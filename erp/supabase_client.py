@@ -1,0 +1,381 @@
+"""Simple Supabase helper for inserting/listing customers.
+
+Reads `SUPABASE_URL` and `SUPABASE_KEY` from environment variables.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any, Dict, List
+
+from dotenv import load_dotenv
+
+try:
+    from supabase import create_client  # type: ignore
+except Exception:  # pragma: no cover - import may fail if package missing
+    create_client = None
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent / ".env"
+load_dotenv(env_path)
+
+
+class SupabaseClient:
+    def __init__(self) -> None:
+        url = os.getenv('SUPABASE_URL') or 'https://gsafyjbpucgbhtvvbfue.supabase.co'
+        key = os.getenv('SUPABASE_KEY') or 'sb_publishable_Ixq1xmRqsLVavcvL-wpguQ_v3JSxlhS'
+        if not url or not key:
+            raise RuntimeError("Set SUPABASE_URL and SUPABASE_KEY environment variables")
+        if create_client is None:
+            raise RuntimeError("supabase package not installed. Run: pip install supabase")
+        self.client = create_client(url, key)
+
+    def insert_customer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("customers").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_customers(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("customers").select("*").execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list):
+            return data
+        return []
+
+    def update_customer(self, customer_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("customers").update(payload).eq("id", customer_id).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def delete_customer(self, customer_id: str) -> None:
+        resp = self.client.table("customers").delete().eq("id", customer_id).execute()
+        error = None
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+
+    def insert_site(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("sites").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_sites(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("sites").select("*").execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list):
+            return data
+        return []
+
+    def update_site(self, site_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("sites").update(payload).eq("id", site_id).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def delete_site(self, site_id: str) -> None:
+        resp = self.client.table("sites").delete().eq("id", site_id).execute()
+        error = None
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+
+    def insert_operator(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("operators").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_operators(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("operators").select("*").execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list):
+            return data
+        return []
+
+    def update_operator(self, operator_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("operators").update(payload).eq("id", operator_id).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def delete_operator(self, operator_id: str) -> None:
+        resp = self.client.table("operators").delete().eq("id", operator_id).execute()
+        error = None
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+
+    def insert_machine(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("machines").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_machines(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("machines").select("*").execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list):
+            return data
+        return []
+
+    def update_machine(self, machine_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("machines").update(payload).eq("id", machine_id).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def delete_machine(self, machine_id: str) -> None:
+        resp = self.client.table("machines").delete().eq("id", machine_id).execute()
+        error = None
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+
+    def insert_work_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("work_orders").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_work_orders(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("work_orders").select("*").execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list):
+            return data
+        return []
+
+    def update_work_order(self, work_order_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("work_orders").update(payload).eq("id", work_order_id).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def insert_work_order_line(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("work_order_lines").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
