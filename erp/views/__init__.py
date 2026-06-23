@@ -1,3 +1,3 @@
-from . import customers, machine, operator, site, workorder
+from . import asset, customers, dashboard, machine, operator, site, workorder
 
-__all__ = ["customers", "machine", "operator", "site", "workorder"]
+__all__ = ["asset", "customers", "dashboard", "machine", "operator", "site", "workorder"]

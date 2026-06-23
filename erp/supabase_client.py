@@ -360,6 +360,62 @@ class SupabaseClient:
             return data
         return {}
 
+    def list_assets(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("asset_master").select("*").order("asset_name").execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        return data if isinstance(data, list) else []
+
+    def insert_asset(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("asset_master").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def update_asset(self, asset_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("asset_master").update(payload).eq("id", asset_id).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
     def insert_work_order_line(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         resp = self.client.table("work_order_lines").insert(payload).execute()
         data = None

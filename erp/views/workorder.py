@@ -55,7 +55,14 @@ def _reset_line_item_inputs() -> None:
 
 
 def render() -> None:
-    st.subheader("Work Orders")
+    st.markdown(
+        """
+        <div class="page-eyebrow">// Fleet Operations</div>
+        <div class="page-title">Work Orders</div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
 
     try:
         sb = SupabaseClient()
@@ -214,7 +221,7 @@ def render() -> None:
             )
             if st.button(f"Remove line {idx + 1}", key=f"remove_line_{idx}"):
                 st.session_state.wo_line_items.pop(idx)
-                st.experimental_rerun()
+                st.rerun()
 
     if not customers:
         st.info("No customers found. Add customers in the Customers page first.")

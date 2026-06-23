@@ -34,7 +34,7 @@ class ConditionStatus(str, Enum):
     RUNNING = "Running"
     BREAKDOWN = "Breakdown"
     UNDER_REPAIR = "Under Repair"
-    BER = "BER"
+    BER = "BER (Beyond Economic Repair)"
 
 
 class OperatorStatus(str, Enum):
