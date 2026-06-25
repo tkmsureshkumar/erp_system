@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from erp.views import asset, customers, dashboard, machine, operator, site, workorder
+from erp.views import asset, customers, dashboard, machine, operator, site, worklog, workorder
 
 st.set_page_config(
     page_title="IRONLINE ACCESS – Fleet Operations",
@@ -241,6 +241,7 @@ st.markdown(
         <a href="?page=machines"   target="_self" class="{_cls('machines')}">Machines</a>
         <a href="?page=assets"     target="_self" class="{_cls('assets')}">Assets</a>
         <a href="?page=workorders" target="_self" class="{_cls('workorders')}">Work Orders</a>
+        <a href="?page=worklog"    target="_self" class="{_cls('worklog')}">Worklog</a>
         <a href="?page=system"     target="_self" class="{_cls('system')}">System</a>
       </nav>
     </div>
@@ -263,6 +264,8 @@ elif page == "assets":
     asset.render()
 elif page == "workorders":
     workorder.render()
+elif page == "worklog":
+    worklog.render()
 elif page == "system":
     st.markdown(
         """
