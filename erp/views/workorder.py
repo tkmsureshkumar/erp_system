@@ -1,13 +1,15 @@
 """
 erp/views/workorder.py
-Work Order — creates and edits work order master records (billing configuration).
-Shift schedule and billing summary are managed in worklog.py.
+Work Order — one WO can contain multiple machines, each with its own
+billing configuration. Start Date and End Date are at the WO level.
 """
 from __future__ import annotations
 
 import calendar
+import json
 from datetime import date, datetime
 
+import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
@@ -16,6 +18,13 @@ from ..supabase_client import SupabaseClient
 
 BILLING_TYPES  = ["Monthly Fixed Rental", "Daily Rental"]
 BILLING_CYCLES = ["Calendar Month", "Custom"]
+
+_MC_COLS = [
+    "Machine",
+    "Billing Type", "Billing Cycle",
+    "Rental / Month",
+    "Cycle Start", "Cycle End",
+]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +39,53 @@ def _parse_date(value) -> date | None:
         except (ValueError, TypeError):
             return None
     return None
+
+
+def _default_cycle_dates(ref: date | None) -> tuple[date, date]:
+    d = ref or date.today()
+    return d.replace(day=1), d.replace(day=calendar.monthrange(d.year, d.month)[1])
+
+
+def _parse_machine_config(raw, id_to_label: dict) -> pd.DataFrame:
+    if not raw:
+        return pd.DataFrame(columns=_MC_COLS)
+    try:
+        records = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(records, list):
+            return pd.DataFrame(columns=_MC_COLS)
+        rows = []
+        for r in records:
+            rows.append({
+                "Machine":        id_to_label.get(r.get("machine_id", ""), r.get("machine_label", "")),
+                "Billing Type":   r.get("billing_type", BILLING_TYPES[0]),
+                "Billing Cycle":  r.get("billing_cycle", BILLING_CYCLES[0]),
+                "Rental / Month": float(r.get("rental_per_month") or 0.0),
+                "Cycle Start":    _parse_date(r.get("billing_cycle_start_date")),
+                "Cycle End":      _parse_date(r.get("billing_cycle_end_date")),
+            })
+        return pd.DataFrame(rows, columns=_MC_COLS)
+    except Exception:
+        return pd.DataFrame(columns=_MC_COLS)
+
+
+def _machine_config_to_json(df: pd.DataFrame, label_to_id: dict) -> str:
+    records = []
+    for _, row in df.iterrows():
+        label = str(row.get("Machine") or "").strip()
+        if not label:
+            continue
+        cs = row.get("Cycle Start")
+        ce = row.get("Cycle End")
+        records.append({
+            "machine_id":               label_to_id.get(label),
+            "machine_label":            label,
+            "billing_type":             str(row.get("Billing Type") or ""),
+            "billing_cycle":            str(row.get("Billing Cycle") or ""),
+            "rental_per_month":         float(row.get("Rental / Month") or 0),
+            "billing_cycle_start_date": cs.isoformat() if isinstance(cs, date) else None,
+            "billing_cycle_end_date":   ce.isoformat() if isinstance(ce, date) else None,
+        })
+    return json.dumps(records)
 
 
 # ── View ──────────────────────────────────────────────────────────────────────
@@ -62,22 +118,19 @@ def render() -> None:
     def fetch_customers() -> list[dict]:
         try:
             return sb.list_customers()
-        except Exception as exc:
-            st.error(f"Failed to load customers: {exc}")
+        except Exception:
             return []
 
     def fetch_sites() -> list[dict]:
         try:
             return sb.list_sites()
-        except Exception as exc:
-            st.error(f"Failed to load sites: {exc}")
+        except Exception:
             return []
 
     def fetch_machines() -> list[dict]:
         try:
             return sb.list_machines()
-        except Exception as exc:
-            st.error(f"Failed to load machines: {exc}")
+        except Exception:
             return []
 
     work_orders = fetch_work_orders()
@@ -87,8 +140,15 @@ def render() -> None:
 
     customer_map = {c.get("id"): c for c in customers if c.get("id")}
     site_map     = {s.get("id"): s for s in sites     if s.get("id")}
-    machine_map  = {m.get("id"): m for m in machines  if m.get("id")}
     wo_map       = {w.get("id"): w for w in work_orders if w.get("id")}
+
+    # Machine label ↔ ID lookups
+    id_to_label  = {
+        m.get("id"): f"{m.get('asset_code', '')} — {m.get('machine_type', '')}".strip("— ")
+        for m in machines if m.get("id")
+    }
+    label_to_id  = {v: k for k, v in id_to_label.items()}
+    machine_opts = [""] + sorted(id_to_label.values())
 
     # ── Edit selector ──────────────────────────────────────────────────────────
     selected_wo_id = st.selectbox(
@@ -100,28 +160,29 @@ def render() -> None:
         key="selected_wo_id",
     )
     selected_wo = wo_map.get(selected_wo_id)
+    wo_key = selected_wo_id or "new"
 
-    # ── Sync session state on WO selection change ──────────────────────────────
+    # ── Sync session state on selection change ─────────────────────────────────
     if st.session_state.get("_editing_wo_id") != selected_wo_id:
-        st.session_state["_editing_wo_id"]        = selected_wo_id
+        st.session_state["_editing_wo_id"] = selected_wo_id
         wo = selected_wo or {}
-
-        st.session_state["wo_customer_id"]        = wo.get("customer_id", "")
-        st.session_state["wo_site_id"]            = wo.get("site_id", "")
-        st.session_state["wo_machine_id"]         = wo.get("machine_id", "")
-        st.session_state["wo_start_date"]         = _parse_date(wo.get("start_date"))
-        st.session_state["wo_end_date"]           = _parse_date(wo.get("end_date"))
-        st.session_state["wo_billing_type"]       = wo.get("billing_type", BILLING_TYPES[0])
-        st.session_state["wo_billing_cycle_type"] = wo.get("billing_cycle_type", BILLING_CYCLES[0])
-        st.session_state["wo_billing_start_date"] = _parse_date(wo.get("billing_start_date"))
-        st.session_state["wo_billing_end_date"]   = _parse_date(wo.get("billing_end_date"))
-        st.session_state["wo_rental_per_month"]   = float(wo.get("rental_per_month") or 0.0)
+        st.session_state["wo_customer_id"] = wo.get("customer_id", "")
+        st.session_state["wo_site_id"]     = wo.get("site_id", "")
+        st.session_state["wo_start_date"]  = _parse_date(wo.get("start_date"))
+        st.session_state["wo_end_date"]    = _parse_date(wo.get("end_date"))
+        for k in [f"mc_data_{wo_key}", f"mc_recalc_{wo_key}"]:
+            st.session_state.pop(k, None)
 
     # ── A. Basic Selection ─────────────────────────────────────────────────────
-    st.markdown('<p class="filter-label">Basic Selection</p>', unsafe_allow_html=True)
+    st.markdown(
+        "<div style='margin-bottom:6px;border-top:2px solid #E87722;padding-top:10px;"
+        "font-size:10px;font-weight:700;letter-spacing:.12em;color:#E87722;"
+        "text-transform:uppercase;'>A — Basic Selection</div>",
+        unsafe_allow_html=True,
+    )
 
-    sel1, sel2 = st.columns(2)
-    with sel1:
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
         selected_customer_id = st.selectbox(
             "Customer *",
             options=[""] + list(customer_map),
@@ -129,7 +190,7 @@ def render() -> None:
                 else customer_map[cid].get("customer_name", "Unknown"),
             key="wo_customer_id",
         )
-    with sel2:
+    with col2:
         filtered_sites = {
             sid: s for sid, s in site_map.items()
             if str(s.get("customer_id", "")) == str(selected_customer_id)
@@ -143,68 +204,106 @@ def render() -> None:
                 else filtered_sites[sid].get("site_name", "Unknown"),
             key="wo_site_id",
         )
+    with col3:
+        selected_start_date = st.date_input("Start Date *", key="wo_start_date")
+    with col4:
+        selected_end_date = st.date_input("End Date", key="wo_end_date")
 
-    selected_machine_id = st.selectbox(
-        "Machine *",
-        options=[""] + list(machine_map),
-        format_func=lambda mid: "Select machine" if not mid
-            else f"{machine_map[mid].get('asset_code', '')} — {machine_map[mid].get('machine_type', '')}",
-        key="wo_machine_id",
+    # ── B. Machine Configuration ───────────────────────────────────────────────
+    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='margin-bottom:6px;border-top:2px solid #E87722;padding-top:10px;"
+        "font-size:10px;font-weight:700;letter-spacing:.12em;color:#E87722;"
+        "text-transform:uppercase;'>B — Machine Configuration</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<p style='font-size:12px;color:#6b7280;margin:0 0 10px;'>"
+        "Add one or more machines. <strong>Calendar Month</strong> cycle dates "
+        "auto-fill from the WO Start Date.</p>",
+        unsafe_allow_html=True,
     )
 
-    dt1, dt2 = st.columns(2)
-    with dt1:
-        start_date = st.date_input("Start Date", key="wo_start_date")
-    with dt2:
-        end_date = st.date_input("End Date (if applicable)", key="wo_end_date")
+    recalc_count = st.session_state.get(f"mc_recalc_{wo_key}", 0)
+    editor_key   = f"mc_{wo_key}_{recalc_count}"
 
-    # ── B. Billing & Cycle Configuration ───────────────────────────────────────
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
-    st.markdown('<p class="filter-label">Billing &amp; Cycle Configuration</p>', unsafe_allow_html=True)
-
-    bc1, bc2, bc3 = st.columns(3)
-    with bc1:
-        billing_type = st.selectbox(
-            "Billing Type",
-            options=BILLING_TYPES,
-            key="wo_billing_type",
-        )
-    with bc2:
-        billing_cycle_type = st.selectbox(
-            "Billing Cycle",
-            options=BILLING_CYCLES,
-            key="wo_billing_cycle_type",
-        )
-    with bc3:
-        rental_per_month = st.number_input(
-            "Rental per Month",
-            value=float(st.session_state.get("wo_rental_per_month", 0.0)),
-            step=0.01,
-            min_value=0.0,
-            key="wo_rental_per_month",
-        )
-
-    if billing_cycle_type == "Calendar Month":
-        today              = date.today()
-        billing_start_date = today.replace(day=1)
-        billing_end_date   = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-        bcd1, bcd2 = st.columns(2)
-        with bcd1:
-            st.date_input("Billing Cycle Start Date", value=billing_start_date,
-                          disabled=True, key="wo_billing_start_date_display")
-        with bcd2:
-            st.date_input("Billing Cycle End Date", value=billing_end_date,
-                          disabled=True, key="wo_billing_end_date_display")
+    # Determine initial DataFrame
+    if f"mc_data_{wo_key}" in st.session_state:
+        initial_df = st.session_state[f"mc_data_{wo_key}"]
+    elif selected_wo and selected_wo.get("machine_config"):
+        initial_df = _parse_machine_config(selected_wo.get("machine_config"), id_to_label)
     else:
-        bcd1, bcd2 = st.columns(2)
-        with bcd1:
-            billing_start_date = st.date_input("Billing Cycle Start Date",
-                                               key="wo_billing_start_date")
-        with bcd2:
-            billing_end_date = st.date_input("Billing Cycle End Date",
-                                             key="wo_billing_end_date")
+        cs, ce = _default_cycle_dates(selected_start_date)
+        initial_df = pd.DataFrame([{
+            "Machine":        "",
+            "Billing Type":   BILLING_TYPES[0],
+            "Billing Cycle":  BILLING_CYCLES[0],
+            "Rental / Month": 0.0,
+            "Cycle Start":    cs,
+            "Cycle End":      ce,
+        }], columns=_MC_COLS)
 
-    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+    edited_machines = st.data_editor(
+        initial_df,
+        column_config={
+            "Machine":        st.column_config.SelectboxColumn(
+                                  "Machine *", options=machine_opts, width="large"),
+            "Billing Type":   st.column_config.SelectboxColumn(
+                                  "Billing Type", options=BILLING_TYPES, width="medium"),
+            "Billing Cycle":  st.column_config.SelectboxColumn(
+                                  "Billing Cycle", options=BILLING_CYCLES, width="medium"),
+            "Rental / Month": st.column_config.NumberColumn(
+                                  "Rental / Month", format="%.0f", step=1000,
+                                  min_value=0, width="medium"),
+            "Cycle Start":    st.column_config.DateColumn(
+                                  "Cycle Start", width="medium"),
+            "Cycle End":      st.column_config.DateColumn(
+                                  "Cycle End", width="medium"),
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        key=editor_key,
+    )
+
+    # Auto-fill Cycle Start / Cycle End for Calendar Month rows using WO Start Date
+    if edited_machines is not None and not edited_machines.empty:
+        updated   = edited_machines.copy()
+        needs_upd = False
+        ref_date  = selected_start_date if isinstance(selected_start_date, date) else None
+        exp_cs, exp_ce = _default_cycle_dates(ref_date)
+        for idx, row in updated.iterrows():
+            if str(row.get("Billing Cycle", "")) == "Calendar Month":
+                cs = row.get("Cycle Start")
+                ce = row.get("Cycle End")
+                if cs != exp_cs or ce != exp_ce:
+                    updated.at[idx, "Cycle Start"] = exp_cs
+                    updated.at[idx, "Cycle End"]   = exp_ce
+                    needs_upd = True
+        if needs_upd:
+            st.session_state[f"mc_data_{wo_key}"]   = updated
+            st.session_state[f"mc_recalc_{wo_key}"] = recalc_count + 1
+            st.rerun()
+
+    # Summary bar beneath the table
+    if edited_machines is not None and not edited_machines.empty:
+        valid = edited_machines[
+            edited_machines["Machine"].notna() & (edited_machines["Machine"] != "")
+        ]
+        if not valid.empty:
+            st.markdown(
+                f"<div style='display:flex;gap:32px;padding:8px 12px;"
+                f"background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;"
+                f"margin-top:4px;font-size:12px;'>"
+                f"<span style='color:#6b7280;'>Machines: "
+                f"<strong style='color:#111827;'>{len(valid)}</strong></span>"
+                f"<span style='color:#6b7280;'>Total Rental / Month: "
+                f"<strong style='color:#E87722;'>{float(valid['Rental / Month'].fillna(0).sum()):,.0f}</strong></span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
     # ── Form (submit) ──────────────────────────────────────────────────────────
     with st.form("wo_form"):
@@ -214,7 +313,7 @@ def render() -> None:
                 f"<strong>{selected_wo.get('wo_number', '—')}</strong></span>",
                 unsafe_allow_html=True,
             )
-            st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
         submitted = st.form_submit_button(
             "Update Work Order" if selected_wo else "Create Work Order"
@@ -225,35 +324,42 @@ def render() -> None:
                 st.error("Customer is required.")
             elif not selected_site_id:
                 st.error("Site is required.")
-            elif not selected_machine_id:
-                st.error("Machine is required.")
+            elif not selected_start_date:
+                st.error("Start Date is required.")
             else:
-                payload = dict(
-                    customer_id=selected_customer_id,
-                    site_id=selected_site_id,
-                    machine_id=selected_machine_id,
-                    start_date=start_date.isoformat() if start_date else None,
-                    end_date=end_date.isoformat() if end_date else None,
-                    billing_type=billing_type,
-                    billing_cycle_type=billing_cycle_type,
-                    billing_start_date=billing_start_date.isoformat() if billing_start_date else None,
-                    billing_end_date=billing_end_date.isoformat() if billing_end_date else None,
-                    rental_per_month=float(rental_per_month) if rental_per_month else None,
+                valid_rows = (
+                    edited_machines[
+                        edited_machines["Machine"].notna() &
+                        (edited_machines["Machine"] != "")
+                    ]
+                    if edited_machines is not None
+                    else pd.DataFrame()
                 )
-                try:
-                    if selected_wo:
-                        sb.update_work_order(selected_wo_id, payload)
-                        st.success("Work order updated.")
-                    else:
-                        created = sb.insert_work_order(payload)
-                        wo_num = created.get("wo_number") or created.get("id", "")
-                        st.success(f"Work order created: {wo_num}")
-                    work_orders = fetch_work_orders()
-                except Exception as exc:
-                    st.error(f"Could not save work order: {exc}")
+                if valid_rows.empty:
+                    st.error("Add at least one machine.")
+                else:
+                    machine_config_json = _machine_config_to_json(valid_rows, label_to_id)
+                    payload = dict(
+                        customer_id=selected_customer_id,
+                        site_id=selected_site_id,
+                        start_date=selected_start_date.isoformat() if isinstance(selected_start_date, date) else None,
+                        end_date=selected_end_date.isoformat()     if isinstance(selected_end_date, date)   else None,
+                        machine_config=machine_config_json,
+                    )
+                    try:
+                        if selected_wo:
+                            sb.update_work_order(selected_wo_id, payload)
+                            st.success("Work order updated.")
+                        else:
+                            created = sb.insert_work_order(payload)
+                            wo_num  = created.get("wo_number") or created.get("id", "")
+                            st.success(f"Work order created: {wo_num}")
+                        work_orders = fetch_work_orders()
+                    except Exception as exc:
+                        st.error(f"Could not save work order: {exc}")
 
     # ── Work order list ────────────────────────────────────────────────────────
-    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
     col_cap, col_btn = st.columns([5, 1])
     with col_cap:
         st.markdown('<p class="filter-label">All Work Orders</p>', unsafe_allow_html=True)
@@ -262,23 +368,28 @@ def render() -> None:
             work_orders = fetch_work_orders()
 
     if work_orders:
-        st.dataframe(
-            [
-                {
-                    "WO Number":     w.get("wo_number", ""),
-                    "Customer":      customer_map.get(w.get("customer_id", ""), {}).get("customer_name", ""),
-                    "Site":          site_map.get(w.get("site_id", ""), {}).get("site_name", ""),
-                    "Machine":       machine_map.get(w.get("machine_id", ""), {}).get("asset_code", ""),
-                    "Billing Type":  w.get("billing_type", ""),
-                    "Billing Cycle": w.get("billing_cycle_type", ""),
-                    "Cycle Start":   w.get("billing_start_date", ""),
-                    "Cycle End":     w.get("billing_end_date", ""),
-                    "Rental/Month":  w.get("rental_per_month", ""),
-                }
-                for w in work_orders
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
+        rows = []
+        for w in work_orders:
+            mc_raw    = w.get("machine_config")
+            mc_list   = []
+            total_rnt = 0.0
+            if mc_raw:
+                try:
+                    mc_records = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+                    mc_list    = [r.get("machine_label", "") for r in mc_records if r.get("machine_label")]
+                    total_rnt  = sum(float(r.get("rental_per_month") or 0) for r in mc_records)
+                except Exception:
+                    pass
+            rows.append({
+                "WO Number":    w.get("wo_number", ""),
+                "Customer":     customer_map.get(w.get("customer_id", ""), {}).get("customer_name", ""),
+                "Site":         site_map.get(w.get("site_id", ""), {}).get("site_name", ""),
+                "Start Date":   w.get("start_date", ""),
+                "End Date":     w.get("end_date", ""),
+                "Machines":     len(mc_list),
+                "Machine List": ", ".join(mc_list) if mc_list else "—",
+                "Total Rental": f"{total_rnt:,.0f}" if total_rnt else "—",
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
     else:
         st.info("No work orders found.")
