@@ -435,3 +435,96 @@ class SupabaseClient:
         if isinstance(data, dict):
             return data
         return {}
+
+    # ── Deployments ───────────────────────────────────────────────────────────
+
+    def list_deployments(self) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("deployments")
+            .select("*")
+            .execute()
+        )
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list):
+            return data
+        return []
+
+    def get_deployment_by_wo(self, work_order_id: str) -> Dict[str, Any]:
+        resp = (
+            self.client.table("deployments")
+            .select("*")
+            .eq("work_order_id", work_order_id)
+            .limit(1)
+            .execute()
+        )
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        return {}
+
+    def insert_deployment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("deployments").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def update_deployment(self, deployment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = (
+            self.client.table("deployments")
+            .update(payload)
+            .eq("id", deployment_id)
+            .execute()
+        )
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}

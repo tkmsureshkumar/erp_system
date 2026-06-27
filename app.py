@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from erp.views import asset, customers, dashboard, machine, operator, site, worklog, worklogreport, workorder
+from erp.views import asset, customers, dashboard, deployment, machine, operator, site, worklog, worklogreport, workorder
 
 st.set_page_config(
     page_title="IRONLINE ACCESS – Fleet Operations",
@@ -240,7 +240,8 @@ st.markdown(
         <a href="?page=operators"  target="_self" class="{_cls('operators')}">Operators</a>
         <a href="?page=machines"   target="_self" class="{_cls('machines')}">Machines</a>
         <a href="?page=assets"     target="_self" class="{_cls('assets')}">Assets</a>
-        <a href="?page=workorders" target="_self" class="{_cls('workorders')}">Work Orders</a>
+        <a href="?page=workorders"  target="_self" class="{_cls('workorders')}">Work Orders</a>
+        <a href="?page=deployments" target="_self" class="{_cls('deployments')}">Deployments</a>
         <a href="?page=worklog"    target="_self" class="{_cls('worklog')}">Worklog</a>
         <span style="color:rgba(255,255,255,0.18);padding:0 6px;font-size:18px;line-height:1;align-self:center;">|</span>
         <span style="color:rgba(255,255,255,0.35);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:0 2px 0 4px;align-self:center;">Reports</span>
@@ -267,6 +268,8 @@ elif page == "assets":
     asset.render()
 elif page == "workorders":
     workorder.render()
+elif page == "deployments":
+    deployment.render()
 elif page == "worklog":
     worklog.render()
 elif page == "wlreport":
