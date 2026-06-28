@@ -6,6 +6,7 @@ Schedules are saved back per-machine inside machine_config.
 """
 from __future__ import annotations
 
+import calendar
 import json
 from datetime import date, datetime, time, timedelta
 
@@ -22,7 +23,7 @@ _SCHED_COLS = [
     "Date", "Weekday",
     "Start Time", "End Time", "Net Time",
     "Start HMR", "End HMR", "Breakdown Hours",
-    "OT", "Operator", "Remarks",
+    "OT", "HSD in Ltr", "Operator", "Remarks",
 ]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -111,6 +112,7 @@ def _build_schedule(
             "End HMR":         None,
             "Breakdown Hours": None if is_sunday else 0.0,
             "OT":              None if is_sunday else 0,
+            "HSD in Ltr":      None if is_sunday else 0.0,
             "Operator":        "",
             "Remarks":         "",
         })
@@ -134,6 +136,7 @@ def _schedule_to_json(df: pd.DataFrame) -> str:
             "end_hmr":         float(row.get("End HMR"))   if pd.notna(row.get("End HMR"))   else None,
             "breakdown_hours": float(row.get("Breakdown Hours")) if pd.notna(row.get("Breakdown Hours")) else 0.0,
             "ot":              int(row.get("OT")) if pd.notna(row.get("OT")) else 0,
+            "hsd_in_ltr":      float(row.get("HSD in Ltr")) if pd.notna(row.get("HSD in Ltr")) else 0.0,
             "operator":        str(row.get("Operator") or ""),
             "remarks":         str(row.get("Remarks") or ""),
         })
@@ -158,6 +161,7 @@ def _json_to_schedule_df(raw) -> pd.DataFrame | None:
                 "End HMR":         r.get("end_hmr"),
                 "Breakdown Hours": r.get("breakdown_hours", 0),
                 "OT":              r.get("ot", 0),
+                "HSD in Ltr":      r.get("hsd_in_ltr", 0.0),
                 "Operator":        r.get("operator", ""),
                 "Remarks":         r.get("remarks", ""),
             }
@@ -191,18 +195,23 @@ def _compute_billing_summary(
     rental_per_month: float,
     shift_start: time,
     shift_end: time,
+    ot_rate_input: float = 0.0,
 ) -> dict | None:
     if df is None or df.empty:
         return None
     w = df.drop(columns=["Select"], errors="ignore")
-    working_days  = int(w["Start Time"].notna().sum())
-    std_hours     = _net_hours(shift_start, shift_end) or 0.0
-    working_hours = working_days * std_hours
-    actual        = float(w["Net Time"].fillna(0).sum())
-    qty           = actual / working_hours if working_hours else 0.0
-    billing       = rental_per_month * qty
-    ot            = float(w["OT"].fillna(0).sum())
-    ot_rate       = rental_per_month / working_hours if working_hours else 0.0
+    working_days     = int(w["Start Time"].notna().sum())
+    std_hours        = _net_hours(shift_start, shift_end) or 0.0
+    working_hours    = working_days * std_hours
+    actual           = float(w["Net Time"].fillna(0).sum())
+    qty              = actual / working_hours if working_hours else 0.0
+    billing          = rental_per_month * qty
+    ot_hours         = float(w["OT"].fillna(0).sum())
+    ot_rate          = float(ot_rate_input or 0.0)
+    ot_billing       = ot_hours * ot_rate
+    total_billing    = billing + ot_billing
+    deduction_amt    = total_billing - billing
+    adjusted_billing = total_billing - deduction_amt
     return dict(
         rental_per_month=rental_per_month,
         working_days=working_days,
@@ -210,8 +219,12 @@ def _compute_billing_summary(
         actual=actual,
         qty=qty,
         billing=billing,
-        ot=ot,
+        ot_hours=ot_hours,
         ot_rate=ot_rate,
+        ot_billing=ot_billing,
+        total_billing=total_billing,
+        deduction=deduction_amt,
+        adjusted_billing=adjusted_billing,
     )
 
 
@@ -220,15 +233,20 @@ def _render_billing_summary(s: dict) -> None:
         return f"{v:,.{dec}f}"
 
     rows_data = [
-        ("Rental per month", _n(s["rental_per_month"]),  "Rental per month"),
-        ("Working days",     _n(s["working_days"]),       "Count of shift schedule rows"),
-        ("Working hours",    _n(s["working_hours"]),      "Working days × net time of 1 day"),
-        ("Actual",           _n(s["actual"]),             "Sum of net time"),
+        ("Rental per month", _n(s["rental_per_month"]),  "Rental / Month"),
+        ("Working days",     _n(s["working_days"]),       "Count of rows where Start Time is not blank"),
+        ("Working hours",    _n(s["working_hours"]),      "Working days × Working hours"),
+        ("Actual",           _n(s["actual"]),             "Sum(Net Time)"),
         ("Qty",              f"{s['qty']:.4f}",           "Actual ÷ Working hours"),
         ("Billing",          _n(s["billing"]),            "Rental per month × Qty"),
         None,
-        ("OT",               _n(s["ot"]),                 "Sum of OT hours"),
-        ("OT rate",          _n(s["ot_rate"]),            "Rental per month ÷ Working hours"),
+        ("OT hours",         _n(s["ot_hours"]),             "Sum(Over Time Hrs.)"),
+        ("OT rate",          _n(s["ot_rate"], 2),           "From OT Rate field"),
+        ("OT billing",       _n(s["ot_billing"]),           "OT hours × OT rate"),
+        None,
+        ("Total Billing",    _n(s["total_billing"]),        "Billing + OT Billing"),
+        ("Deduction",        _n(s["deduction"]),            "Total Billing − Billing"),
+        ("Adjusted Billing", _n(s["adjusted_billing"]),     "Total Billing − Deduction"),
     ]
 
     tbody = ""
@@ -396,6 +414,7 @@ def render() -> None:
         saved_et = _parse_time(selected_machine.get("shift_end_time"))   or time(20, 0)
         _set_ampm_state("wl_shift_start", saved_st)
         _set_ampm_state("wl_shift_end",   saved_et)
+        st.session_state["wl_ot_rate"] = float(selected_machine.get("ot_rate") or 0.0)
 
     # ── Machine config card ────────────────────────────────────────────────────
     _rental = selected_machine.get("rental_per_month")
@@ -434,6 +453,46 @@ def render() -> None:
         )
         return
 
+    # ── Month selector: next 12 months from current month ─────────────────────
+    _today = date.today()
+    _y, _m = _today.year, _today.month
+    available_months: list[tuple[int, int]] = []
+    for _ in range(12):
+        available_months.append((_y, _m))
+        _m += 1
+        if _m > 12:
+            _m, _y = 1, _y + 1
+
+    month_options = [f"{calendar.month_name[mn]} {y}" for y, mn in available_months]
+    moc1, _ = st.columns([1, 3])
+    with moc1:
+        selected_month_label = st.selectbox(
+            "Billing Month",
+            options=month_options,
+            key="wl_selected_month",
+        )
+    sel_idx = month_options.index(selected_month_label) if selected_month_label in month_options else 0
+    selected_year, selected_month_num = available_months[sel_idx]
+    last_day    = calendar.monthrange(selected_year, selected_month_num)[1]
+    month_start = date(selected_year, selected_month_num, 1)
+    month_end   = date(selected_year, selected_month_num, last_day)
+
+    # Sync ot_rate when month changes (before the number_input renders)
+    wl_sync_key = f"{selected_wo_id}_{machine_idx}_{selected_year}_{selected_month_num}"
+    if st.session_state.get("_wl_month_sync") != wl_sync_key:
+        st.session_state["_wl_month_sync"] = wl_sync_key
+        _mkey = selected_machine.get("machine_id") or str(machine_idx)
+        try:
+            _wl_rec = sb.get_worklog_by_month(
+                selected_wo_id, _mkey, selected_year, selected_month_num
+            )
+        except Exception:
+            _wl_rec = {}
+        if _wl_rec:
+            st.session_state["wl_ot_rate"] = float(_wl_rec.get("ot_rate") or 0.0)
+        else:
+            st.session_state["wl_ot_rate"] = float(selected_machine.get("ot_rate") or 0.0)
+
     # ── Shift Configuration ────────────────────────────────────────────────────
     st.markdown('<p class="filter-label">Shift Configuration</p>', unsafe_allow_html=True)
     sc1, sc2 = st.columns(2)
@@ -441,6 +500,17 @@ def render() -> None:
         shift_start_time = _time_input_ampm("Shift Start Time", "wl_shift_start")
     with sc2:
         shift_end_time = _time_input_ampm("Shift End Time", "wl_shift_end")
+
+    or1, _ = st.columns([1, 3])
+    with or1:
+        ot_rate_input = st.number_input(
+            "OT Rate",
+            min_value=0.0,
+            step=100.0,
+            format="%.2f",
+            help="Leave as 0 to auto-calculate (Rental ÷ Working hours)",
+            key="wl_ot_rate",
+        )
 
     # ── Shift Schedule Table ───────────────────────────────────────────────────
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
@@ -450,23 +520,31 @@ def render() -> None:
 
     base_key = (
         f"wl_{selected_wo_id}_{machine_idx}"
-        f"_{billing_start_date}_{billing_end_date}"
+        f"_{selected_year}_{selected_month_num:02d}"
         f"_{shift_start_time}_{shift_end_time}"
     )
     recalc_count = st.session_state.get(f"sched_recalc_{base_key}", 0)
     editor_key   = f"{base_key}_{recalc_count}"
 
+    _mkey = selected_machine.get("machine_id") or str(machine_idx)
     if f"sched_data_{base_key}" in st.session_state:
         initial_df = st.session_state[f"sched_data_{base_key}"]
-    elif selected_machine.get("shift_schedule"):
-        saved_df = _json_to_schedule_df(selected_machine.get("shift_schedule"))
-        initial_df = saved_df if saved_df is not None else _build_schedule(
-            billing_start_date, billing_end_date, shift_start_time, shift_end_time
-        )
     else:
-        initial_df = _build_schedule(
-            billing_start_date, billing_end_date, shift_start_time, shift_end_time
-        )
+        try:
+            _wl_rec = sb.get_worklog_by_month(
+                selected_wo_id, _mkey, selected_year, selected_month_num
+            )
+        except Exception:
+            _wl_rec = {}
+        if _wl_rec and _wl_rec.get("schedule_data"):
+            saved_df = _json_to_schedule_df(_wl_rec["schedule_data"])
+            initial_df = saved_df if saved_df is not None else _build_schedule(
+                month_start, month_end, shift_start_time, shift_end_time
+            )
+        else:
+            initial_df = _build_schedule(
+                month_start, month_end, shift_start_time, shift_end_time
+            )
 
     edited_schedule = st.data_editor(
         _style_schedule(initial_df),
@@ -481,9 +559,11 @@ def render() -> None:
                                    min_value=0, step=0.1, width="small"),
             "End HMR":         st.column_config.NumberColumn("End HMR", format="%.1f",
                                    min_value=0, step=0.1, width="small"),
-            "Breakdown Hours": st.column_config.NumberColumn("Breakdown Hrs", format="%.1f",
+            "Breakdown Hours": st.column_config.NumberColumn("B/D Hrs", format="%.1f",
                                    min_value=0, step=0.5, width="small"),
-            "OT":              st.column_config.NumberColumn("OT", default=0, step=1, width="small"),
+            "OT":              st.column_config.NumberColumn("Over Time Hrs.", default=0, step=1, width="small"),
+            "HSD in Ltr":      st.column_config.NumberColumn("HSD in Ltr", format="%.1f",
+                                   min_value=0, step=0.5, width="small"),
             "Operator":        st.column_config.SelectboxColumn("Operator",
                                    options=operator_names, width="medium"),
             "Remarks":         st.column_config.TextColumn("Remarks", width="medium"),
@@ -494,9 +574,10 @@ def render() -> None:
         key=editor_key,
     )
 
-    # Auto-recalculate Net Time on every Start/End Time edit
+    # Auto-recalculate Net Time; cap at shift duration and push excess into OT
     if edited_schedule is not None and not edited_schedule.empty:
-        clean = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
+        clean      = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
+        shift_dur  = _net_hours(shift_start_time, shift_end_time)
         needs_recalc = False
         for idx, row in clean.iterrows():
             st_ = row.get("Start Time")
@@ -511,16 +592,36 @@ def render() -> None:
                     et_ = _parse_time(str(et_))
                 except Exception:
                     et_ = None
-            expected = _net_hours(st_, et_)
-            current  = row.get("Net Time")
-            cur_na   = current is None or (not isinstance(current, bool) and pd.isna(current))
-            exp_na   = expected is None
-            if cur_na != exp_na or (
-                not cur_na and not exp_na
-                and abs(float(current) - float(expected)) > 0.001
+
+            raw_net = _net_hours(st_, et_)
+
+            # If actual hours exceed shift duration, cap Net Time and auto-fill OT
+            if raw_net is not None and shift_dur is not None and raw_net > shift_dur + 0.001:
+                expected_net = shift_dur
+                expected_ot  = round(raw_net - shift_dur, 2)
+            else:
+                expected_net = raw_net
+                expected_ot  = None  # don't overwrite manually entered OT
+
+            # Check Net Time change
+            cur_net    = row.get("Net Time")
+            cur_net_na = cur_net is None or (not isinstance(cur_net, bool) and pd.isna(cur_net))
+            exp_net_na = expected_net is None
+            if cur_net_na != exp_net_na or (
+                not cur_net_na and not exp_net_na
+                and abs(float(cur_net) - float(expected_net)) > 0.001
             ):
-                clean.at[idx, "Net Time"] = expected
+                clean.at[idx, "Net Time"] = expected_net
                 needs_recalc = True
+
+            # Check OT change (only when overflow detected)
+            if expected_ot is not None:
+                cur_ot    = row.get("OT")
+                cur_ot_na = cur_ot is None or (not isinstance(cur_ot, bool) and pd.isna(cur_ot))
+                if cur_ot_na or abs(float(cur_ot) - expected_ot) > 0.001:
+                    clean.at[idx, "OT"] = expected_ot
+                    needs_recalc = True
+
         if needs_recalc:
             st.session_state[f"sched_data_{base_key}"]   = clean
             st.session_state[f"sched_recalc_{base_key}"] = recalc_count + 1
@@ -529,7 +630,8 @@ def render() -> None:
     # ── Billing Summary ────────────────────────────────────────────────────────
     if edited_schedule is not None and not edited_schedule.empty:
         summary = _compute_billing_summary(
-            edited_schedule, rental_per_month, shift_start_time, shift_end_time
+            edited_schedule, rental_per_month, shift_start_time, shift_end_time,
+            ot_rate_input=ot_rate_input,
         )
         if summary:
             st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
@@ -552,7 +654,18 @@ def render() -> None:
                     )
             schedule_json = _schedule_to_json(save_df)
 
-        # Embed shift times + schedule into the selected machine's config entry
+        _mlabel = selected_machine.get("machine_label", f"Machine {machine_idx + 1}")
+        billing_month_str = f"{calendar.month_name[selected_month_num]} {selected_year}"
+        wl_payload = dict(
+            work_order_id=selected_wo_id,
+            machine_id=_mkey,
+            machine_label=_mlabel,
+            year=billing_month_str,
+            ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
+            schedule_data=schedule_json,
+        )
+
+        # Keep shift defaults in machine_config for future months
         updated_configs = [dict(m) for m in machine_configs]
         updated_configs[machine_idx]["shift_start_time"] = (
             shift_start_time.strftime("%H:%M") if shift_start_time else None
@@ -560,12 +673,14 @@ def render() -> None:
         updated_configs[machine_idx]["shift_end_time"] = (
             shift_end_time.strftime("%H:%M") if shift_end_time else None
         )
-        updated_configs[machine_idx]["shift_schedule"] = schedule_json
+        updated_configs[machine_idx]["ot_rate"] = ot_rate_input if ot_rate_input > 0 else None
 
         try:
+            sb.upsert_worklog(wl_payload)
             sb.update_work_order(selected_wo_id, {
                 "machine_config": json.dumps(updated_configs),
             })
-            st.success("Work log saved successfully.")
+            st.session_state.pop(f"sched_data_{base_key}", None)
+            st.success(f"Work log for {selected_month_label} saved successfully.")
         except Exception as exc:
             st.error(f"Could not save work log: {exc}")

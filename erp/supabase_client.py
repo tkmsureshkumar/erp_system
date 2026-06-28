@@ -4,6 +4,7 @@ Reads `SUPABASE_URL` and `SUPABASE_KEY` from environment variables.
 """
 from __future__ import annotations
 
+import calendar
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -528,3 +529,118 @@ class SupabaseClient:
         if isinstance(data, dict):
             return data
         return {}
+
+    # ── Worklogs ──────────────────────────────────────────────────────────────
+
+    def get_worklog_by_month(
+        self, work_order_id: str, machine_id: str, year: int, month: int
+    ) -> Dict[str, Any]:
+        billing_month = f"{calendar.month_name[month]} {year}"
+        resp = (
+            self.client.table("work_logs")
+            .select("*")
+            .eq("work_order_id", work_order_id)
+            .eq("machine_id", machine_id)
+            .eq("year", billing_month)
+            .limit(1)
+            .execute()
+        )
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        return {}
+
+    def upsert_worklog(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        # Look up existing record by work_order_id + machine_id + year (billing month string)
+        fb = (
+            self.client.table("work_logs")
+            .select("id")
+            .eq("work_order_id", payload["work_order_id"])
+            .eq("machine_id", payload["machine_id"])
+            .eq("year", payload["year"])
+            .limit(1)
+            .execute()
+        )
+        fb_data = fb.data if hasattr(fb, "data") else (fb.get("data") if isinstance(fb, dict) else None)
+        lookup = fb_data[0] if isinstance(fb_data, list) and fb_data else {}
+
+        if lookup.get("id"):
+            resp = (
+                self.client.table("work_logs")
+                .update(payload)
+                .eq("id", lookup["id"])
+                .execute()
+            )
+        else:
+            resp = self.client.table("work_logs").insert(payload).execute()
+
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_all_worklogs(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("work_logs").select("*").execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        return data if isinstance(data, list) else []
+
+    def list_worklogs_for_machine(
+        self, work_order_id: str, machine_id: str
+    ) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("work_logs")
+            .select("*")
+            .eq("work_order_id", work_order_id)
+            .eq("machine_id", machine_id)
+            .order("year")
+            .order("month")
+            .execute()
+        )
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        return data if isinstance(data, list) else []
