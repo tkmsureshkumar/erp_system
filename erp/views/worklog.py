@@ -638,6 +638,41 @@ def render() -> None:
             st.session_state[f"sched_recalc_{base_key}"] = recalc_count + 1
             st.rerun()
 
+    # ── Schedule Totals Row ────────────────────────────────────────────────────
+    if edited_schedule is not None and not edited_schedule.empty:
+        _df_t         = edited_schedule.drop(columns=["Select"], errors="ignore")
+        _working_days = int(_df_t["Start Time"].notna().sum())
+        _total_net    = float(_df_t["Net Time"].fillna(0).sum())
+        _total_ot     = float(_df_t["OT"].fillna(0).sum())
+        _total_bd     = float(_df_t["Breakdown Hours"].fillna(0).sum())
+        _total_hsd    = float(_df_t["HSD in Ltr"].fillna(0).sum())
+
+        def _tc(label: str, value: str) -> str:
+            return (
+                f"<td style='padding:8px 14px;border-right:1px solid #374151;'>"
+                f"<div style='font-size:9px;font-weight:700;letter-spacing:.1em;"
+                f"text-transform:uppercase;color:#9ca3af;margin-bottom:2px;'>{label}</div>"
+                f"<div style='font-size:14px;font-weight:800;color:#E87722;"
+                f"font-variant-numeric:tabular-nums;'>{value}</div></td>"
+            )
+
+        st.markdown(
+            "<div style='border:1px solid #374151;border-radius:0 0 6px 6px;"
+            "background:#1c1c2e;margin-top:-8px;overflow:hidden;'>"
+            "<table style='width:100%;border-collapse:collapse;'><tbody><tr>"
+            "<td style='padding:8px 14px;border-right:1px solid #374151;'>"
+            "<div style='font-size:10px;font-weight:800;letter-spacing:.12em;"
+            "text-transform:uppercase;color:#ffffff;'>TOTAL</div></td>"
+            + _tc("Working Days", str(_working_days))
+            + _tc("Net Time (hrs)", f"{_total_net:.1f}")
+            + _tc("Over Time (hrs)", f"{_total_ot:.1f}")
+            + _tc("Breakdown (hrs)", f"{_total_bd:.1f}")
+            + _tc("HSD (Ltr)", f"{_total_hsd:.1f}")
+            + "<td style='padding:8px 14px;' colspan='2'></td>"
+            "</tr></tbody></table></div>",
+            unsafe_allow_html=True,
+        )
+
     # ── Billing Summary ────────────────────────────────────────────────────────
     if edited_schedule is not None and not edited_schedule.empty:
         summary = _compute_billing_summary(
