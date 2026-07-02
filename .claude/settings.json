@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(New-Item -ItemType File -Path \"c:\\\\Users\\\\tkmsu\\\\OneDrive\\\\Documents\\\\erp\\\\cto-erp-py\\\\cto-erp-py\\\\erp\\\\views\\\\worklog.py\" -Force)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
