@@ -420,7 +420,11 @@ def render() -> None:
                 with r2c3:
                     st.date_input("Site Reach Date", key=f"dep_{dep_key}_sr_{mid}")
                 with r2c4:
-                    st.date_input("Billing Start Date", key=f"dep_{dep_key}_bs_{mid}")
+                    st.date_input(
+                        "Billing Start Date",
+                        key=f"dep_{dep_key}_bs_{mid}",
+                        disabled=op_status != "Mobilising",
+                    )
             else:
                 r2c1, r2c2 = st.columns(2)
                 with r2c1:
