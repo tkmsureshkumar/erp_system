@@ -311,8 +311,11 @@ page = st.query_params.get("page", "dashboard")
 # Handle logout BEFORE cookie restoration so cleared cookies
 # don't immediately re-log the user back in.
 if page == "logout":
-    _cc.remove("il_at")
-    _cc.remove("il_rt")
+    _all = _cc.getAll() or {}
+    if "il_at" in _all:
+        _cc.remove("il_at")
+    if "il_rt" in _all:
+        _cc.remove("il_rt")
     for _k in list(st.session_state.keys()):
         del st.session_state[_k]
     st.query_params["page"] = "dashboard"
@@ -341,8 +344,11 @@ if not auth.is_logged_in():
                     st.session_state["profile"] = _profile
                     st.rerun()
         except Exception:
-            _cc.remove("il_at")
-            _cc.remove("il_rt")
+            _all2 = _cc.getAll() or {}
+            if "il_at" in _all2:
+                _cc.remove("il_at")
+            if "il_rt" in _all2:
+                _cc.remove("il_rt")
 
 # Show login page if still not authenticated
 if not auth.is_logged_in():
