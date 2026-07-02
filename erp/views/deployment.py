@@ -126,23 +126,48 @@ def render() -> None:
         m["id"]: m for m in machines if m.get("id")
     }
 
-    # ── Work Order selector ────────────────────────────────────────────────────
-    st.markdown(
-        "<div style='font-size:11px;font-weight:700;color:#374151;"
-        "letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;'>"
-        "Select Work Order</div>",
-        unsafe_allow_html=True,
+    # ── Work Order selector (two-step: Customer → Work Order) ─────────────────
+    _cids_with_wo = sorted(
+        {wo.get("customer_id") for wo in work_orders if wo.get("customer_id")},
+        key=lambda cid: customer_map.get(cid, {}).get("customer_name", ""),
+    )
+    selected_customer_id: str = st.selectbox(
+        "Select Customer",
+        options=[""] + _cids_with_wo,
+        format_func=lambda cid: "Select a customer" if not cid
+            else customer_map.get(cid, {}).get("customer_name", cid),
+        key="dep_selected_customer_id",
+    )
+
+    # Reset WO selection whenever the customer changes.
+    if st.session_state.get("_dep_prev_customer") != selected_customer_id:
+        st.session_state["_dep_prev_customer"] = selected_customer_id
+        st.session_state["dep_selected_wo_id"] = ""
+
+    if not selected_customer_id:
+        st.markdown(
+            "<div style='margin-top:32px;padding:28px 24px;background:#f8fafc;"
+            "border:1px dashed #d1d5db;border-radius:10px;text-align:center;'>"
+            "<div style='font-size:28px;margin-bottom:8px;'>📋</div>"
+            "<div style='font-size:14px;font-weight:600;color:#374151;'>No customer selected</div>"
+            "<div style='font-size:12px;color:#9ca3af;margin-top:4px;'>"
+            "Pick a customer above to continue.</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    _filtered_wo_ids = sorted(
+        [wid for wid, wo in wo_map.items()
+         if wo.get("customer_id") == selected_customer_id],
+        key=lambda wid: wo_map[wid].get("wo_number", ""),
     )
     selected_wo_id: str = st.selectbox(
         "Select Work Order",
-        options=[""] + list(wo_map),
+        options=[""] + _filtered_wo_ids,
         format_func=lambda wid: "— Choose a work order —" if not wid
-            else (
-                f"{wo_map[wid].get('wo_number', 'Unknown')}  ·  "
-                f"{customer_map.get(wo_map[wid].get('customer_id', ''), {}).get('customer_name', '')}"
-            ),
+            else wo_map[wid].get("wo_number", "Unknown"),
         key="dep_selected_wo_id",
-        label_visibility="collapsed",
     )
 
     if not selected_wo_id:

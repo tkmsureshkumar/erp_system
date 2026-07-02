@@ -423,9 +423,32 @@ def render() -> None:
     }
 
     # ── Edit selector ──────────────────────────────────────────────────────────
+    # Optional customer filter — narrows the WO list; blank = show all + allow new.
+    _cids_with_wo = sorted(
+        {wo.get("customer_id") for wo in work_orders if wo.get("customer_id")},
+        key=lambda cid: customer_map.get(cid, {}).get("customer_name", ""),
+    )
+    _filter_customer_id = st.selectbox(
+        "Filter by Customer",
+        options=[""] + _cids_with_wo,
+        format_func=lambda cid: "All customers" if not cid
+            else customer_map.get(cid, {}).get("customer_name", cid),
+        key="wo_filter_customer_id",
+    )
+
+    # Reset WO selection when the customer filter changes.
+    if st.session_state.get("_wo_prev_filter_customer") != _filter_customer_id:
+        st.session_state["_wo_prev_filter_customer"] = _filter_customer_id
+        st.session_state["selected_wo_id"] = ""
+
+    _filtered_wo_ids = sorted(
+        [wid for wid, wo in wo_map.items()
+         if not _filter_customer_id or wo.get("customer_id") == _filter_customer_id],
+        key=lambda wid: wo_map[wid].get("wo_number", ""),
+    )
     selected_wo_id = st.selectbox(
         "Edit existing work order",
-        options=[""] + list(wo_map),
+        options=[""] + _filtered_wo_ids,
         format_func=lambda wid: "New work order" if not wid
             else f"{wo_map[wid].get('wo_number', 'Unknown')} — "
                  f"{customer_map.get(wo_map[wid].get('customer_id', ''), {}).get('customer_name', '')}",
