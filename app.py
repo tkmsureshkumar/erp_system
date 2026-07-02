@@ -319,6 +319,13 @@ page = st.query_params.get("page", "dashboard")
 # Handle logout BEFORE cookie restoration so cleared cookies
 # don't immediately re-log the user back in.
 if page == "logout":
+    # Invalidate tokens server-side first so stale cookies can't restore
+    # the session even if the browser delays removing them.
+    try:
+        _sb_lo = SupabaseClient()
+        _sb_lo.client.auth.sign_out()
+    except Exception:
+        pass
     _all = _cc.getAll() or {}
     if "il_at" in _all:
         _cc.remove("il_at")
@@ -326,6 +333,10 @@ if page == "logout":
         _cc.remove("il_rt")
     for _k in list(st.session_state.keys()):
         del st.session_state[_k]
+    # Keep these flags so the next render skips cookie restoration and
+    # goes straight to the login page instead of trying set_session().
+    st.session_state["_cc_synced"] = True
+    st.session_state["_logging_out"] = True
     st.query_params["page"] = "dashboard"
     st.rerun()
 
@@ -343,24 +354,27 @@ if not auth.is_logged_in():
         st.session_state["_cc_synced"] = True
         st.stop()
 
-    _at = (_all_cookies or {}).get("il_at")
-    _rt = (_all_cookies or {}).get("il_rt")
-    if _at and _rt:
-        try:
-            _sb   = SupabaseClient()
-            _resp = _sb.client.auth.set_session(_at, _rt)
-            if _resp and _resp.user:
-                _profile = _sb.get_user_profile(str(_resp.user.id))
-                if _profile and _profile.get("is_active", True):
-                    st.session_state["user"]    = _resp.user
-                    st.session_state["profile"] = _profile
-                    st.rerun()
-        except Exception:
-            _all2 = _cc.getAll() or {}
-            if "il_at" in _all2:
-                _cc.remove("il_at")
-            if "il_rt" in _all2:
-                _cc.remove("il_rt")
+    # Skip cookie restoration if we just signed out — the browser may not
+    # have deleted the cookies yet and the tokens are already invalidated.
+    if not st.session_state.get("_logging_out"):
+        _at = (_all_cookies or {}).get("il_at")
+        _rt = (_all_cookies or {}).get("il_rt")
+        if _at and _rt:
+            try:
+                _sb   = SupabaseClient()
+                _resp = _sb.client.auth.set_session(_at, _rt)
+                if _resp and _resp.user:
+                    _profile = _sb.get_user_profile(str(_resp.user.id))
+                    if _profile and _profile.get("is_active", True):
+                        st.session_state["user"]    = _resp.user
+                        st.session_state["profile"] = _profile
+                        st.rerun()
+            except Exception:
+                _all2 = _cc.getAll() or {}
+                if "il_at" in _all2:
+                    _cc.remove("il_at")
+                if "il_rt" in _all2:
+                    _cc.remove("il_rt")
 
 # Show login page if still not authenticated
 if not auth.is_logged_in():
