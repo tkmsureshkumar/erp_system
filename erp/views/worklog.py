@@ -196,11 +196,15 @@ def _compute_billing_summary(
     shift_start: time,
     shift_end: time,
     ot_rate_input: float = 0.0,
+    no_of_days: int | None = None,
 ) -> dict | None:
     if df is None or df.empty:
         return None
     w = df.drop(columns=["Select"], errors="ignore")
-    working_days     = int(w["Start Time"].notna().sum())
+    # Prefer No of Days from the Work Order machine config; fall back to
+    # counting rows that have a Start Time entered.
+    working_days     = no_of_days if (no_of_days and no_of_days > 0) \
+                       else int(w["Start Time"].notna().sum())
     std_hours        = _net_hours(shift_start, shift_end) or 0.0
     working_hours    = working_days * std_hours
     actual           = float(w["Net Time"].fillna(0).sum())
@@ -234,7 +238,7 @@ def _render_billing_summary(s: dict) -> None:
 
     rows_data = [
         ("Rental per month", _n(s["rental_per_month"]),  "Rental / Month"),
-        ("Working days",     _n(s["working_days"]),       "Count of rows where Start Time is not blank"),
+        ("Working days",     _n(s["working_days"]),       "No of Days from Work Order (machine config)"),
         ("Working hours",    _n(s["working_hours"]),      "Working days × Working hours"),
         ("Actual",           _n(s["actual"]),             "Sum(Net Time)"),
         ("Qty",              f"{s['qty']:.4f}",           "Actual ÷ Working hours"),
@@ -639,13 +643,16 @@ def render() -> None:
             st.rerun()
 
     # ── Schedule Totals Row ────────────────────────────────────────────────────
+    _no_of_days_raw = selected_machine.get("no_of_days")
+    _no_of_days     = int(_no_of_days_raw) if _no_of_days_raw else None
+
     if edited_schedule is not None and not edited_schedule.empty:
-        _df_t         = edited_schedule.drop(columns=["Select"], errors="ignore")
-        _working_days = int(_df_t["Start Time"].notna().sum())
-        _total_net    = float(_df_t["Net Time"].fillna(0).sum())
-        _total_ot     = float(_df_t["OT"].fillna(0).sum())
-        _total_bd     = float(_df_t["Breakdown Hours"].fillna(0).sum())
-        _total_hsd    = float(_df_t["HSD in Ltr"].fillna(0).sum())
+        _df_t      = edited_schedule.drop(columns=["Select"], errors="ignore")
+        _total_net = float(_df_t["Net Time"].fillna(0).sum())
+        _total_ot  = float(_df_t["OT"].fillna(0).sum())
+        _total_bd  = float(_df_t["Breakdown Hours"].fillna(0).sum())
+        _total_hsd = float(_df_t["HSD in Ltr"].fillna(0).sum())
+        _wd_display = str(_no_of_days) if _no_of_days else "—"
 
         def _tc(label: str, value: str) -> str:
             return (
@@ -663,7 +670,7 @@ def render() -> None:
             "<td style='padding:8px 14px;border-right:1px solid #374151;'>"
             "<div style='font-size:10px;font-weight:800;letter-spacing:.12em;"
             "text-transform:uppercase;color:#ffffff;'>TOTAL</div></td>"
-            + _tc("Working Days", str(_working_days))
+            + _tc("Working Days", _wd_display)
             + _tc("Net Time (hrs)", f"{_total_net:.1f}")
             + _tc("Over Time (hrs)", f"{_total_ot:.1f}")
             + _tc("Breakdown (hrs)", f"{_total_bd:.1f}")
@@ -678,6 +685,7 @@ def render() -> None:
         summary = _compute_billing_summary(
             edited_schedule, rental_per_month, shift_start_time, shift_end_time,
             ot_rate_input=ot_rate_input,
+            no_of_days=_no_of_days,
         )
         if summary:
             st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
