@@ -197,6 +197,7 @@ def _compute_billing_summary(
     shift_end: time,
     ot_rate_input: float = 0.0,
     no_of_days: int | None = None,
+    deduction: float = 0.0,
 ) -> dict | None:
     if df is None or df.empty:
         return None
@@ -214,7 +215,7 @@ def _compute_billing_summary(
     ot_rate          = float(ot_rate_input or 0.0)
     ot_billing       = ot_hours * ot_rate
     total_billing    = billing + ot_billing
-    deduction_amt    = total_billing - billing
+    deduction_amt    = float(deduction or 0.0)
     adjusted_billing = total_billing - deduction_amt
     return dict(
         rental_per_month=rental_per_month,
@@ -249,7 +250,7 @@ def _render_billing_summary(s: dict) -> None:
         ("OT billing",       _n(s["ot_billing"]),           "OT hours × OT rate"),
         None,
         ("Total Billing",    _n(s["total_billing"]),        "Billing + OT Billing"),
-        ("Deduction",        _n(s["deduction"]),            "Total Billing − Billing"),
+        ("Deduction",        _n(s["deduction"]),            "Manual entry"),
         ("Adjusted Billing", _n(s["adjusted_billing"]),     "Total Billing − Deduction"),
     ]
 
@@ -498,9 +499,11 @@ def render() -> None:
         except Exception:
             _wl_rec_sync = {}
         if _wl_rec_sync:
-            st.session_state["wl_ot_rate"] = float(_wl_rec_sync.get("ot_rate") or 0.0)
+            st.session_state["wl_ot_rate"]   = float(_wl_rec_sync.get("ot_rate") or 0.0)
+            st.session_state["wl_deduction"] = float(_wl_rec_sync.get("deduction") or 0.0)
         else:
-            st.session_state["wl_ot_rate"] = float(selected_machine.get("ot_rate") or 0.0)
+            st.session_state["wl_ot_rate"]   = float(selected_machine.get("ot_rate") or 0.0)
+            st.session_state["wl_deduction"] = 0.0
 
     # ── Shift Configuration ────────────────────────────────────────────────────
     st.markdown('<p class="filter-label">Shift Configuration</p>', unsafe_allow_html=True)
@@ -510,7 +513,7 @@ def render() -> None:
     with sc2:
         shift_end_time = _time_input_ampm("Shift End Time", "wl_shift_end")
 
-    or1, _ = st.columns([1, 3])
+    or1, or2, _ = st.columns([1, 1, 2])
     with or1:
         ot_rate_input = st.number_input(
             "OT Rate",
@@ -519,6 +522,15 @@ def render() -> None:
             format="%.2f",
             help="Leave as 0 to auto-calculate (Rental ÷ Working hours)",
             key="wl_ot_rate",
+        )
+    with or2:
+        deduction_input = st.number_input(
+            "Deduction",
+            min_value=0.0,
+            step=100.0,
+            format="%.2f",
+            help="Amount to subtract from Total Billing to get Adjusted Billing",
+            key="wl_deduction",
         )
 
     # ── Load DB record once (draft banner + schedule init) ────────────────────
@@ -712,6 +724,7 @@ def render() -> None:
             edited_schedule, rental_per_month, shift_start_time, shift_end_time,
             ot_rate_input=ot_rate_input,
             no_of_days=_no_of_days,
+            deduction=deduction_input,
         )
         if summary:
             st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
@@ -736,6 +749,7 @@ def render() -> None:
                     machine_label=_mlabel,
                     year=_billing_month_str,
                     ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
+                    deduction=deduction_input,
                     schedule_data=_schedule_to_json(_draft_df),
                     is_draft=True,
                 )
@@ -781,6 +795,7 @@ def render() -> None:
                 machine_label=_mlabel,
                 year=_billing_month_str,
                 ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
+                deduction=deduction_input,
                 schedule_data=schedule_json,
                 is_draft=False,
             )
