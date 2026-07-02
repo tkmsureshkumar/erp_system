@@ -222,7 +222,9 @@ def render() -> None:
         for mr in mc_rows_init:
             mid   = mr.get("machine_id") or mr.get("machine_label", "")
             saved = existing_mc_dates.get(mid) or existing_mc_dates.get(mr.get("machine_label", "")) or {}
-            st.session_state[f"dep_{dep_key}_dtype_{mid}"]    = saved.get("deployment_type") or "Mobilisation"
+            _raw_dtype = saved.get("deployment_type") or "Mob"
+            _DTYPE_NORM_SEED = {"Mobilisation": "Mob", "Demobilisation": "Demob"}
+            st.session_state[f"dep_{dep_key}_dtype_{mid}"] = _DTYPE_NORM_SEED.get(_raw_dtype, _raw_dtype) if _DTYPE_NORM_SEED.get(_raw_dtype, _raw_dtype) in ["Mob", "Demob", "Other"] else "Mob"
             st.session_state[f"dep_{dep_key}_location_{mid}"] = saved.get("machine_current_location") or ""
             st.session_state[f"dep_{dep_key}_ts_{mid}"]       = _parse_date(saved.get("transaction_start_date"))
             st.session_state[f"dep_{dep_key}_sr_{mid}"]       = _parse_date(saved.get("site_reached_date"))
@@ -368,7 +370,7 @@ def render() -> None:
         "Set the deployment type and dates for each machine",
     )
 
-    _DEPLOY_TYPES = ["Mobilisation", "Demobilisation", "Other"]
+    _DEPLOY_TYPES = ["Mob", "Demob", "Other"]
 
     if mc_rows:
         for idx, mr in enumerate(mc_rows):
@@ -383,6 +385,14 @@ def render() -> None:
                 f"margin-bottom:10px;'>",
                 unsafe_allow_html=True,
             )
+
+            # Normalize stale dtype values from old option labels
+            _dtype_key = f"dep_{dep_key}_dtype_{mid}"
+            _DTYPE_NORM = {"Mobilisation": "Mob", "Demobilisation": "Demob"}
+            if st.session_state.get(_dtype_key) not in _DEPLOY_TYPES:
+                st.session_state[_dtype_key] = _DTYPE_NORM.get(
+                    st.session_state.get(_dtype_key, ""), "Mob"
+                )
 
             # Row 1: machine name | status | Deployment Type
             r1c1, r1c2, r1c3 = st.columns([2, 1, 2])
@@ -407,8 +417,50 @@ def render() -> None:
                 )
 
             # Row 2: conditional fields based on Deployment Type
-            if dtype == "Mobilisation":
+            if dtype == "Mob":
+                # Default Loading Date to today when Reserved and not yet set
+                ts_key_mob = f"dep_{dep_key}_ts_{mid}"
+                if op_status == "Reserved" and not isinstance(
+                    st.session_state.get(ts_key_mob), date
+                ):
+                    st.session_state[ts_key_mob] = date.today()
+
+                # Read Site Reach Date from session state to decide if Billing Start Date unlocks
+                sr_filled = isinstance(
+                    st.session_state.get(f"dep_{dep_key}_sr_{mid}"), date
+                )
+
+                loading_disabled      = op_status not in ("Reserved", "Mobilizing")
+                site_reach_disabled   = op_status != "Mobilizing"
+                billing_disabled      = not (op_status == "Mobilizing" and sr_filled)
+
                 r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+                with r2c1:
+                    st.text_input(
+                        "Machine Current Location",
+                        placeholder="e.g. Chennai Yard",
+                        key=f"dep_{dep_key}_location_{mid}",
+                    )
+                with r2c2:
+                    st.date_input(
+                        "Loading Date",
+                        key=f"dep_{dep_key}_ts_{mid}",
+                        disabled=loading_disabled,
+                    )
+                with r2c3:
+                    st.date_input(
+                        "Site Reach Date",
+                        key=f"dep_{dep_key}_sr_{mid}",
+                        disabled=site_reach_disabled,
+                    )
+                with r2c4:
+                    st.date_input(
+                        "Billing Start Date",
+                        key=f"dep_{dep_key}_bs_{mid}",
+                        disabled=billing_disabled,
+                    )
+            elif dtype == "Demob":
+                r2c1, r2c2, r2c3 = st.columns(3)
                 with r2c1:
                     st.text_input(
                         "Machine Current Location",
@@ -419,12 +471,6 @@ def render() -> None:
                     st.date_input("Loading Date", key=f"dep_{dep_key}_ts_{mid}")
                 with r2c3:
                     st.date_input("Site Reach Date", key=f"dep_{dep_key}_sr_{mid}")
-                with r2c4:
-                    st.date_input(
-                        "Billing Start Date",
-                        key=f"dep_{dep_key}_bs_{mid}",
-                        disabled=op_status != "Mobilising",
-                    )
             else:
                 r2c1, r2c2 = st.columns(2)
                 with r2c1:
@@ -545,20 +591,34 @@ def render() -> None:
                 # Update machine operational_status based on deployment type
                 for mr in mc_rows:
                     machine_id_val = mr.get("machine_id")
-                    if not machine_id_val:
-                        continue
-                    mid_val   = mr.get("machine_id") or mr.get("machine_label", "")
-                    dtype_val = st.session_state.get(f"dep_{dep_key}_dtype_{mid_val}") or "Mobilisation"
-                    new_status = None
-                    if dtype_val == "Mobilisation":
-                        new_status = "Mobilising"
-                    elif dtype_val == "Demobilisation":
-                        new_status = "On Rent"
+                    mid_val        = machine_id_val or mr.get("machine_label", "")
+                    dtype_val      = st.session_state.get(f"dep_{dep_key}_dtype_{mid_val}") or "Mob"
+                    new_status     = None
+                    if dtype_val == "Mob":
+                        bs_val = st.session_state.get(f"dep_{dep_key}_bs_{mid_val}")
+                        ts_val = st.session_state.get(f"dep_{dep_key}_ts_{mid_val}")
+                        if isinstance(bs_val, date):
+                            new_status = "On Rent"
+                        elif isinstance(ts_val, date):
+                            new_status = "Mobilizing"
+                    elif dtype_val == "Demob":
+                        sr_val = st.session_state.get(f"dep_{dep_key}_sr_{mid_val}")
+                        ts_val = st.session_state.get(f"dep_{dep_key}_ts_{mid_val}")
+                        if isinstance(sr_val, date):
+                            new_status = "Available"
+                        elif isinstance(ts_val, date):
+                            new_status = "Demobilizing"
                     if new_status:
-                        try:
-                            sb.update_machine(machine_id_val, {"operational_status": new_status})
-                        except Exception:
-                            pass
+                        if not machine_id_val:
+                            st.warning(
+                                f"Machine '{mr.get('machine_label', '')}' has no ID linked — "
+                                "operational status not updated. Re-save the Work Order to fix this."
+                            )
+                        else:
+                            try:
+                                sb.update_machine(machine_id_val, {"operational_status": new_status})
+                            except Exception as me:
+                                st.warning(f"Could not update machine status for '{mr.get('machine_label', '')}': {me}")
 
                 # Force re-fetch on next render so fields reload from DB
                 st.session_state.pop("_dep_editing_wo_id", None)
