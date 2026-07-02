@@ -835,8 +835,7 @@ def render() -> None:
         f"ot_{selected_wo_id}_{machine_idx}"
         f"_{selected_year}_{selected_month_num:02d}"
     )
-    ot_log_recalc = st.session_state.get(f"ot_recalc_{ot_log_base_key}", 0)
-    ot_editor_key = f"{ot_log_base_key}_{ot_log_recalc}"
+    ot_editor_key = f"ot_editor_{ot_log_base_key}"
 
     if f"ot_data_{ot_log_base_key}" in st.session_state:
         ot_initial_df = st.session_state[f"ot_data_{ot_log_base_key}"]
@@ -845,6 +844,24 @@ def render() -> None:
         ot_initial_df = _loaded_ot if _loaded_ot is not None else _build_ot_log()
     else:
         ot_initial_df = _build_ot_log()
+
+    # Pre-compute Net OT Hrs for all existing rows before rendering the editor.
+    # This ensures values loaded from DB or session_state always display correctly.
+    if not ot_initial_df.empty:
+        _ot_pre = ot_initial_df.copy()
+        for _pi, _pr in _ot_pre.iterrows():
+            _ots = _pr.get("OT Start")
+            _ote = _pr.get("OT End")
+            if _ots and not isinstance(_ots, time):
+                try:    _ots = _parse_time(str(_ots))
+                except: _ots = None
+            if _ote and not isinstance(_ote, time):
+                try:    _ote = _parse_time(str(_ote))
+                except: _ote = None
+            _pre_calc = _net_hours(_ots, _ote)
+            if _pre_calc is not None:
+                _ot_pre.at[_pi, "Net OT Hrs"] = _pre_calc
+        ot_initial_df = _ot_pre
 
     edited_ot_log = st.data_editor(
         ot_initial_df,
@@ -872,7 +889,10 @@ def render() -> None:
         key=ot_editor_key,
     )
 
-    # Auto-recalculate Net OT Hrs from OT Start / OT End (cross-midnight auto-detected).
+    # After each edit: recompute Net OT Hrs from OT Start / OT End and save to
+    # session_state. Rerun WITHOUT changing the editor key so that (a) the user's
+    # other column inputs are preserved and (b) the disabled Net OT Hrs column
+    # picks up the new value from the updated ot_initial_df on the next render.
     if edited_ot_log is not None and not edited_ot_log.empty:
         ot_clean        = edited_ot_log.copy()
         needs_ot_recalc = False
@@ -892,8 +912,7 @@ def render() -> None:
                 ot_clean.at[idx, "Net OT Hrs"] = calc_hrs
                 needs_ot_recalc = True
         if needs_ot_recalc:
-            st.session_state[f"ot_data_{ot_log_base_key}"]   = ot_clean
-            st.session_state[f"ot_recalc_{ot_log_base_key}"] = ot_log_recalc + 1
+            st.session_state[f"ot_data_{ot_log_base_key}"] = ot_clean
             st.rerun()
 
     # OT Log totals strip
