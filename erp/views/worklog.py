@@ -485,21 +485,32 @@ def render() -> None:
     month_start = date(selected_year, selected_month_num, 1)
     month_end   = date(selected_year, selected_month_num, last_day)
 
-    # Sync ot_rate when month changes (before the number_input renders)
+    # Draft key — unique per WO + machine + month; lives in session_state only.
+    draft_key = (
+        f"_wl_draft_{selected_wo_id}_{machine_idx}"
+        f"_{selected_year}_{selected_month_num}"
+    )
+
+    # Sync ot_rate when month changes (before the number_input renders).
+    # Priority: existing draft > saved DB record > machine config default.
     wl_sync_key = f"{selected_wo_id}_{machine_idx}_{selected_year}_{selected_month_num}"
     if st.session_state.get("_wl_month_sync") != wl_sync_key:
         st.session_state["_wl_month_sync"] = wl_sync_key
         _mkey = selected_machine.get("machine_id") or str(machine_idx)
-        try:
-            _wl_rec = sb.get_worklog_by_month(
-                selected_wo_id, _mkey, selected_year, selected_month_num
-            )
-        except Exception:
-            _wl_rec = {}
-        if _wl_rec:
-            st.session_state["wl_ot_rate"] = float(_wl_rec.get("ot_rate") or 0.0)
+        _draft_on_sync = st.session_state.get(draft_key)
+        if _draft_on_sync:
+            st.session_state["wl_ot_rate"] = float(_draft_on_sync.get("ot_rate") or 0.0)
         else:
-            st.session_state["wl_ot_rate"] = float(selected_machine.get("ot_rate") or 0.0)
+            try:
+                _wl_rec = sb.get_worklog_by_month(
+                    selected_wo_id, _mkey, selected_year, selected_month_num
+                )
+            except Exception:
+                _wl_rec = {}
+            if _wl_rec:
+                st.session_state["wl_ot_rate"] = float(_wl_rec.get("ot_rate") or 0.0)
+            else:
+                st.session_state["wl_ot_rate"] = float(selected_machine.get("ot_rate") or 0.0)
 
     # ── Shift Configuration ────────────────────────────────────────────────────
     st.markdown('<p class="filter-label">Shift Configuration</p>', unsafe_allow_html=True)
@@ -520,6 +531,30 @@ def render() -> None:
             key="wl_ot_rate",
         )
 
+    # ── Draft status banner ────────────────────────────────────────────────────
+    _draft = st.session_state.get(draft_key)
+    if _draft:
+        _saved_at = _draft.get("saved_at", "")
+        st.markdown(
+            f"""
+            <div style='background:#fff7ed;border:1px solid #f97316;border-radius:6px;
+                        padding:10px 16px;margin:8px 0 12px;
+                        display:flex;align-items:center;gap:12px;'>
+              <span style='font-size:20px;flex-shrink:0;'>📝</span>
+              <div>
+                <div style='font-size:13px;font-weight:700;color:#9a3412;'>
+                  Draft Work Log — saved at {_saved_at}, not yet committed to database
+                </div>
+                <div style='font-size:12px;color:#c2410c;margin-top:2px;'>
+                  Click <b>Save Work Log</b> to persist to the database,
+                  or <b>Save Draft</b> to update this draft.
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     # ── Shift Schedule Table ───────────────────────────────────────────────────
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
     st.markdown('<p class="filter-label">Shift Schedule</p>', unsafe_allow_html=True)
@@ -534,9 +569,18 @@ def render() -> None:
     recalc_count = st.session_state.get(f"sched_recalc_{base_key}", 0)
     editor_key   = f"{base_key}_{recalc_count}"
 
-    _mkey = selected_machine.get("machine_id") or str(machine_idx)
+    _mkey  = selected_machine.get("machine_id") or str(machine_idx)
+    _draft = st.session_state.get(draft_key)
+
     if f"sched_data_{base_key}" in st.session_state:
+        # In-memory recalculation buffer takes highest priority
         initial_df = st.session_state[f"sched_data_{base_key}"]
+    elif _draft and _draft.get("schedule_json"):
+        # Restore from saved draft (session_state, not DB)
+        draft_df   = _json_to_schedule_df(_draft["schedule_json"])
+        initial_df = draft_df if draft_df is not None else _build_schedule(
+            month_start, month_end, shift_start_time, shift_end_time
+        )
     else:
         try:
             _wl_rec = sb.get_worklog_by_month(
@@ -545,7 +589,7 @@ def render() -> None:
         except Exception:
             _wl_rec = {}
         if _wl_rec and _wl_rec.get("schedule_data"):
-            saved_df = _json_to_schedule_df(_wl_rec["schedule_data"])
+            saved_df   = _json_to_schedule_df(_wl_rec["schedule_data"])
             initial_df = saved_df if saved_df is not None else _build_schedule(
                 month_start, month_end, shift_start_time, shift_end_time
             )
@@ -692,49 +736,77 @@ def render() -> None:
             st.markdown('<p class="filter-label">Billing Summary</p>', unsafe_allow_html=True)
             _render_billing_summary(summary)
 
-    # ── Save ───────────────────────────────────────────────────────────────────
+    # ── Action buttons ─────────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
-    if st.button("Save Work Log", type="primary", key="save_worklog"):
-        schedule_json: str | None = None
-        if edited_schedule is not None and not edited_schedule.empty:
-            save_df = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
-            for idx, row in save_df.iterrows():
-                st_ = row.get("Start Time")
-                et_ = row.get("End Time")
-                if st_ and et_:
-                    save_df.at[idx, "Net Time"] = _net_hours(
-                        st_ if isinstance(st_, time) else _parse_time(str(st_)),
-                        et_ if isinstance(et_, time) else _parse_time(str(et_)),
-                    )
-            schedule_json = _schedule_to_json(save_df)
+    _btn_save, _btn_draft, _btn_discard = st.columns([3, 3, 2])
 
-        _mlabel = selected_machine.get("machine_label", f"Machine {machine_idx + 1}")
-        billing_month_str = f"{calendar.month_name[selected_month_num]} {selected_year}"
-        wl_payload = dict(
-            work_order_id=selected_wo_id,
-            machine_id=_mkey,
-            machine_label=_mlabel,
-            year=billing_month_str,
-            ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
-            schedule_data=schedule_json,
-        )
+    # ── Save Draft (session_state only — no DB write) ──────────────────────────
+    with _btn_draft:
+        if st.button("📝 Save Draft", key="save_draft_btn", use_container_width=True):
+            if edited_schedule is not None and not edited_schedule.empty:
+                _draft_df = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
+                st.session_state[draft_key] = {
+                    "schedule_json": _schedule_to_json(_draft_df),
+                    "ot_rate":       ot_rate_input,
+                    "saved_at":      datetime.now().strftime("%H:%M"),
+                }
+                st.toast("Draft saved — click Save Work Log to commit to database.", icon="📝")
+                st.rerun()
 
-        # Keep shift defaults in machine_config for future months
-        updated_configs = [dict(m) for m in machine_configs]
-        updated_configs[machine_idx]["shift_start_time"] = (
-            shift_start_time.strftime("%H:%M") if shift_start_time else None
-        )
-        updated_configs[machine_idx]["shift_end_time"] = (
-            shift_end_time.strftime("%H:%M") if shift_end_time else None
-        )
-        updated_configs[machine_idx]["ot_rate"] = ot_rate_input if ot_rate_input > 0 else None
+    # ── Discard Draft ──────────────────────────────────────────────────────────
+    with _btn_discard:
+        if st.session_state.get(draft_key):
+            if st.button("Discard Draft", key="discard_draft_btn", use_container_width=True):
+                st.session_state.pop(draft_key, None)
+                st.session_state.pop(f"sched_data_{base_key}", None)
+                st.rerun()
 
-        try:
-            sb.upsert_worklog(wl_payload)
-            sb.update_work_order(selected_wo_id, {
-                "machine_config": json.dumps(updated_configs),
-            })
-            st.session_state.pop(f"sched_data_{base_key}", None)
-            st.success(f"Work log for {selected_month_label} saved successfully.")
-        except Exception as exc:
-            st.error(f"Could not save work log: {exc}")
+    # ── Save Work Log (commits to DB) ──────────────────────────────────────────
+    with _btn_save:
+        if st.button("💾 Save Work Log", type="primary", key="save_worklog",
+                     use_container_width=True):
+            schedule_json: str | None = None
+            if edited_schedule is not None and not edited_schedule.empty:
+                save_df = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
+                for idx, row in save_df.iterrows():
+                    st_ = row.get("Start Time")
+                    et_ = row.get("End Time")
+                    if st_ and et_:
+                        save_df.at[idx, "Net Time"] = _net_hours(
+                            st_ if isinstance(st_, time) else _parse_time(str(st_)),
+                            et_ if isinstance(et_, time) else _parse_time(str(et_)),
+                        )
+                schedule_json = _schedule_to_json(save_df)
+
+            _mlabel = selected_machine.get("machine_label", f"Machine {machine_idx + 1}")
+            billing_month_str = f"{calendar.month_name[selected_month_num]} {selected_year}"
+            wl_payload = dict(
+                work_order_id=selected_wo_id,
+                machine_id=_mkey,
+                machine_label=_mlabel,
+                year=billing_month_str,
+                ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
+                schedule_data=schedule_json,
+            )
+
+            # Keep shift defaults in machine_config for future months
+            updated_configs = [dict(m) for m in machine_configs]
+            updated_configs[machine_idx]["shift_start_time"] = (
+                shift_start_time.strftime("%H:%M") if shift_start_time else None
+            )
+            updated_configs[machine_idx]["shift_end_time"] = (
+                shift_end_time.strftime("%H:%M") if shift_end_time else None
+            )
+            updated_configs[machine_idx]["ot_rate"] = ot_rate_input if ot_rate_input > 0 else None
+
+            try:
+                sb.upsert_worklog(wl_payload)
+                sb.update_work_order(selected_wo_id, {
+                    "machine_config": json.dumps(updated_configs),
+                })
+                # Clear both draft and in-memory buffer on successful DB commit
+                st.session_state.pop(draft_key, None)
+                st.session_state.pop(f"sched_data_{base_key}", None)
+                st.success(f"✅ Work log for {selected_month_label} saved to database.")
+            except Exception as exc:
+                st.error(f"Could not save work log: {exc}")
