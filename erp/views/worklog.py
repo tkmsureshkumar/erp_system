@@ -283,7 +283,7 @@ def _compute_billing_summary(
     billing          = rental_per_month * qty
     ot_hours_sched   = float(w["OT"].fillna(0).sum())
     ot_hours_log     = (
-        float(ot_log_df["Net OT Hrs"].fillna(0).sum())
+        float(pd.to_numeric(ot_log_df["Net OT Hrs"], errors="coerce").fillna(0).sum())
         if ot_log_df is not None and not ot_log_df.empty else 0.0
     )
     ot_hours         = ot_hours_sched + ot_hours_log
@@ -898,9 +898,9 @@ def render() -> None:
 
     # OT Log totals strip
     if edited_ot_log is not None and not edited_ot_log.empty:
-        _ot_total_hrs = float(edited_ot_log["Net OT Hrs"].fillna(0).sum())
-        _ot_total_bd  = float(edited_ot_log["Breakdown Hours"].fillna(0).sum())
-        _ot_total_hsd = float(edited_ot_log["HSD in Ltr"].fillna(0).sum())
+        _ot_total_hrs = float(pd.to_numeric(edited_ot_log["Net OT Hrs"],      errors="coerce").fillna(0).sum())
+        _ot_total_bd  = float(pd.to_numeric(edited_ot_log["Breakdown Hours"], errors="coerce").fillna(0).sum())
+        _ot_total_hsd = float(pd.to_numeric(edited_ot_log["HSD in Ltr"],      errors="coerce").fillna(0).sum())
         st.markdown(
             "<div style='border:1px solid #374151;border-radius:0 0 6px 6px;"
             "background:#1c1c2e;margin-top:-8px;overflow:hidden;'>"
