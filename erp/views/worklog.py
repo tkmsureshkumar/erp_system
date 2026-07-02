@@ -350,15 +350,40 @@ def render() -> None:
         op.get("operator_name", "") for op in operators if op.get("operator_name")
     )
 
-    # ── Work order selector ────────────────────────────────────────────────────
+    # ── Customer selector ──────────────────────────────────────────────────────
+    # Only list customers that have at least one work order (keeps it short).
+    _cids_with_wo = sorted(
+        {wo.get("customer_id") for wo in work_orders if wo.get("customer_id")},
+        key=lambda cid: customer_map.get(cid, {}).get("customer_name", ""),
+    )
+    selected_customer_id = st.selectbox(
+        "Select Customer",
+        options=[""] + _cids_with_wo,
+        format_func=lambda cid: "Select a customer" if not cid
+            else customer_map.get(cid, {}).get("customer_name", cid),
+        key="wl_selected_customer_id",
+    )
+
+    # Reset WO selection whenever the customer changes.
+    if st.session_state.get("_wl_prev_customer") != selected_customer_id:
+        st.session_state["_wl_prev_customer"] = selected_customer_id
+        st.session_state["wl_selected_wo_id"] = ""
+
+    if not selected_customer_id:
+        st.info("Select a customer above to continue.")
+        return
+
+    # ── Work order selector (filtered by selected customer) ────────────────────
+    _filtered_wo_ids = sorted(
+        [wid for wid, wo in wo_map.items()
+         if wo.get("customer_id") == selected_customer_id],
+        key=lambda wid: wo_map[wid].get("wo_number", ""),
+    )
     selected_wo_id = st.selectbox(
         "Select Work Order",
-        options=[""] + list(wo_map),
+        options=[""] + _filtered_wo_ids,
         format_func=lambda wid: "Select a work order" if not wid
-            else (
-                f"{wo_map[wid].get('wo_number', 'Unknown')} — "
-                f"{customer_map.get(wo_map[wid].get('customer_id', ''), {}).get('customer_name', '')}"
-            ),
+            else wo_map[wid].get("wo_number", "Unknown"),
         key="wl_selected_wo_id",
     )
     selected_wo = wo_map.get(selected_wo_id)
