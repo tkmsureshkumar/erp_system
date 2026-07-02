@@ -5,8 +5,24 @@ Run with:  streamlit run app.py
 from __future__ import annotations
 
 import streamlit as st
+from streamlit_cookies_controller import CookieController
 
-from erp.views import asset, customers, dashboard, deployment, machine, operator, site, worklog, worklogreport, workorder
+from erp import auth
+from erp.supabase_client import SupabaseClient
+from erp.views import (
+    admin,
+    asset,
+    customers,
+    dashboard,
+    deployment,
+    login,
+    machine,
+    operator,
+    site,
+    worklog,
+    worklogreport,
+    workorder,
+)
 
 st.set_page_config(
     page_title="IRONLINE ACCESS – Fleet Operations",
@@ -93,16 +109,18 @@ st.markdown(
         padding: 0 18px;
         gap: 2px;
         flex: 1;
+        overflow-x: auto;
       }
       .il-nav a {
         color: rgba(255,255,255,0.68);
         font-size: 13px;
         font-weight: 500;
         text-decoration: none;
-        padding: 6px 16px;
+        padding: 6px 14px;
         border-radius: 4px;
         letter-spacing: 0.03em;
         transition: background 0.15s, color 0.15s;
+        white-space: nowrap;
       }
       .il-nav a:hover {
         color: #fff;
@@ -112,6 +130,72 @@ st.markdown(
         color: #E87722;
         background: rgba(232,119,34,0.14);
         font-weight: 600;
+      }
+      /* Admin link gets a subtle accent */
+      .il-nav a.admin-nav-link {
+        color: rgba(232,119,34,0.80);
+      }
+      .il-nav a.admin-nav-link:hover {
+        color: #E87722;
+        background: rgba(232,119,34,0.10);
+      }
+      .il-nav a.admin-nav-link.active {
+        color: #E87722;
+        background: rgba(232,119,34,0.18);
+      }
+      /* Right-side user area */
+      .il-nav-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 18px;
+        flex-shrink: 0;
+        border-left: 1px solid rgba(255,255,255,0.10);
+      }
+      .il-user-name {
+        font-size: 12px;
+        color: rgba(255,255,255,0.50);
+        font-weight: 500;
+        white-space: nowrap;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .il-signout {
+        color: rgba(255,255,255,0.65);
+        font-size: 12px;
+        font-weight: 500;
+        text-decoration: none;
+        padding: 5px 12px;
+        border-radius: 4px;
+        border: 1px solid rgba(255,255,255,0.18);
+        letter-spacing: 0.04em;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+      }
+      .il-signout:hover {
+        color: #fff;
+        background: rgba(255,255,255,0.10);
+        border-color: rgba(255,255,255,0.35);
+      }
+      /* Nav section label */
+      .il-nav-sep {
+        color: rgba(255,255,255,0.18);
+        padding: 0 6px;
+        font-size: 18px;
+        line-height: 1;
+        align-self: center;
+        flex-shrink: 0;
+      }
+      .il-nav-section {
+        color: rgba(255,255,255,0.35);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        padding: 0 2px 0 4px;
+        align-self: center;
+        flex-shrink: 0;
       }
 
       /* ============================================================
@@ -216,12 +300,116 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---- Determine active page from query params ----
+# ============================================================
+# COOKIE-BASED SESSION PERSISTENCE
+# Restores login state after full page reloads (navbar clicks).
+# ============================================================
+_cc = CookieController()
+
 page = st.query_params.get("page", "dashboard")
 
-# ---- Inject top navbar ----
+# Handle logout BEFORE cookie restoration so cleared cookies
+# don't immediately re-log the user back in.
+if page == "logout":
+    _cc.remove("il_at")
+    _cc.remove("il_rt")
+    for _k in list(st.session_state.keys()):
+        del st.session_state[_k]
+    st.query_params["page"] = "dashboard"
+    st.rerun()
+
+# Restore session from cookies when session state is empty.
+# CookieController takes one render cycle to load — getAll() returns None
+# until the component has initialised.  We stop (without showing the login
+# page) so the component can finish loading and trigger an automatic rerun.
+if not auth.is_logged_in():
+    _all_cookies = _cc.getAll()
+    if _all_cookies is None:
+        # Component not ready yet — show nothing and wait for its rerun.
+        st.stop()
+
+    _at = (_all_cookies or {}).get("il_at")
+    _rt = (_all_cookies or {}).get("il_rt")
+    if _at and _rt:
+        try:
+            _sb  = SupabaseClient()
+            _resp = _sb.client.auth.set_session(_at, _rt)
+            if _resp and _resp.user:
+                _profile = _sb.get_user_profile(str(_resp.user.id))
+                if _profile and _profile.get("is_active", True):
+                    st.session_state["user"]    = _resp.user
+                    st.session_state["profile"] = _profile
+                    st.rerun()
+        except Exception:
+            _cc.remove("il_at")
+            _cc.remove("il_rt")
+
+# Show login page if still not authenticated
+if not auth.is_logged_in():
+    login.render()
+    st.stop()
+
+# Save tokens to cookies after a fresh login
+if "_new_tokens" in st.session_state:
+    _tok = st.session_state.pop("_new_tokens")
+    if _tok.get("at"):
+        _cc.set("il_at", _tok["at"], max_age=86400 * 7)   # 7 days
+    if _tok.get("rt"):
+        _cc.set("il_rt", _tok["rt"], max_age=86400 * 30)  # 30 days
+
+# ============================================================
+# DYNAMIC NAVBAR
+# ============================================================
+_profile = auth.current_profile()
+_user_name = _profile.get("full_name") or _profile.get("email") or "User"
+
+# Pages in display order with an optional section divider.
+# Each entry is either ("key", "label") or the string "REPORTS_SEP"
+# (which renders the divider + "Reports" label).
+_NAV_STRUCTURE = [
+    ("dashboard",   "Dashboard"),
+    ("customers",   "Customers"),
+    ("sites",       "Sites"),
+    ("operators",   "Operators"),
+    ("machines",    "Machines"),
+    ("assets",      "Assets"),
+    ("workorders",  "Work Orders"),
+    ("deployments", "Deployments"),
+    ("worklog",     "Worklog"),
+    "REPORTS_SEP",
+    ("wlreport",    "Worklog Report"),
+    ("system",      "System"),
+]
+
+
 def _cls(p: str) -> str:
     return "active" if page == p else ""
+
+
+def _build_nav_items() -> str:
+    parts: list[str] = []
+    sep_rendered = False
+    for item in _NAV_STRUCTURE:
+        if item == "REPORTS_SEP":
+            sep_rendered = True
+            continue
+        key, label = item  # type: ignore[misc]
+        if not auth.has_page_access(key):
+            continue
+        if sep_rendered:
+            parts.append('<span class="il-nav-sep">|</span>')
+            parts.append('<span class="il-nav-section">Reports</span>')
+            sep_rendered = False
+        parts.append(
+            f'<a href="?page={key}" target="_self" class="{_cls(key)}">{label}</a>'
+        )
+    if auth.is_admin():
+        parts.append(
+            f'<a href="?page=admin" target="_self" '
+            f'class="admin-nav-link {_cls("admin")}">Admin</a>'
+        )
+    return "\n        ".join(parts)
+
 
 st.markdown(
     f"""
@@ -234,54 +422,107 @@ st.markdown(
         </div>
       </a>
       <nav class="il-nav">
-        <a href="?page=dashboard"  target="_self" class="{_cls('dashboard')}">Dashboard</a>
-        <a href="?page=customers"  target="_self" class="{_cls('customers')}">Customers</a>
-        <a href="?page=sites"      target="_self" class="{_cls('sites')}">Sites</a>
-        <a href="?page=operators"  target="_self" class="{_cls('operators')}">Operators</a>
-        <a href="?page=machines"   target="_self" class="{_cls('machines')}">Machines</a>
-        <a href="?page=assets"     target="_self" class="{_cls('assets')}">Assets</a>
-        <a href="?page=workorders"  target="_self" class="{_cls('workorders')}">Work Orders</a>
-        <a href="?page=deployments" target="_self" class="{_cls('deployments')}">Deployments</a>
-        <a href="?page=worklog"    target="_self" class="{_cls('worklog')}">Worklog</a>
-        <span style="color:rgba(255,255,255,0.18);padding:0 6px;font-size:18px;line-height:1;align-self:center;">|</span>
-        <span style="color:rgba(255,255,255,0.35);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:0 2px 0 4px;align-self:center;">Reports</span>
-        <a href="?page=wlreport"   target="_self" class="{_cls('wlreport')}">Worklog Report</a>
-        <a href="?page=system"     target="_self" class="{_cls('system')}">System</a>
+        {_build_nav_items()}
       </nav>
+      <div class="il-nav-right">
+        <span class="il-user-name" title="{_user_name}">{_user_name}</span>
+        <a href="?page=logout" target="_self" class="il-signout">Sign Out</a>
+      </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# ---- Route to page ----
+# ============================================================
+# PAGE ROUTING
+# ============================================================
+
+def _access_denied() -> None:
+    st.warning("You don't have access to this page.", icon="🔒")
+
+
 if page == "dashboard":
-    dashboard.render()
+    if auth.has_page_access("dashboard"):
+        dashboard.render()
+    else:
+        _access_denied()
+
 elif page == "machines":
-    machine.render()
+    if auth.has_page_access("machines"):
+        machine.render()
+    else:
+        _access_denied()
+
 elif page == "customers":
-    customers.render()
+    if auth.has_page_access("customers"):
+        customers.render()
+    else:
+        _access_denied()
+
 elif page == "sites":
-    site.render()
+    if auth.has_page_access("sites"):
+        site.render()
+    else:
+        _access_denied()
+
 elif page == "operators":
-    operator.render()
+    if auth.has_page_access("operators"):
+        operator.render()
+    else:
+        _access_denied()
+
 elif page == "assets":
-    asset.render()
+    if auth.has_page_access("assets"):
+        asset.render()
+    else:
+        _access_denied()
+
 elif page == "workorders":
-    workorder.render()
+    if auth.has_page_access("workorders"):
+        workorder.render()
+    else:
+        _access_denied()
+
 elif page == "deployments":
-    deployment.render()
+    if auth.has_page_access("deployments"):
+        deployment.render()
+    else:
+        _access_denied()
+
 elif page == "worklog":
-    worklog.render()
+    if auth.has_page_access("worklog"):
+        worklog.render()
+    else:
+        _access_denied()
+
 elif page == "wlreport":
-    worklogreport.render()
+    if auth.has_page_access("wlreport"):
+        worklogreport.render()
+    else:
+        _access_denied()
+
 elif page == "system":
-    st.markdown(
-        """
-        <div class="page-eyebrow">// Configuration</div>
-        <div class="page-title">System</div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.info("System settings coming soon.")
+    if auth.has_page_access("system"):
+        st.markdown(
+            """
+            <div class="page-eyebrow">// Configuration</div>
+            <div class="page-title">System</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.info("System settings coming soon.")
+    else:
+        _access_denied()
+
+elif page == "admin":
+    if auth.is_admin():
+        admin.render()
+    else:
+        _access_denied()
+
 else:
-    dashboard.render()
+    # Unknown page key — fall through to dashboard if accessible
+    if auth.has_page_access("dashboard"):
+        dashboard.render()
+    else:
+        _access_denied()

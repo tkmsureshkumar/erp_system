@@ -31,6 +31,16 @@ class SupabaseClient:
             raise RuntimeError("supabase package not installed. Run: pip install supabase")
         self.client = create_client(url, key)
 
+        # Admin client uses the service-role key (bypasses RLS).
+        # Falls back to the anon client when the key is not configured —
+        # admin operations will then fail with a permissions error, which
+        # is the correct behaviour until the key is set.
+        service_key = os.getenv('SUPABASE_SERVICE_KEY')
+        if service_key:
+            self.admin_client = create_client(url, service_key)
+        else:
+            self.admin_client = self.client  # fallback (limited permissions)
+
     def insert_customer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         resp = self.client.table("customers").insert(payload).execute()
         data = None
@@ -643,4 +653,193 @@ class SupabaseClient:
             error = resp.get("error")
         if error:
             raise RuntimeError(str(error))
+        return data if isinstance(data, list) else []
+
+    # ── Auth / User profiles ──────────────────────────────────────────────
+
+    def sign_in(self, email: str, password: str) -> tuple:
+        """
+        Authenticate with Supabase, then fetch the matching user_profiles row.
+
+        Returns:
+            (user, profile_dict, session) — session carries access/refresh tokens.
+        """
+        resp = self.client.auth.sign_in_with_password(
+            {"email": email, "password": password}
+        )
+        user    = resp.user
+        session = resp.session
+        profile = self.get_user_profile(str(user.id))
+        return user, profile, session
+
+    def get_user_profile(self, user_id: str) -> Dict[str, Any]:
+        """SELECT * FROM user_profiles WHERE id = user_id (single row)."""
+        resp = (
+            self.admin_client.table("user_profiles")
+            .select("*")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        if isinstance(data, list) and data:
+            return data[0]
+        return {}
+
+    def list_user_profiles(self) -> List[Dict[str, Any]]:
+        """SELECT * FROM user_profiles ORDER BY created_at DESC."""
+        resp = (
+            self.admin_client.table("user_profiles")
+            .select("*")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return data if isinstance(data, list) else []
+
+    def admin_create_user(
+        self,
+        email: str,
+        password: str,
+        full_name: str,
+        role: str,
+        page_access: List[str],
+    ) -> Dict[str, Any]:
+        """
+        1. Create a Supabase Auth user (email pre-confirmed).
+        2. Insert a matching row into user_profiles.
+
+        Returns the inserted user_profiles row.
+        """
+        auth_resp = self.admin_client.auth.admin.create_user(
+            {
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+            }
+        )
+        new_user = auth_resp.user
+
+        profile_payload: Dict[str, Any] = {
+            "id": str(new_user.id),
+            "email": email,
+            "full_name": full_name,
+            "role": role,
+            "page_access": page_access,
+            "is_active": True,
+        }
+        resp = (
+            self.admin_client.table("user_profiles")
+            .insert(profile_payload)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return profile_payload
+
+    def update_user_profile(
+        self, user_id: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """UPDATE user_profiles SET ... WHERE id = user_id."""
+        from datetime import datetime, timezone  # noqa: PLC0415
+        update_payload = {
+            **payload,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        resp = (
+            self.admin_client.table("user_profiles")
+            .update(update_payload)
+            .eq("id", user_id)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    # ── Activity logging ──────────────────────────────────────────────────
+
+    def log_activity(
+        self,
+        user_id: Any,
+        user_email: str,
+        user_name: str,
+        action: str,
+        module: str,
+        record_id: Any = None,
+        record_label: Any = None,
+        details: Any = None,
+    ) -> None:
+        """
+        Insert a row into activity_logs.
+
+        This method NEVER raises — any error is silently swallowed so that
+        a logging failure cannot break normal application flow.
+        """
+        try:
+            payload: Dict[str, Any] = {
+                "user_id": str(user_id) if user_id is not None else None,
+                "user_email": user_email,
+                "user_name": user_name,
+                "action": action,
+                "module": module,
+                "record_id": str(record_id) if record_id is not None else None,
+                "record_label": str(record_label) if record_label is not None else None,
+                "details": details,
+            }
+            self.admin_client.table("activity_logs").insert(payload).execute()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def list_activity_logs(
+        self,
+        module: Any = None,
+        action: Any = None,
+        user_name: Any = None,
+        date_from: Any = None,
+        date_to: Any = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        SELECT * FROM activity_logs with optional filters.
+        Returns up to 500 rows ordered by created_at DESC.
+        """
+        from datetime import timedelta  # noqa: PLC0415
+
+        query = (
+            self.admin_client.table("activity_logs")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(500)
+        )
+        if module:
+            query = query.eq("module", module)
+        if action:
+            query = query.eq("action", action)
+        if user_name:
+            query = query.ilike("user_name", f"%{user_name}%")
+        if date_from:
+            # gte on an ISO date string works with TIMESTAMPTZ columns
+            query = query.gte("created_at", str(date_from))
+        if date_to:
+            # Make upper bound inclusive by querying up to start of next day
+            next_day = date_to + timedelta(days=1)
+            query = query.lt("created_at", str(next_day))
+
+        resp = query.execute()
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
         return data if isinstance(data, list) else []
