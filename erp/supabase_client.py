@@ -623,6 +623,14 @@ class SupabaseClient:
             return data
         return {}
 
+    def delete_worklog(self, work_order_id: str, machine_id: str, billing_month: str) -> None:
+        self.client.table("work_logs") \
+            .delete() \
+            .eq("work_order_id", work_order_id) \
+            .eq("machine_id", machine_id) \
+            .eq("year", billing_month) \
+            .execute()
+
     def list_all_worklogs(self) -> List[Dict[str, Any]]:
         resp = self.client.table("work_logs").select("*").execute()
         data = None
