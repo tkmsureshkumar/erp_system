@@ -19,6 +19,7 @@ from ..supabase_client import SupabaseClient
 BILLING_TYPES  = ["Monthly Fixed Rental", "Daily Rental"]
 BILLING_CYCLES = ["Calendar Month", "Custom"]
 _HOUR_OPTS     = [""] + [str(h) for h in range(1, 25)]   # 1–24 hrs, blank = not set
+_DAYS_OPTS     = [""] + [str(d) for d in range(1, 31)]   # 1–30 days, blank = not set
 _YES_NO_OPTS   = ["No", "Yes"]
 
 _MC_COLS = [
@@ -126,9 +127,8 @@ def _init_dialog_state(row: dict, label_to_details: dict, ref_date) -> None:
         p + "rental":       float(row.get("rental_per_month") or 0),
         p + "cs":           cs or date.today(),
         p + "ce":           ce or date.today(),
-        p + "default_hour": row.get("machine_default_hour") or "",
+        p + "no_of_days":   row.get("no_of_days")            or "",
         p + "shift_hour":   row.get("machine_shift_hour")   or "",
-        p + "ot_hour":      row.get("ot_hour")              or "",
         p + "mob_cost":     float(row.get("mobilization_cost")   or 0),
         p + "demob_cost":   float(row.get("demobilization_cost") or 0),
         p + "cross_rental": row.get("cross_rental") or _YES_NO_OPTS[0],
@@ -221,13 +221,13 @@ def _machine_row_dialog(
         "Shift &amp; Hours</div>",
         unsafe_allow_html=True,
     )
-    h1, h2, h3 = st.columns(3)
+    h1, h2 = st.columns(2)
     with h1:
-        default_hour = st.selectbox(
-            "Default Hour / Day",
-            _HOUR_OPTS,
-            format_func=lambda x: "— Select —" if x == "" else f"{x} hr",
-            key=p + "default_hour",
+        no_of_days = st.selectbox(
+            "No of Days",
+            _DAYS_OPTS,
+            format_func=lambda x: "— Select —" if x == "" else f"{x} day{'s' if x != '1' else ''}",
+            key=p + "no_of_days",
         )
     with h2:
         shift_hour = st.selectbox(
@@ -236,12 +236,17 @@ def _machine_row_dialog(
             format_func=lambda x: "— Select —" if x == "" else f"{x} hr",
             key=p + "shift_hour",
         )
-    with h3:
-        ot_hour = st.selectbox(
-            "OT Hour",
-            _HOUR_OPTS,
-            format_func=lambda x: "— Select —" if x == "" else f"{x} hr",
-            key=p + "ot_hour",
+
+    vm1, vm2 = st.columns(2)
+    with vm1:
+        mob_cost = st.number_input(
+            "Mobilisation Cost", min_value=0.0, step=500.0, format="%.0f",
+            key=p + "mob_cost",
+        )
+    with vm2:
+        demob_cost = st.number_input(
+            "Demobilisation Cost", min_value=0.0, step=500.0, format="%.0f",
+            key=p + "demob_cost",
         )
 
     # ── Operational Details ────────────────────────────────────────────────────
@@ -251,19 +256,8 @@ def _machine_row_dialog(
         "Operational Details</div>",
         unsafe_allow_html=True,
     )
-    od1, od2 = st.columns(2)
+    od1, _ = st.columns(2)
     with od1:
-        mob_cost = st.number_input(
-            "Mobilization Cost", min_value=0.0, step=500.0, format="%.0f",
-            key=p + "mob_cost",
-        )
-    with od2:
-        demob_cost = st.number_input(
-            "Demobilization Cost", min_value=0.0, step=500.0, format="%.0f",
-            key=p + "demob_cost",
-        )
-    od3, _ = st.columns(2)
-    with od3:
         cross_rental = st.selectbox(
             "Cross Rental", _YES_NO_OPTS, key=p + "cross_rental",
         )
@@ -329,9 +323,8 @@ def _machine_row_dialog(
                     "rental_per_month":         float(rental or 0),
                     "billing_cycle_start_date": cycle_start.isoformat() if isinstance(cycle_start, date) else None,
                     "billing_cycle_end_date":   cycle_end.isoformat() if isinstance(cycle_end, date) else None,
-                    "machine_default_hour":     default_hour or None,
+                    "no_of_days":               no_of_days   or None,
                     "machine_shift_hour":       shift_hour   or None,
-                    "ot_hour":                  ot_hour      or None,
                     "mobilization_cost":        float(mob_cost   or 0),
                     "demobilization_cost":      float(demob_cost or 0),
                     "cross_rental":             cross_rental,
