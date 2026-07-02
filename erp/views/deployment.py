@@ -122,6 +122,9 @@ def render() -> None:
     machine_status_map: dict[str, str] = {
         m["id"]: m.get("operational_status", "") for m in machines if m.get("id")
     }
+    machine_full_map: dict[str, dict] = {
+        m["id"]: m for m in machines if m.get("id")
+    }
 
     # ── Work Order selector ────────────────────────────────────────────────────
     st.markdown(
@@ -219,8 +222,11 @@ def render() -> None:
         for mr in mc_rows_init:
             mid   = mr.get("machine_id") or mr.get("machine_label", "")
             saved = existing_mc_dates.get(mid) or existing_mc_dates.get(mr.get("machine_label", "")) or {}
-            st.session_state[f"dep_{dep_key}_ts_{mid}"] = _parse_date(saved.get("transaction_start_date"))
-            st.session_state[f"dep_{dep_key}_sr_{mid}"] = _parse_date(saved.get("site_reached_date"))
+            st.session_state[f"dep_{dep_key}_dtype_{mid}"]    = saved.get("deployment_type") or "Mobilisation"
+            st.session_state[f"dep_{dep_key}_location_{mid}"] = saved.get("machine_current_location") or ""
+            st.session_state[f"dep_{dep_key}_ts_{mid}"]       = _parse_date(saved.get("transaction_start_date"))
+            st.session_state[f"dep_{dep_key}_sr_{mid}"]       = _parse_date(saved.get("site_reached_date"))
+            st.session_state[f"dep_{dep_key}_bs_{mid}"]       = _parse_date(saved.get("billing_start_date"))
 
     # ── Derive machine list ────────────────────────────────────────────────────
     raw_mc = selected_wo.get("machine_config")
@@ -290,68 +296,139 @@ def render() -> None:
             unsafe_allow_html=True,
         )
 
-    # ── Section B — Machine Deployment Dates ─────────────────────────────────
-    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-    _section_header(
-        "B — Machine Deployment Dates",
-        "Set the transaction start and site-reached dates for each machine",
-    )
-
+    # ── Machine selector + detail card ───────────────────────────────────────
     if mc_rows:
-        # Header row
+        st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+        machine_labels = [mr.get("machine_label", f"Machine {i+1}") for i, mr in enumerate(mc_rows)]
+
+        sel_machine_label = st.selectbox(
+            "Select Machine",
+            options=machine_labels,
+            key=f"dep_machine_sel_{selected_wo_id}",
+        )
+
+        sel_mr = next(
+            (mr for mr in mc_rows if mr.get("machine_label") == sel_machine_label),
+            mc_rows[0],
+        )
+
+        op_status   = machine_status_map.get(sel_mr.get("machine_id", ""), "")
+        mach_master = machine_full_map.get(sel_mr.get("machine_id", ""), {})
+        make  = sel_mr.get("make")  or mach_master.get("make",  "")
+        model = sel_mr.get("model") or mach_master.get("model", "")
+        make_model = " · ".join(filter(None, [make, model])) or "—"
+
+        rental = sel_mr.get("rental_per_month")
+        mob    = sel_mr.get("mobilization_cost")
+        demob  = sel_mr.get("demobilization_cost")
+        cycle_period = (
+            f"{sel_mr.get('billing_cycle_start_date', '—')}  →  "
+            f"{sel_mr.get('billing_cycle_end_date', '—')}"
+        )
+        shift_hr  = sel_mr.get("machine_shift_hour")
+        no_days   = sel_mr.get("no_of_days")
+
+        detail_fields = [
+            ("Make / Model",       make_model),
+            ("Billing Type",       sel_mr.get("billing_type")  or "—"),
+            ("Billing Cycle",      sel_mr.get("billing_cycle") or "—"),
+            ("Rental / Month",     f"{float(rental):,.0f}" if rental else "—"),
+            ("Cycle Period",       cycle_period),
+            ("Shift Hour",         f"{shift_hr} hr" if shift_hr else "—"),
+            ("No of Days",         str(no_days) if no_days else "—"),
+            ("Mobilisation Cost",  f"{float(mob):,.0f}"  if mob  else "—"),
+            ("Demobilisation Cost",f"{float(demob):,.0f}" if demob else "—"),
+        ]
+
         st.markdown(
-            "<div style='display:grid;grid-template-columns:2fr 1fr 1fr 1fr;"
-            "gap:12px;padding:8px 14px;background:#f1f5f9;"
-            "border:1px solid #e2e8f0;border-radius:8px 8px 0 0;'>"
-            "<div style='font-size:10px;font-weight:700;color:#6b7280;"
-            "letter-spacing:.08em;text-transform:uppercase;'>Machine</div>"
-            "<div style='font-size:10px;font-weight:700;color:#6b7280;"
-            "letter-spacing:.08em;text-transform:uppercase;'>Machine Status</div>"
-            "<div style='font-size:10px;font-weight:700;color:#6b7280;"
-            "letter-spacing:.08em;text-transform:uppercase;'>Transaction Start Date</div>"
-            "<div style='font-size:10px;font-weight:700;color:#6b7280;"
-            "letter-spacing:.08em;text-transform:uppercase;'>Site Reached Date</div>"
-            "</div>",
+            "<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;"
+            "padding:16px 20px 8px;margin-top:8px;'>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px;'>"
+            f"<div style='font-size:17px;font-weight:800;color:#111827;'>{sel_machine_label}</div>"
+            f"{_status_badge(op_status)}"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
+        cols = st.columns(4)
+        for i, (lbl, val) in enumerate(detail_fields):
+            with cols[i % 4]:
+                st.markdown(_info_card(lbl, val), unsafe_allow_html=True)
+                st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Section B — Machine Deployment ────────────────────────────────────────
+    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+    _section_header(
+        "B — Machine Deployment",
+        "Set the deployment type and dates for each machine",
+    )
+
+    _DEPLOY_TYPES = ["Mobilisation", "Demobilisation", "Other"]
+
+    if mc_rows:
         for idx, mr in enumerate(mc_rows):
-            mlabel  = mr.get("machine_label", "")
-            mid     = mr.get("machine_id") or mlabel
-            ts_key  = f"dep_{dep_key}_ts_{mid}"
-            sr_key  = f"dep_{dep_key}_sr_{mid}"
+            mlabel    = mr.get("machine_label", "")
+            mid       = mr.get("machine_id") or mlabel
             op_status = machine_status_map.get(mr.get("machine_id", ""), "")
-            bg      = "#ffffff" if idx % 2 == 0 else "#fafafa"
-            is_last = idx == len(mc_rows) - 1
-            radius  = "0 0 8px 8px" if is_last else "0"
+            make_model = " · ".join(filter(None, [mr.get("make", ""), mr.get("model", "")])).strip()
 
             st.markdown(
-                f"<div style='background:{bg};border:1px solid #e2e8f0;"
-                f"border-top:none;border-radius:{radius};padding:4px 14px 0;'></div>",
+                f"<div style='background:{'#ffffff' if idx % 2 == 0 else '#fafafa'};"
+                f"border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px 4px;"
+                f"margin-bottom:10px;'>",
                 unsafe_allow_html=True,
             )
-            rc1, rc2, rc3, rc4 = st.columns([2, 1, 1, 1])
-            with rc1:
-                make_model = " · ".join(filter(None, [mr.get("make", ""), mr.get("model", "")])).strip()
+
+            # Row 1: machine name | status | Deployment Type
+            r1c1, r1c2, r1c3 = st.columns([2, 1, 2])
+            with r1c1:
                 st.markdown(
-                    f"<div style='padding:10px 0 6px;'>"
-                    f"<div style='font-size:13px;font-weight:600;color:#111827;'>{mlabel}</div>"
-                    + (
-                        f"<div style='font-size:11px;color:#9ca3af;margin-top:1px;'>{make_model}</div>"
-                        if make_model else ""
-                    )
+                    f"<div style='padding:6px 0 2px;'>"
+                    f"<div style='font-size:14px;font-weight:700;color:#111827;'>{mlabel}</div>"
+                    + (f"<div style='font-size:11px;color:#9ca3af;'>{make_model}</div>" if make_model else "")
                     + "</div>",
                     unsafe_allow_html=True,
                 )
-            with rc2:
+            with r1c2:
                 st.markdown(
-                    f"<div style='padding:14px 0 6px;'>{_status_badge(op_status)}</div>",
+                    f"<div style='padding:10px 0 2px;'>{_status_badge(op_status)}</div>",
                     unsafe_allow_html=True,
                 )
-            with rc3:
-                st.date_input("Transaction Start Date", key=ts_key, label_visibility="collapsed")
-            with rc4:
-                st.date_input("Site Reached Date", key=sr_key, label_visibility="collapsed")
+            with r1c3:
+                dtype = st.selectbox(
+                    "Deployment Type",
+                    options=_DEPLOY_TYPES,
+                    key=f"dep_{dep_key}_dtype_{mid}",
+                )
+
+            # Row 2: conditional fields based on Deployment Type
+            if dtype == "Mobilisation":
+                r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+                with r2c1:
+                    st.text_input(
+                        "Machine Current Location",
+                        placeholder="e.g. Chennai Yard",
+                        key=f"dep_{dep_key}_location_{mid}",
+                    )
+                with r2c2:
+                    st.date_input("Loading Date", key=f"dep_{dep_key}_ts_{mid}")
+                with r2c3:
+                    st.date_input("Site Reach Date", key=f"dep_{dep_key}_sr_{mid}")
+                with r2c4:
+                    st.date_input("Billing Start Date", key=f"dep_{dep_key}_bs_{mid}")
+            else:
+                r2c1, r2c2 = st.columns(2)
+                with r2c1:
+                    st.date_input("Transaction Start Date", key=f"dep_{dep_key}_ts_{mid}")
+                with r2c2:
+                    st.date_input("Site Reached Date", key=f"dep_{dep_key}_sr_{mid}")
+
+            st.markdown("</div>", unsafe_allow_html=True)
     else:
         st.markdown(
             "<div style='padding:20px 16px;background:#f8fafc;border:1px solid #e2e8f0;"
@@ -422,15 +499,21 @@ def render() -> None:
         if submitted:
             mc_dates_payload = []
             for mr in mc_rows:
-                mlabel = mr.get("machine_label", "")
-                mid    = mr.get("machine_id") or mlabel
-                ts     = st.session_state.get(f"dep_{dep_key}_ts_{mid}")
-                sr     = st.session_state.get(f"dep_{dep_key}_sr_{mid}")
+                mlabel   = mr.get("machine_label", "")
+                mid      = mr.get("machine_id") or mlabel
+                dtype    = st.session_state.get(f"dep_{dep_key}_dtype_{mid}") or "Mobilisation"
+                ts       = st.session_state.get(f"dep_{dep_key}_ts_{mid}")
+                sr       = st.session_state.get(f"dep_{dep_key}_sr_{mid}")
+                location = st.session_state.get(f"dep_{dep_key}_location_{mid}") or None
+                bs       = st.session_state.get(f"dep_{dep_key}_bs_{mid}")
                 mc_dates_payload.append({
-                    "machine_id":             mr.get("machine_id"),
-                    "machine_label":          mlabel,
-                    "transaction_start_date": ts.isoformat() if isinstance(ts, date) else None,
-                    "site_reached_date":      sr.isoformat() if isinstance(sr, date) else None,
+                    "machine_id":               mr.get("machine_id"),
+                    "machine_label":            mlabel,
+                    "deployment_type":          dtype,
+                    "machine_current_location": location,
+                    "transaction_start_date":   ts.isoformat() if isinstance(ts, date) else None,
+                    "site_reached_date":        sr.isoformat() if isinstance(sr, date) else None,
+                    "billing_start_date":       bs.isoformat() if isinstance(bs, date) else None,
                 })
 
             payload = dict(
@@ -454,6 +537,29 @@ def render() -> None:
                 else:
                     sb.insert_deployment(payload)
                     st.success("Deployment saved successfully.")
+
+                # Update machine operational_status based on deployment type
+                for mr in mc_rows:
+                    machine_id_val = mr.get("machine_id")
+                    if not machine_id_val:
+                        continue
+                    mid_val   = mr.get("machine_id") or mr.get("machine_label", "")
+                    dtype_val = st.session_state.get(f"dep_{dep_key}_dtype_{mid_val}") or "Mobilisation"
+                    cur_status = machine_status_map.get(machine_id_val, "")
+                    new_status = None
+                    if dtype_val == "Mobilisation":
+                        if cur_status == "Reserved":
+                            new_status = "Mobilising"
+                        elif cur_status == "Mobilising":
+                            new_status = "On Rent"
+                    elif dtype_val == "Demobilisation":
+                        new_status = "On Rent"
+                    if new_status:
+                        try:
+                            sb.update_machine(machine_id_val, {"operational_status": new_status})
+                        except Exception:
+                            pass
+
                 # Force re-fetch on next render so fields reload from DB
                 st.session_state.pop("_dep_editing_wo_id", None)
             except Exception as exc:
