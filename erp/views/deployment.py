@@ -461,6 +461,16 @@ def render() -> None:
                         disabled=billing_disabled,
                     )
             elif dtype == "Demob":
+                # Default Loading Date to today when On Rent and not yet set
+                ts_key_demob = f"dep_{dep_key}_ts_{mid}"
+                if op_status == "On Rent" and not isinstance(
+                    st.session_state.get(ts_key_demob), date
+                ):
+                    st.session_state[ts_key_demob] = date.today()
+
+                demob_loading_disabled    = op_status not in ("On Rent", "Demobilizing")
+                demob_site_reach_disabled = op_status != "Demobilizing"
+
                 r2c1, r2c2, r2c3 = st.columns(3)
                 with r2c1:
                     st.text_input(
@@ -469,9 +479,17 @@ def render() -> None:
                         key=f"dep_{dep_key}_location_{mid}",
                     )
                 with r2c2:
-                    st.date_input("Loading Date", key=f"dep_{dep_key}_ts_{mid}")
+                    st.date_input(
+                        "Loading Date",
+                        key=f"dep_{dep_key}_ts_{mid}",
+                        disabled=demob_loading_disabled,
+                    )
                 with r2c3:
-                    st.date_input("Site Reach Date", key=f"dep_{dep_key}_sr_{mid}")
+                    st.date_input(
+                        "Site Reach Date",
+                        key=f"dep_{dep_key}_sr_{mid}",
+                        disabled=demob_site_reach_disabled,
+                    )
             else:
                 r2c1, r2c2 = st.columns(2)
                 with r2c1:
