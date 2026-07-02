@@ -21,25 +21,35 @@ env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path)
 
 
+def _secret(key: str, default: str = "") -> str:
+    """Read a secret from os.environ first, then st.secrets (Streamlit Cloud)."""
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        import streamlit as st  # noqa: PLC0415
+        return str(st.secrets.get(key, default))
+    except Exception:
+        return default
+
+
 class SupabaseClient:
     def __init__(self) -> None:
-        url = os.getenv('SUPABASE_URL') or 'https://gsafyjbpucgbhtvvbfue.supabase.co'
-        key = os.getenv('SUPABASE_KEY') or 'sb_publishable_Ixq1xmRqsLVavcvL-wpguQ_v3JSxlhS'
+        url = _secret('SUPABASE_URL')
+        key = _secret('SUPABASE_KEY')
         if not url or not key:
-            raise RuntimeError("Set SUPABASE_URL and SUPABASE_KEY environment variables")
+            raise RuntimeError("Set SUPABASE_URL and SUPABASE_KEY in secrets or .env")
         if create_client is None:
             raise RuntimeError("supabase package not installed. Run: pip install supabase")
         self.client = create_client(url, key)
 
-        # Admin client uses the service-role key (bypasses RLS).
-        # Falls back to the anon client when the key is not configured —
-        # admin operations will then fail with a permissions error, which
-        # is the correct behaviour until the key is set.
-        service_key = os.getenv('SUPABASE_SERVICE_KEY')
+        # Admin client uses the service-role key (bypasses RLS, needed for
+        # auth.admin.create_user and user_profiles writes).
+        service_key = _secret('SUPABASE_SERVICE_KEY')
         if service_key:
             self.admin_client = create_client(url, service_key)
         else:
-            self.admin_client = self.client  # fallback (limited permissions)
+            self.admin_client = self.client  # fallback — admin ops will fail
 
     def insert_customer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         resp = self.client.table("customers").insert(payload).execute()
