@@ -3,6 +3,14 @@ app.py — CTO ERP entry point.
 Run with:  streamlit run app.py
 """
 from __future__ import annotations
+import os
+import sys
+
+# Ensure the project root is always on sys.path so `import erp` works
+# correctly on Streamlit Cloud regardless of working directory.
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 import streamlit as st
 from streamlit_cookies_controller import CookieController
