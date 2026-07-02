@@ -322,20 +322,24 @@ if page == "logout":
     st.rerun()
 
 # Restore session from cookies when session state is empty.
-# CookieController takes one render cycle to load — getAll() returns None
-# until the component has initialised.  We stop (without showing the login
-# page) so the component can finish loading and trigger an automatic rerun.
+# CookieController can return None OR {} on the first render before it has
+# fully synced with the browser.  We always wait one extra render cycle
+# (via the _cc_synced flag) before concluding no session exists, so the
+# login page never flashes during normal navigation.
 if not auth.is_logged_in():
     _all_cookies = _cc.getAll()
-    if _all_cookies is None:
-        # Component not ready yet — show nothing and wait for its rerun.
+
+    if not st.session_state.get("_cc_synced"):
+        # First render of this session — always wait one cycle regardless of
+        # what getAll() returned, to let the component finish syncing.
+        st.session_state["_cc_synced"] = True
         st.stop()
 
     _at = (_all_cookies or {}).get("il_at")
     _rt = (_all_cookies or {}).get("il_rt")
     if _at and _rt:
         try:
-            _sb  = SupabaseClient()
+            _sb   = SupabaseClient()
             _resp = _sb.client.auth.set_session(_at, _rt)
             if _resp and _resp.user:
                 _profile = _sb.get_user_profile(str(_resp.user.id))
