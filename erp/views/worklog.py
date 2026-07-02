@@ -578,10 +578,12 @@ def render() -> None:
         key=editor_key,
     )
 
-    # Auto-recalculate Net Time; cap at shift duration and push excess into OT
+    # Auto-recalculate Net Time and OT whenever Start/End Time are present.
+    # Sunday rule: all worked hours are OT (Net Time stays blank).
+    # Weekday rule: Net Time = min(raw, shift_dur); OT = excess over shift_dur.
     if edited_schedule is not None and not edited_schedule.empty:
-        clean      = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
-        shift_dur  = _net_hours(shift_start_time, shift_end_time)
+        clean        = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
+        shift_dur    = _net_hours(shift_start_time, shift_end_time)
         needs_recalc = False
         for idx, row in clean.iterrows():
             st_ = row.get("Start Time")
@@ -597,17 +599,22 @@ def render() -> None:
                 except Exception:
                     et_ = None
 
-            raw_net = _net_hours(st_, et_)
+            raw_net    = _net_hours(st_, et_)
+            is_sunday  = str(row.get("Weekday", "")) == "Sunday"
 
-            # If actual hours exceed shift duration, cap Net Time and auto-fill OT
-            if raw_net is not None and shift_dur is not None and raw_net > shift_dur + 0.001:
-                expected_net = shift_dur
-                expected_ot  = round(raw_net - shift_dur, 2)
+            if raw_net is not None and is_sunday:
+                # Sunday: full worked hours → OT, Net Time stays None
+                expected_net = None
+                expected_ot  = round(raw_net, 2)
+            elif raw_net is not None and shift_dur is not None:
+                # Weekday: cap Net Time at shift duration, excess → OT
+                expected_net = min(raw_net, shift_dur)
+                expected_ot  = round(max(0.0, raw_net - shift_dur), 2)
             else:
                 expected_net = raw_net
-                expected_ot  = None  # don't overwrite manually entered OT
+                expected_ot  = None
 
-            # Check Net Time change
+            # Update Net Time if changed
             cur_net    = row.get("Net Time")
             cur_net_na = cur_net is None or (not isinstance(cur_net, bool) and pd.isna(cur_net))
             exp_net_na = expected_net is None
@@ -618,7 +625,7 @@ def render() -> None:
                 clean.at[idx, "Net Time"] = expected_net
                 needs_recalc = True
 
-            # Check OT change (only when overflow detected)
+            # Update OT if changed
             if expected_ot is not None:
                 cur_ot    = row.get("OT")
                 cur_ot_na = cur_ot is None or (not isinstance(cur_ot, bool) and pd.isna(cur_ot))
