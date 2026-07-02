@@ -549,13 +549,9 @@ def render() -> None:
                         continue
                     mid_val   = mr.get("machine_id") or mr.get("machine_label", "")
                     dtype_val = st.session_state.get(f"dep_{dep_key}_dtype_{mid_val}") or "Mobilisation"
-                    cur_status = machine_status_map.get(machine_id_val, "")
                     new_status = None
                     if dtype_val == "Mobilisation":
-                        if cur_status == "Reserved":
-                            new_status = "Mobilising"
-                        elif cur_status == "Mobilising":
-                            new_status = "On Rent"
+                        new_status = "Mobilising"
                     elif dtype_val == "Demobilisation":
                         new_status = "On Rent"
                     if new_status:
