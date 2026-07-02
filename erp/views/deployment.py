@@ -621,12 +621,13 @@ def render() -> None:
                         elif isinstance(ts_val, date):
                             new_status = "Mobilizing"
                     elif dtype_val == "Demob":
+                        cur_status = machine_status_map.get(machine_id_val, "")
                         sr_val = st.session_state.get(f"dep_{dep_key}_sr_{mid_val}")
                         ts_val = st.session_state.get(f"dep_{dep_key}_ts_{mid_val}")
-                        if isinstance(sr_val, date):
-                            new_status = "Available"
-                        elif isinstance(ts_val, date):
+                        if cur_status == "On Rent" and isinstance(ts_val, date):
                             new_status = "Demobilizing"
+                        elif cur_status == "Demobilizing" and isinstance(sr_val, date):
+                            new_status = "Available"
                     if new_status:
                         if not machine_id_val:
                             st.warning(
