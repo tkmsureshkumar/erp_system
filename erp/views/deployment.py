@@ -373,7 +373,8 @@ def render() -> None:
     _DEPLOY_TYPES = ["Mob", "Demob", "Other"]
 
     if mc_rows:
-        for idx, mr in enumerate(mc_rows):
+        _section_b_machines = [sel_mr] if sel_mr else mc_rows
+        for idx, mr in enumerate(_section_b_machines):
             mlabel    = mr.get("machine_label", "")
             mid       = mr.get("machine_id") or mlabel
             op_status = machine_status_map.get(mr.get("machine_id", ""), "")
