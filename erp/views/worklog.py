@@ -453,26 +453,30 @@ def render() -> None:
         )
         return
 
-    # ── Month selector: next 12 months from current month ─────────────────────
-    _today = date.today()
-    _y, _m = _today.year, _today.month
-    available_months: list[tuple[int, int]] = []
-    for _ in range(12):
-        available_months.append((_y, _m))
-        _m += 1
-        if _m > 12:
-            _m, _y = 1, _y + 1
+    # ── Month / Year selectors ─────────────────────────────────────────────────
+    _today    = date.today()
+    _cur_year = _today.year
+    _year_opts  = [_cur_year - 1, _cur_year, _cur_year + 1]
+    _month_opts = list(calendar.month_name)[1:]   # Jan … Dec
 
-    month_options = [f"{calendar.month_name[mn]} {y}" for y, mn in available_months]
-    moc1, _ = st.columns([1, 3])
+    moc1, moc2, _ = st.columns([1, 1, 2])
     with moc1:
-        selected_month_label = st.selectbox(
-            "Billing Month",
-            options=month_options,
+        selected_month_name = st.selectbox(
+            "Month",
+            options=_month_opts,
+            index=_today.month - 1,
             key="wl_selected_month",
         )
-    sel_idx = month_options.index(selected_month_label) if selected_month_label in month_options else 0
-    selected_year, selected_month_num = available_months[sel_idx]
+    with moc2:
+        selected_year = st.selectbox(
+            "Year",
+            options=_year_opts,
+            index=1,          # default = current year
+            key="wl_selected_year",
+        )
+
+    selected_month_num   = _month_opts.index(selected_month_name) + 1
+    selected_month_label = f"{selected_month_name} {selected_year}"
     last_day    = calendar.monthrange(selected_year, selected_month_num)[1]
     month_start = date(selected_year, selected_month_num, 1)
     month_end   = date(selected_year, selected_month_num, last_day)
