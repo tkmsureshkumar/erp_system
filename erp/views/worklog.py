@@ -20,7 +20,7 @@ from ..supabase_client import SupabaseClient
 _MINUTES = [f"{m:02d}" for m in range(0, 60, 5)]   # 00, 05, 10 … 55
 
 _SCHED_COLS = [
-    "Date", "Weekday",
+    "Date", "Weekday", "Type",
     "Start Time", "End Time", "Net Time",
     "Start HMR", "End HMR", "Breakdown Hours",
     "OT", "HSD in Ltr", "Operator", "Remarks",
@@ -102,9 +102,12 @@ def _build_schedule(
     rows, cur = [], start_date
     while cur <= end_date:
         is_sunday = cur.strftime("%A") == "Sunday"
+        weekday   = cur.strftime("%A")
+        # Regular shift row
         rows.append({
             "Date":            cur,
-            "Weekday":         cur.strftime("%A"),
+            "Weekday":         weekday,
+            "Type":            "Shift",
             "Start Time":      None if is_sunday else shift_start,
             "End Time":        None if is_sunday else shift_end,
             "Net Time":        None if is_sunday else _net_hours(shift_start, shift_end),
@@ -113,6 +116,22 @@ def _build_schedule(
             "Breakdown Hours": None if is_sunday else 0.0,
             "OT":              None if is_sunday else 0,
             "HSD in Ltr":      None if is_sunday else 0.0,
+            "Operator":        "",
+            "Remarks":         "",
+        })
+        # OT continuation row — blank, user fills in if there is overnight OT
+        rows.append({
+            "Date":            cur,
+            "Weekday":         weekday,
+            "Type":            "OT",
+            "Start Time":      None,
+            "End Time":        None,
+            "Net Time":        None,
+            "Start HMR":       None,
+            "End HMR":         None,
+            "Breakdown Hours": None,
+            "OT":              None,
+            "HSD in Ltr":      None,
             "Operator":        "",
             "Remarks":         "",
         })
@@ -129,14 +148,15 @@ def _schedule_to_json(df: pd.DataFrame) -> str:
         records.append({
             "date":            d.isoformat() if isinstance(d, date) else (str(d) if d else None),
             "weekday":         str(row.get("Weekday") or ""),
+            "type":            str(row.get("Type") or "Shift"),
             "start_time":      st_.strftime("%H:%M") if isinstance(st_, time) else (str(st_) if st_ else None),
             "end_time":        et_.strftime("%H:%M") if isinstance(et_, time) else (str(et_) if et_ else None),
-            "net_time":        float(row.get("Net Time") or 0) if pd.notna(row.get("Net Time")) else 0.0,
+            "net_time":        float(row.get("Net Time") or 0) if pd.notna(row.get("Net Time")) else None,
             "start_hmr":       float(row.get("Start HMR")) if pd.notna(row.get("Start HMR")) else None,
             "end_hmr":         float(row.get("End HMR"))   if pd.notna(row.get("End HMR"))   else None,
-            "breakdown_hours": float(row.get("Breakdown Hours")) if pd.notna(row.get("Breakdown Hours")) else 0.0,
-            "ot":              float(row.get("OT")) if pd.notna(row.get("OT")) else 0,
-            "hsd_in_ltr":      float(row.get("HSD in Ltr")) if pd.notna(row.get("HSD in Ltr")) else 0.0,
+            "breakdown_hours": float(row.get("Breakdown Hours")) if pd.notna(row.get("Breakdown Hours")) else None,
+            "ot":              float(row.get("OT")) if pd.notna(row.get("OT")) else None,
+            "hsd_in_ltr":      float(row.get("HSD in Ltr")) if pd.notna(row.get("HSD in Ltr")) else None,
             "operator":        str(row.get("Operator") or ""),
             "remarks":         str(row.get("Remarks") or ""),
         })
@@ -154,28 +174,59 @@ def _json_to_schedule_df(raw) -> pd.DataFrame | None:
             {
                 "Date":            _parse_date(r.get("date")),
                 "Weekday":         r.get("weekday", ""),
+                "Type":            r.get("type", "Shift"),
                 "Start Time":      _parse_time(r.get("start_time")),
                 "End Time":        _parse_time(r.get("end_time")),
                 "Net Time":        r.get("net_time"),
                 "Start HMR":       r.get("start_hmr"),
                 "End HMR":         r.get("end_hmr"),
-                "Breakdown Hours": r.get("breakdown_hours", 0),
-                "OT":              r.get("ot", 0),
-                "HSD in Ltr":      r.get("hsd_in_ltr", 0.0),
+                "Breakdown Hours": r.get("breakdown_hours"),
+                "OT":              r.get("ot"),
+                "HSD in Ltr":      r.get("hsd_in_ltr"),
                 "Operator":        r.get("operator", ""),
                 "Remarks":         r.get("remarks", ""),
             }
             for r in records
         ]
-        return pd.DataFrame(rows, columns=_SCHED_COLS)
+        df = pd.DataFrame(rows, columns=_SCHED_COLS)
+        return _ensure_ot_rows(df)
     except (json.JSONDecodeError, ValueError, KeyError):
         return None
+
+
+def _ensure_ot_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee every date has exactly one Shift row followed by one OT row.
+    Old saved data (no Type column / all Shift) gets blank OT rows inserted."""
+    if df.empty:
+        return df
+    result = []
+    seen_dates = []
+    for d, grp in df.groupby("Date", sort=True):
+        seen_dates.append(d)
+        shift_rows = grp[grp["Type"] == "Shift"] if "Type" in grp.columns else grp
+        ot_rows    = grp[grp["Type"] == "OT"]    if "Type" in grp.columns else pd.DataFrame()
+        for _, r in (shift_rows if not shift_rows.empty else grp).iterrows():
+            result.append(r.to_dict())
+        if ot_rows.empty:
+            wday = shift_rows.iloc[0]["Weekday"] if not shift_rows.empty else ""
+            result.append({
+                "Date": d, "Weekday": wday, "Type": "OT",
+                "Start Time": None, "End Time": None, "Net Time": None,
+                "Start HMR": None, "End HMR": None, "Breakdown Hours": None,
+                "OT": None, "HSD in Ltr": None, "Operator": "", "Remarks": "",
+            })
+        else:
+            for _, r in ot_rows.iterrows():
+                result.append(r.to_dict())
+    return pd.DataFrame(result, columns=_SCHED_COLS)
 
 
 def _style_schedule(df: pd.DataFrame):
     def _row_style(row):
         if str(row.get("Weekday", "")) == "Sunday":
             return ["background-color:#fef08a; color:#713f12"] * len(row)
+        if str(row.get("Type", "")) == "OT":
+            return ["background-color:#e0e7ff; color:#1e3a5f"] * len(row)
         return [""] * len(row)
     return df.style.apply(_row_style, axis=1)
 
@@ -191,65 +242,6 @@ def _parse_machine_configs(raw) -> list[dict]:
 
 
 # ── OT Continuation Log helpers ───────────────────────────────────────────────
-
-_OT_LOG_COLS = [
-    "Date", "OT Start", "OT End", "Net OT Hrs",
-    "Start HMR", "End HMR", "Breakdown Hours",
-    "HSD in Ltr", "Operator", "Remarks",
-]
-
-
-def _build_ot_log() -> pd.DataFrame:
-    return pd.DataFrame(columns=_OT_LOG_COLS)
-
-
-def _ot_log_to_json(df: pd.DataFrame) -> str:
-    records = []
-    for _, row in df.iterrows():
-        d   = row.get("Date")
-        ots = row.get("OT Start")
-        ote = row.get("OT End")
-        records.append({
-            "date":            d.isoformat() if isinstance(d, date) else (str(d) if d else None),
-            "ot_start":        ots.strftime("%H:%M") if isinstance(ots, time) else (str(ots) if ots else None),
-            "ot_end":          ote.strftime("%H:%M") if isinstance(ote, time) else (str(ote) if ote else None),
-            "net_ot_hrs":      float(row.get("Net OT Hrs") or 0) if pd.notna(row.get("Net OT Hrs")) else 0.0,
-            "start_hmr":       float(row.get("Start HMR")) if pd.notna(row.get("Start HMR")) else None,
-            "end_hmr":         float(row.get("End HMR"))   if pd.notna(row.get("End HMR"))   else None,
-            "breakdown_hours": float(row.get("Breakdown Hours")) if pd.notna(row.get("Breakdown Hours")) else 0.0,
-            "hsd_in_ltr":      float(row.get("HSD in Ltr")) if pd.notna(row.get("HSD in Ltr")) else 0.0,
-            "operator":        str(row.get("Operator") or ""),
-            "remarks":         str(row.get("Remarks") or ""),
-        })
-    return json.dumps(records)
-
-
-def _json_to_ot_log_df(raw) -> pd.DataFrame | None:
-    if not raw:
-        return None
-    try:
-        records = json.loads(raw) if isinstance(raw, str) else raw
-        if not isinstance(records, list):
-            return None
-        rows = [
-            {
-                "Date":            _parse_date(r.get("date")),
-                "OT Start":        _parse_time(r.get("ot_start")),
-                "OT End":          _parse_time(r.get("ot_end")),
-                "Net OT Hrs":      r.get("net_ot_hrs", 0.0),
-                "Start HMR":       r.get("start_hmr"),
-                "End HMR":         r.get("end_hmr"),
-                "Breakdown Hours": r.get("breakdown_hours", 0.0),
-                "HSD in Ltr":      r.get("hsd_in_ltr", 0.0),
-                "Operator":        r.get("operator", ""),
-                "Remarks":         r.get("remarks", ""),
-            }
-            for r in records
-        ]
-        return pd.DataFrame(rows, columns=_OT_LOG_COLS)
-    except (json.JSONDecodeError, ValueError, KeyError):
-        return None
-
 
 def _totals_cell(label: str, value: str) -> str:
     return (
@@ -269,24 +261,19 @@ def _compute_billing_summary(
     ot_rate_input: float = 0.0,
     no_of_days: int | None = None,
     deduction: float = 0.0,
-    ot_log_df: pd.DataFrame | None = None,
 ) -> dict | None:
     if df is None or df.empty:
         return None
-    w = df.drop(columns=["Select"], errors="ignore")
+    w       = df.drop(columns=["Select"], errors="ignore")
+    w_shift = w[w["Type"] == "Shift"] if "Type" in w.columns else w
     working_days     = no_of_days if (no_of_days and no_of_days > 0) \
-                       else int(w["Start Time"].notna().sum())
+                       else int(w_shift["Start Time"].notna().sum())
     std_hours        = _net_hours(shift_start, shift_end) or 0.0
     working_hours    = working_days * std_hours
-    actual           = float(w["Net Time"].fillna(0).sum())
+    actual           = float(w_shift["Net Time"].fillna(0).sum())
     qty              = actual / working_hours if working_hours else 0.0
     billing          = rental_per_month * qty
-    ot_hours_sched   = float(w["OT"].fillna(0).sum())
-    ot_hours_log     = (
-        float(pd.to_numeric(ot_log_df["Net OT Hrs"], errors="coerce").fillna(0).sum())
-        if ot_log_df is not None and not ot_log_df.empty else 0.0
-    )
-    ot_hours         = ot_hours_sched + ot_hours_log
+    ot_hours         = float(w["OT"].fillna(0).sum())
     ot_rate          = float(ot_rate_input or 0.0)
     ot_billing       = ot_hours * ot_rate
     total_billing    = billing + ot_billing
@@ -299,8 +286,6 @@ def _compute_billing_summary(
         actual=actual,
         qty=qty,
         billing=billing,
-        ot_hours_sched=ot_hours_sched,
-        ot_hours_log=ot_hours_log,
         ot_hours=ot_hours,
         ot_rate=ot_rate,
         ot_billing=ot_billing,
@@ -322,10 +307,8 @@ def _render_billing_summary(s: dict) -> None:
         ("Qty",              f"{s['qty']:.4f}",           "Actual ÷ Working hours"),
         ("Billing",          _n(s["billing"]),            "Rental per month × Qty"),
         None,
-        ("OT hours (Shift)", _n(s["ot_hours_sched"], 2),    "Sum(OT Hrs) from Shift Schedule"),
-        ("OT hours (Log)",   _n(s["ot_hours_log"],   2),    "Sum(Net OT Hrs) from OT Continuation Log"),
-        ("Total OT hours",   _n(s["ot_hours"],       2),    "Shift OT + Log OT"),
-        ("OT rate",          _n(s["ot_rate"],        2),    "From OT Rate field"),
+        ("OT hours",         _n(s["ot_hours"],       2),  "Sum(OT Hrs) from Shift Schedule"),
+        ("OT rate",          _n(s["ot_rate"],        2),  "From OT Rate field"),
         ("OT billing",       _n(s["ot_billing"]),            "Total OT hours × OT rate"),
         None,
         ("Total Billing",    _n(s["total_billing"]),        "Billing + OT Billing"),
@@ -701,8 +684,11 @@ def render() -> None:
         column_config={
             "Date":            st.column_config.DateColumn("Date", disabled=True, width="small"),
             "Weekday":         st.column_config.TextColumn("Weekday", disabled=True, width="small"),
+            "Type":            st.column_config.TextColumn("Type", disabled=True, width="small"),
             "Start Time":      st.column_config.TimeColumn("Start Time", width="small"),
-            "End Time":        st.column_config.TimeColumn("End Time", width="small"),
+            "End Time":        st.column_config.TimeColumn("End Time",
+                                   help="OT rows: enter the overnight end time (e.g. 05:00 for next morning) — auto cross-midnight",
+                                   width="small"),
             "Net Time":        st.column_config.NumberColumn("Net Time", format="%.1f",
                                    disabled=True, width="small"),
             "Start HMR":       st.column_config.NumberColumn("Start HMR", format="%.1f",
@@ -748,13 +734,18 @@ def render() -> None:
 
             raw_net    = _net_hours(st_, et_)
             is_sunday  = str(row.get("Weekday", "")) == "Sunday"
+            row_type   = str(row.get("Type", "Shift"))
 
-            if raw_net is not None and is_sunday:
-                # Sunday: full worked hours → OT, Net Time stays None
+            if row_type == "OT":
+                # OT continuation row: Net Time stays blank; full duration → OT Hrs
+                expected_net = None
+                expected_ot  = round(raw_net, 2) if raw_net is not None else None
+            elif raw_net is not None and is_sunday:
+                # Sunday shift: full worked hours → OT, Net Time stays None
                 expected_net = None
                 expected_ot  = round(raw_net, 2)
             elif raw_net is not None and shift_dur is not None:
-                # Weekday: cap Net Time at shift duration, excess → OT
+                # Weekday shift: cap Net Time at shift duration, excess → OT
                 expected_net = min(raw_net, shift_dur)
                 expected_ot  = round(max(0.0, raw_net - shift_dur), 2)
             else:
@@ -790,11 +781,12 @@ def render() -> None:
     _no_of_days     = int(_no_of_days_raw) if _no_of_days_raw else None
 
     if edited_schedule is not None and not edited_schedule.empty:
-        _df_t      = edited_schedule.drop(columns=["Select"], errors="ignore")
-        _total_net = float(_df_t["Net Time"].fillna(0).sum())
-        _total_ot  = float(_df_t["OT"].fillna(0).sum())
-        _total_bd  = float(_df_t["Breakdown Hours"].fillna(0).sum())
-        _total_hsd = float(_df_t["HSD in Ltr"].fillna(0).sum())
+        _df_t       = edited_schedule.drop(columns=["Select"], errors="ignore")
+        _df_shift   = _df_t[_df_t["Type"] == "Shift"] if "Type" in _df_t.columns else _df_t
+        _total_net  = float(_df_shift["Net Time"].fillna(0).sum())
+        _total_ot   = float(_df_t["OT"].fillna(0).sum())
+        _total_bd   = float(_df_t["Breakdown Hours"].fillna(0).sum())
+        _total_hsd  = float(_df_t["HSD in Ltr"].fillna(0).sum())
         _wd_display = str(_no_of_days) if _no_of_days else "—"
 
         st.markdown(
@@ -814,127 +806,6 @@ def render() -> None:
             unsafe_allow_html=True,
         )
 
-    # ── OT Continuation Log ────────────────────────────────────────────────────
-    st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
-    st.markdown(
-        "<div style='background:#1c1c2e;border-radius:8px 8px 0 0;"
-        "padding:12px 16px;display:flex;align-items:center;gap:10px;'>"
-        "<span style='font-size:16px;'>🌙</span>"
-        "<div>"
-        "<div style='font-size:13px;font-weight:700;letter-spacing:.08em;"
-        "text-transform:uppercase;color:#E87722;'>Overtime Continuation Log</div>"
-        "<div style='font-size:11px;color:#9ca3af;margin-top:2px;'>"
-        "Record OT periods that run past the regular shift — "
-        "if OT End is earlier than OT Start the system treats it as next-day "
-        "(e.g. 21:00 → 05:00 = 8 hrs)</div>"
-        "</div></div>",
-        unsafe_allow_html=True,
-    )
-
-    ot_log_base_key = (
-        f"ot_{selected_wo_id}_{machine_idx}"
-        f"_{selected_year}_{selected_month_num:02d}"
-    )
-    ot_editor_key = f"ot_editor_{ot_log_base_key}"
-
-    if f"ot_data_{ot_log_base_key}" in st.session_state:
-        ot_initial_df = st.session_state[f"ot_data_{ot_log_base_key}"]
-    elif _wl_rec and _wl_rec.get("ot_data"):
-        _loaded_ot = _json_to_ot_log_df(_wl_rec["ot_data"])
-        ot_initial_df = _loaded_ot if _loaded_ot is not None else _build_ot_log()
-    else:
-        ot_initial_df = _build_ot_log()
-
-    # Pre-compute Net OT Hrs for all existing rows before rendering the editor.
-    # This ensures values loaded from DB or session_state always display correctly.
-    if not ot_initial_df.empty:
-        _ot_pre = ot_initial_df.copy()
-        for _pi, _pr in _ot_pre.iterrows():
-            _ots = _pr.get("OT Start")
-            _ote = _pr.get("OT End")
-            if _ots and not isinstance(_ots, time):
-                try:    _ots = _parse_time(str(_ots))
-                except: _ots = None
-            if _ote and not isinstance(_ote, time):
-                try:    _ote = _parse_time(str(_ote))
-                except: _ote = None
-            _pre_calc = _net_hours(_ots, _ote)
-            if _pre_calc is not None:
-                _ot_pre.at[_pi, "Net OT Hrs"] = _pre_calc
-        ot_initial_df = _ot_pre
-
-    edited_ot_log = st.data_editor(
-        ot_initial_df,
-        column_config={
-            "Date":            st.column_config.DateColumn("Date", width="small"),
-            "OT Start":        st.column_config.TimeColumn("OT Start", width="small"),
-            "OT End":          st.column_config.TimeColumn("OT End", help="Enter next-day end as-is — auto-detected", width="small"),
-            "Net OT Hrs":      st.column_config.NumberColumn("Net OT Hrs", format="%.2f",
-                                   disabled=True, width="small"),
-            "Start HMR":       st.column_config.NumberColumn("Start HMR", format="%.1f",
-                                   min_value=0, step=0.1, width="small"),
-            "End HMR":         st.column_config.NumberColumn("End HMR", format="%.1f",
-                                   min_value=0, step=0.1, width="small"),
-            "Breakdown Hours": st.column_config.NumberColumn("B/D Hrs", format="%.1f",
-                                   min_value=0, step=0.5, width="small"),
-            "HSD in Ltr":      st.column_config.NumberColumn("HSD in Ltr", format="%.1f",
-                                   min_value=0, step=0.5, width="small"),
-            "Operator":        st.column_config.SelectboxColumn("Operator",
-                                   options=operator_names, width="medium"),
-            "Remarks":         st.column_config.TextColumn("Remarks", width="medium"),
-        },
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        key=ot_editor_key,
-    )
-
-    # After each edit: recompute Net OT Hrs from OT Start / OT End and save to
-    # session_state. Rerun WITHOUT changing the editor key so that (a) the user's
-    # other column inputs are preserved and (b) the disabled Net OT Hrs column
-    # picks up the new value from the updated ot_initial_df on the next render.
-    if edited_ot_log is not None and not edited_ot_log.empty:
-        ot_clean        = edited_ot_log.copy()
-        needs_ot_recalc = False
-        for idx, row in ot_clean.iterrows():
-            ots_ = row.get("OT Start")
-            ote_ = row.get("OT End")
-            if ots_ and not isinstance(ots_, time):
-                try:    ots_ = _parse_time(str(ots_))
-                except: ots_ = None
-            if ote_ and not isinstance(ote_, time):
-                try:    ote_ = _parse_time(str(ote_))
-                except: ote_ = None
-            calc_hrs = _net_hours(ots_, ote_)
-            cur_hrs  = row.get("Net OT Hrs")
-            cur_na   = cur_hrs is None or (not isinstance(cur_hrs, bool) and pd.isna(cur_hrs))
-            if calc_hrs is not None and (cur_na or abs(float(cur_hrs) - calc_hrs) > 0.001):
-                ot_clean.at[idx, "Net OT Hrs"] = calc_hrs
-                needs_ot_recalc = True
-        if needs_ot_recalc:
-            st.session_state[f"ot_data_{ot_log_base_key}"] = ot_clean
-            st.rerun()
-
-    # OT Log totals strip
-    if edited_ot_log is not None and not edited_ot_log.empty:
-        _ot_total_hrs = float(pd.to_numeric(edited_ot_log["Net OT Hrs"],      errors="coerce").fillna(0).sum())
-        _ot_total_bd  = float(pd.to_numeric(edited_ot_log["Breakdown Hours"], errors="coerce").fillna(0).sum())
-        _ot_total_hsd = float(pd.to_numeric(edited_ot_log["HSD in Ltr"],      errors="coerce").fillna(0).sum())
-        st.markdown(
-            "<div style='border:1px solid #374151;border-radius:0 0 6px 6px;"
-            "background:#1c1c2e;margin-top:-8px;overflow:hidden;'>"
-            "<table style='width:100%;border-collapse:collapse;'><tbody><tr>"
-            "<td style='padding:8px 14px;border-right:1px solid #374151;'>"
-            "<div style='font-size:10px;font-weight:800;letter-spacing:.12em;"
-            "text-transform:uppercase;color:#ffffff;'>TOTAL</div></td>"
-            + _totals_cell("OT Hours", f"{_ot_total_hrs:.2f}")
-            + _totals_cell("Breakdown (hrs)", f"{_ot_total_bd:.1f}")
-            + _totals_cell("HSD (Ltr)", f"{_ot_total_hsd:.1f}")
-            + "<td style='padding:8px 14px;' colspan='5'></td>"
-            "</tr></tbody></table></div>",
-            unsafe_allow_html=True,
-        )
-
     # ── Billing Summary ────────────────────────────────────────────────────────
     if edited_schedule is not None and not edited_schedule.empty:
         summary = _compute_billing_summary(
@@ -942,7 +813,6 @@ def render() -> None:
             ot_rate_input=ot_rate_input,
             no_of_days=_no_of_days,
             deduction=deduction_input,
-            ot_log_df=edited_ot_log,
         )
         if summary:
             st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
@@ -961,7 +831,6 @@ def render() -> None:
         if st.button("📝 Save Draft", key="save_draft_btn", use_container_width=True):
             if edited_schedule is not None and not edited_schedule.empty:
                 _draft_df = edited_schedule.drop(columns=["Select"], errors="ignore").copy()
-                _ot_draft_df = edited_ot_log.copy() if (edited_ot_log is not None and not edited_ot_log.empty) else _build_ot_log()
                 _draft_payload = dict(
                     work_order_id=selected_wo_id,
                     machine_id=_mkey,
@@ -970,13 +839,11 @@ def render() -> None:
                     ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
                     deduction=deduction_input,
                     schedule_data=_schedule_to_json(_draft_df),
-                    ot_data=_ot_log_to_json(_ot_draft_df),
                     is_draft=True,
                 )
                 try:
                     sb.upsert_worklog(_draft_payload)
                     st.session_state.pop(f"sched_data_{base_key}", None)
-                    st.session_state.pop(f"ot_data_{ot_log_base_key}", None)
                     st.toast("Draft saved — persists after logout. Click Save Work Log to commit.", icon="📝")
                     st.rerun()
                 except Exception as exc:
@@ -991,7 +858,6 @@ def render() -> None:
                 except Exception:
                     pass
                 st.session_state.pop(f"sched_data_{base_key}", None)
-                st.session_state.pop(f"ot_data_{ot_log_base_key}", None)
                 st.rerun()
 
     # ── Save Work Log (commits to DB with is_draft=False) ─────────────────────
@@ -1011,7 +877,6 @@ def render() -> None:
                         )
                 schedule_json = _schedule_to_json(save_df)
 
-            _ot_save_df = edited_ot_log.copy() if (edited_ot_log is not None and not edited_ot_log.empty) else _build_ot_log()
             wl_payload = dict(
                 work_order_id=selected_wo_id,
                 machine_id=_mkey,
@@ -1020,7 +885,6 @@ def render() -> None:
                 ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
                 deduction=deduction_input,
                 schedule_data=schedule_json,
-                ot_data=_ot_log_to_json(_ot_save_df),
                 is_draft=False,
             )
 
@@ -1040,7 +904,6 @@ def render() -> None:
                     "machine_config": json.dumps(updated_configs),
                 })
                 st.session_state.pop(f"sched_data_{base_key}", None)
-                st.session_state.pop(f"ot_data_{ot_log_base_key}", None)
                 st.success(f"✅ Work log for {selected_month_label} saved to database.")
             except Exception as exc:
                 st.error(f"Could not save work log: {exc}")
