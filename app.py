@@ -72,7 +72,7 @@ st.markdown(
         --text-pri:      #111827;
         --text-sec:      #6B7280;
         --text-muted:    #9CA3AF;
-        --sidebar-bg:    #0F172A;
+        --sidebar-bg:    #79B3C6;
         --sidebar-w:     240px;
         --topbar-h:      58px;
         --radius:        10px;
@@ -129,7 +129,7 @@ st.markdown(
         gap: 11px;
         padding: 0 16px;
         height: var(--topbar-h);
-        border-bottom: 1px solid rgba(255,255,255,.06);
+        border-bottom: 1px solid rgba(0,0,0,.10);
         flex-shrink: 0;
         text-decoration: none !important;
       }
@@ -144,10 +144,10 @@ st.markdown(
       }
       .il-sb-brand-name {
         font-size: 13px; font-weight: 700;
-        color: #fff; letter-spacing: .02em; line-height: 1.3;
+        color: #111827; letter-spacing: .02em; line-height: 1.3;
       }
       .il-sb-brand-sub {
-        font-size: 9px; color: rgba(255,255,255,.38);
+        font-size: 9px; color: rgba(0,0,0,.50);
         letter-spacing: .12em; text-transform: uppercase; margin-top: 1px;
       }
 
@@ -157,10 +157,10 @@ st.markdown(
         padding: 16px 20px 4px;
         font-size: 9px; font-weight: 700;
         letter-spacing: .13em; text-transform: uppercase;
-        color: rgba(255,255,255,.26); user-select: none;
+        color: rgba(0,0,0,.45); user-select: none;
       }
       .il-sb-divider {
-        height: 1px; background: rgba(255,255,255,.06);
+        height: 1px; background: rgba(0,0,0,.10);
         margin: 8px 16px;
       }
       .il-sb-item {
@@ -169,18 +169,18 @@ st.markdown(
         margin: 1px 8px;
         border-radius: 8px;
         text-decoration: none !important;
-        font-size: 13px; font-weight: 500;
-        color: rgba(255,255,255,.58);
+        font-size: 13px; font-weight: 700;
+        color: rgba(0,0,0,.70);
         transition: background .14s, color .14s;
       }
       .il-sb-item:hover {
-        background: rgba(255,255,255,.07);
-        color: rgba(255,255,255,.90);
+        background: rgba(0,0,0,.07);
+        color: rgba(0,0,0,.90);
         text-decoration: none !important;
       }
       .il-sb-item.active {
-        background: rgba(37,99,235,.22);
-        color: #93C5FD;
+        background: rgba(37,99,235,.15);
+        color: #1D4ED8;
         font-weight: 600;
       }
       /* Base icon class — required for Material Symbols to render everywhere */
@@ -194,9 +194,9 @@ st.markdown(
       }
       .il-sb-item .msr {
         font-size: 18px !important; flex-shrink: 0;
-        opacity: .72;
+        opacity: .65;
       }
-      .il-sb-item.active .msr { opacity: 1; }
+      .il-sb-item.active .msr { opacity: 1; color: #1D4ED8; }
       .il-sb-label { white-space: nowrap; }
 
       /* ══════════════════════════════════════════════════
