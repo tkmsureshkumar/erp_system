@@ -208,6 +208,48 @@ st.markdown(
         font-weight: 700;
         box-shadow: 0 2px 8px rgba(37,99,235,.40);
       }
+      /* Left indicator bar on active item */
+      .il-sb-item.active::before {
+        content: '';
+        position: absolute;
+        left: -8px;
+        top: 50%; transform: translateY(-50%);
+        width: 3px; height: 60%;
+        background: #ffffff;
+        border-radius: 0 3px 3px 0;
+      }
+
+      /* ── User profile at bottom ── */
+      .il-sb-user {
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 14px;
+        border-top: 1px solid rgba(255,255,255,.07);
+        cursor: pointer;
+        transition: background .14s;
+        flex-shrink: 0;
+        text-decoration: none !important;
+      }
+      .il-sb-user:hover { background: rgba(255,255,255,.07); }
+      .il-sb-user-avatar {
+        width: 34px; height: 34px; border-radius: 50%;
+        background: var(--primary);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 11px; font-weight: 800; color: #fff;
+        flex-shrink: 0; letter-spacing: .03em;
+      }
+      .il-sb-user-info { flex: 1; min-width: 0; }
+      .il-sb-user-name {
+        font-size: 12px; font-weight: 700; color: #fff;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        line-height: 1.3;
+      }
+      .il-sb-user-role {
+        font-size: 9px; color: rgba(255,255,255,.40);
+        text-transform: uppercase; letter-spacing: .10em; margin-top: 1px;
+      }
+      .il-sb-user-arrow {
+        font-size: 16px !important; color: rgba(255,255,255,.30); flex-shrink: 0;
+      }
 
       /* Material Symbols base class */
       .msr {
@@ -718,10 +760,10 @@ def _build_sidebar() -> str:
     for key, icon, label, section in _SIDEBAR_ITEMS:
         if not auth.has_page_access(key):
             continue
+        # Add a subtle divider between sections (no text label — cleaner look)
         if section != last_section:
             if last_section is not None:
                 items_html.append("<div class='il-sb-divider'></div>")
-            items_html.append(f"<div class='il-sb-section'>{section}</div>")
             last_section = section
         active_cls = " active" if page == key else ""
         items_html.append(
@@ -732,7 +774,6 @@ def _build_sidebar() -> str:
         )
     if auth.is_admin():
         items_html.append("<div class='il-sb-divider'></div>")
-        items_html.append("<div class='il-sb-section'>ADMIN</div>")
         active_cls = " active" if page == "admin" else ""
         items_html.append(
             f"<a href='?page=admin' target='_self' class='il-sb-item{active_cls}'>"
@@ -740,6 +781,21 @@ def _build_sidebar() -> str:
             f"<span class='il-sb-label'>Admin</span>"
             f"</a>"
         )
+
+    # User profile panel at the bottom
+    _initials   = (_user_name or "U")[:2].upper()
+    _role_label = "Admin" if auth.is_admin() else (_profile.get("role") or "User")
+    _user_panel = (
+        f"<a href='?page=system' target='_self' class='il-sb-user'>"
+        f"  <div class='il-sb-user-avatar'>{_initials}</div>"
+        f"  <div class='il-sb-user-info'>"
+        f"    <div class='il-sb-user-name'>{_user_name}</div>"
+        f"    <div class='il-sb-user-role'>{_role_label}</div>"
+        f"  </div>"
+        f"  <span class='msr il-sb-user-arrow'>chevron_right</span>"
+        f"</a>"
+    )
+
     return (
         "<div class='il-sidebar'>"
         "  <a href='?page=dashboard' target='_self' class='il-sb-brand'>"
@@ -750,6 +806,7 @@ def _build_sidebar() -> str:
         "    </div>"
         "  </a>"
         f"  <nav class='il-sb-nav'>{''.join(items_html)}</nav>"
+        f"  {_user_panel}"
         "</div>"
     )
 
