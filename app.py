@@ -193,13 +193,13 @@ st.markdown(
         border-radius: 8px;
         text-decoration: none !important;
         font-size: 13px; font-weight: 600;
-        color: rgba(255,255,255,.68);
+        color: #ffffff;
         transition: background .14s, color .14s;
         position: relative;
       }
       .il-sb-item:hover {
-        background: rgba(255,255,255,.07);
-        color: rgba(255,255,255,.95);
+        background: rgba(255,255,255,.10);
+        color: #ffffff;
         text-decoration: none !important;
       }
       .il-sb-item.active {
@@ -262,10 +262,10 @@ st.markdown(
       }
       .il-sb-item .msr {
         font-size: 18px !important; flex-shrink: 0;
-        opacity: .60;
+        opacity: .85;
         transition: opacity .14s;
       }
-      .il-sb-item:hover .msr { opacity: .85; }
+      .il-sb-item:hover .msr { opacity: 1; }
       .il-sb-item.active .msr { opacity: 1; color: #fff; }
       .il-sb-label { white-space: nowrap; }
 
