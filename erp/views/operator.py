@@ -268,12 +268,11 @@ def render() -> None:
                 sel_bg     = "background:#fff7ed;" if is_sel else "background:#ffffff;"
                 name_w     = "font-weight:700;" if is_sel else "font-weight:500;"
 
-                badge_bg  = "#dcfce7" if status_v == OperatorStatus.ACTIVE.value else "#f3f4f6"
-                badge_clr = "#166534" if status_v == OperatorStatus.ACTIVE.value else "#6b7280"
+                _badge_cls = "badge-active" if status_v == OperatorStatus.ACTIVE.value \
+                             else "badge-draft"
                 status_badge = (
-                    f"<span style='font-size:9px;font-weight:700;background:{badge_bg};"
-                    f"color:{badge_clr};padding:2px 7px;border-radius:10px;"
-                    f"white-space:nowrap;margin-left:auto;'>{status_v}</span>"
+                    f"<span class='badge {_badge_cls}' style='margin-left:auto;'>"
+                    f"{status_v}</span>"
                     if status_v else ""
                 )
                 st.markdown(

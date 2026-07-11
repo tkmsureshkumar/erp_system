@@ -23,16 +23,8 @@ from erp.supabase_client import SupabaseClient
 
 def _badge(is_active: bool) -> str:
     if is_active:
-        return (
-            '<span style="background:#dcfce7;color:#166534;font-size:11px;'
-            'font-weight:700;padding:2px 10px;border-radius:20px;'
-            'letter-spacing:.05em;">ACTIVE</span>'
-        )
-    return (
-        '<span style="background:#fee2e2;color:#991b1b;font-size:11px;'
-        'font-weight:700;padding:2px 10px;border-radius:20px;'
-        'letter-spacing:.05em;">INACTIVE</span>'
-    )
+        return "<span class='badge badge-active'>ACTIVE</span>"
+    return "<span class='badge badge-breakdown'>INACTIVE</span>"
 
 
 # ---------------------------------------------------------------------------

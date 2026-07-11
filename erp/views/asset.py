@@ -217,13 +217,9 @@ def render() -> None:
                 name_w     = "font-weight:700;" if is_sel else "font-weight:500;"
 
                 status_badge = (
-                    "<span style='font-size:9px;font-weight:700;background:#dcfce7;"
-                    "color:#166534;padding:2px 7px;border-radius:10px;"
-                    "white-space:nowrap;'>Active</span>"
+                    "<span class='badge badge-active'>Active</span>"
                     if active else
-                    "<span style='font-size:9px;font-weight:700;background:#fee2e2;"
-                    "color:#991b1b;padding:2px 7px;border-radius:10px;"
-                    "white-space:nowrap;'>Inactive</span>"
+                    "<span class='badge badge-breakdown'>Inactive</span>"
                 )
                 prefix_txt = f"{prefix}&nbsp;&middot;&nbsp;" if prefix else ""
 

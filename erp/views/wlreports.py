@@ -56,13 +56,6 @@ def _section_header(title: str) -> None:
     )
 
 
-def _badge(text: str, bg: str, fg: str = "#fff") -> str:
-    return (
-        f"<span style='background:{bg};color:{fg};font-size:10px;font-weight:700;"
-        f"letter-spacing:.06em;padding:2px 8px;border-radius:4px;'>{text}</span>"
-    )
-
-
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:

@@ -30,23 +30,19 @@ def _parse_date(value) -> date | None:
     return None
 
 
-_STATUS_COLOURS: dict[str, tuple[str, str]] = {
-    "Available":    ("#dcfce7", "#166534"),
-    "On Rent":      ("#dbeafe", "#1e40af"),
-    "Reserved":     ("#fef3c7", "#92400e"),
-    "Mobilizing":   ("#ffedd5", "#c2410c"),
-    "Demobilizing": ("#ede9fe", "#6d28d9"),
-    "Breakdown":    ("#fee2e2", "#991b1b"),
-    "Sold":         ("#f3f4f6", "#6b7280"),
+_STATUS_CLASS: dict[str, str] = {
+    "Available":    "badge-available",
+    "On Rent":      "badge-on-rent",
+    "Reserved":     "badge-reserved",
+    "Mobilizing":   "badge-mobilizing",
+    "Demobilizing": "badge-demobilizing",
+    "Breakdown":    "badge-breakdown",
+    "Sold":         "badge-sold",
 }
 
 def _status_badge(status: str) -> str:
-    bg, fg = _STATUS_COLOURS.get(status, ("#f3f4f6", "#6b7280"))
-    return (
-        f"<span style='display:inline-block;padding:2px 9px;border-radius:20px;"
-        f"font-size:10px;font-weight:700;letter-spacing:.04em;"
-        f"background:{bg};color:{fg};white-space:nowrap;'>{status or '—'}</span>"
-    )
+    cls = _STATUS_CLASS.get(status, "badge-draft")
+    return f"<span class='badge {cls}'>{status or '—'}</span>"
 
 
 def _info_card(label: str, value: str) -> str:
