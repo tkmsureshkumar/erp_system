@@ -48,6 +48,7 @@ class WorkOrderStatus(str, Enum):
     ACTIVE = "Active"
     COMPLETED = "Completed"
     CANCELLED = "Cancelled"
+    CLOSED = "Closed"
 
 
 class DeploymentStatus(str, Enum):
