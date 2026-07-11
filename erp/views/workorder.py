@@ -213,7 +213,6 @@ def _machine_row_dialog(
             "Cycle End", key=p + "ce",
             disabled=(billing_cycle == "Calendar Month"),
         )
-
     # ── Shift & Hours ─────────────────────────────────────────────────────────
     st.markdown(
         "<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"

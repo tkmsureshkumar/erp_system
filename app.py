@@ -31,6 +31,7 @@ from erp.views import (
     machinehistory,
     wlreports,
     workorderreport,
+    operatorreport,
     machine,
     operator,
     site,
@@ -537,6 +538,7 @@ _SIDEBAR_ITEMS = [
     ("woreport",       "receipt_long",            "WO Report",    "REPORTS"),
     ("wlreports",      "pending_actions",         "WL Status",    "REPORTS"),
     ("custreport",     "person_search",           "Cust Report",  "REPORTS"),
+    ("opreport",       "badge",                   "Op Report",    "REPORTS"),
     ("system",         "settings",                "System",       "CONFIG"),
 ]
 
@@ -730,6 +732,12 @@ elif page == "wlreports":
 elif page == "custreport":
     if auth.has_page_access("custreport"):
         customerreport.render()
+    else:
+        _access_denied()
+
+elif page == "opreport":
+    if auth.has_page_access("opreport"):
+        operatorreport.render()
     else:
         _access_denied()
 
