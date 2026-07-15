@@ -1,6 +1,6 @@
-"""
+﻿"""
 erp/views/workorderreport.py
-Work Order Reports — Active Work Orders and Expiring Work Orders.
+Work Order Reports â€” Active Work Orders and Expiring Work Orders.
 """
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ import streamlit as st
 from ..supabase_client import SupabaseClient
 
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
+# â”€â”€ CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _PAGE_CSS = """
 <style>
-/* ── KPI strip ─────────────────────────────────────────────────────── */
+/* â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .kpi-grid {
     display: grid;
     gap: 14px;
@@ -63,7 +63,7 @@ _PAGE_CSS = """
     font-size: 22px; opacity: .12;
 }
 
-/* ── Section header ─────────────────────────────────────────────────── */
+/* â”€â”€ Section header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .form-sec-hdr {
     font-size: 10px; font-weight: 700;
     letter-spacing: .13em; text-transform: uppercase;
@@ -73,7 +73,7 @@ _PAGE_CSS = """
     display: flex; align-items: center; gap: 6px;
 }
 
-/* ── Empty state ─────────────────────────────────────────────────────── */
+/* â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .empty-state-v2 {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
@@ -101,7 +101,7 @@ _PAGE_CSS = """
     max-width: 270px; line-height: 1.6; margin: 0;
 }
 
-/* ── Animations ─────────────────────────────────────────────────────── */
+/* â”€â”€ Animations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes cs-fadeup {
     from { opacity: 0; transform: translateY(10px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -110,7 +110,7 @@ _PAGE_CSS = """
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _parse_date(value) -> date | None:
     if value is None:
@@ -129,7 +129,7 @@ def _parse_date(value) -> date | None:
 
 def _fmt_date(value) -> str:
     d = _parse_date(value)
-    return d.strftime("%d %b %Y") if d else "—"
+    return d.strftime("%d %b %Y") if d else "â€”"
 
 
 def _wo_status(start: date | None, end: date | None, today: date) -> str:
@@ -165,7 +165,7 @@ def _build_wo_row(wo: dict, cust_map: dict, site_map: dict, today: date) -> dict
     ed  = _parse_date(wo.get("end_date"))
     num_machines, rental = _parse_mc(wo.get("machine_config"))
 
-    wo_num    = wo.get("wo_number",             "—") or "—"
+    wo_num    = wo.get("wo_number",             "â€”") or "â€”"
     client_wo = wo.get("client_work_ordernumber", "") or ""
     wo_display = wo_num
     if client_wo and client_wo != wo_num:
@@ -173,11 +173,11 @@ def _build_wo_row(wo: dict, cust_map: dict, site_map: dict, today: date) -> dict
 
     return {
         "Work Order":       wo_display,
-        "Customer":         cust_map.get(wo.get("customer_id", ""), "—"),
-        "Site":             site_map.get(wo.get("site_id",       ""), "—"),
+        "Customer":         cust_map.get(wo.get("customer_id", ""), "â€”"),
+        "Site":             site_map.get(wo.get("site_id",       ""), "â€”"),
         "Start Date":       _fmt_date(sd),
         "End Date":         _fmt_date(ed) if ed else "Open",
-        "Monthly Rental":   f"₹ {rental:,.0f}" if rental else "—",
+        "Monthly Rental":   f"â‚¹ {rental:,.0f}" if rental else "â€”",
         "No. of Machines":  num_machines,
         "Status":           _wo_status(sd, ed, today),
         # raw values for filtering / sorting
@@ -206,7 +206,7 @@ _DISPLAY_COLS = [
 ]
 
 
-# ── HTML builders ─────────────────────────────────────────────────────────────
+# â”€â”€ HTML builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _kpi_card(icon: str, label: str, value: int | str,
               sub: str = "", accent: str = "#2563EB") -> str:
@@ -230,19 +230,19 @@ def _section_hdr(icon: str, label: str) -> None:
     )
 
 
-# ── Main render ───────────────────────────────────────────────────────────────
+# â”€â”€ Main render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def render() -> None:
     st.markdown(_PAGE_CSS, unsafe_allow_html=True)
 
-    # ── Page header ────────────────────────────────────────────────────────────
+    # â”€â”€ Page header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     st.markdown(
         "<div class='page-eyebrow'>// Reports</div>"
         "<div class='page-title'>Work Order Reports</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+    # â”€â”€ Load data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         sb             = SupabaseClient()
         work_orders    = sb.list_work_orders()
@@ -252,14 +252,14 @@ def render() -> None:
         st.error(f"Could not load data: {exc}")
         return
 
-    cust_map = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
-    site_map = {s["id"]: s.get("site_name",     "—") for s in sites_list     if s.get("id")}
+    cust_map = {c["id"]: c.get("customer_name", "â€”") for c in customers_list if c.get("id")}
+    site_map = {s["id"]: s.get("site_name",     "â€”") for s in sites_list     if s.get("id")}
     today    = date.today()
 
     # Build all rows
     all_rows = [_build_wo_row(wo, cust_map, site_map, today) for wo in work_orders]
 
-    # ── Derive active and expiring subsets ────────────────────────────────────
+    # â”€â”€ Derive active and expiring subsets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     active_rows = [
         r for r in all_rows
         if r["_start"] <= today and (r["_end"] is None or r["_end"] >= today)
@@ -274,7 +274,7 @@ def render() -> None:
     ]
     total_machines_active = sum(r["No. of Machines"] for r in active_rows)
 
-    # ── KPI strip ─────────────────────────────────────────────────────────────
+    # â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='kpi-grid' style='grid-template-columns:repeat(4,1fr);'>"
@@ -282,7 +282,7 @@ def render() -> None:
                     "all work orders on record",                  "#2563EB")
         + _kpi_card("assignment_turned_in",  "Active",           len(active_rows),
                     "currently running",                          "#10B981")
-        + _kpi_card("warning",               "Expiring ≤15d",    len(expiring_15),
+        + _kpi_card("warning",               "Expiring â‰¤15d",    len(expiring_15),
                     "need attention soon",                        "#EF4444")
         + _kpi_card("precision_manufacturing","Machines Out",    total_machines_active,
                     "deployed across active WOs",                 "#F59E0B")
@@ -290,13 +290,13 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
-    # ════════════════════════════════════════════════════════════════════
-    # SECTION 1 — ACTIVE WORK ORDERS
-    # ════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SECTION 1 â€” ACTIVE WORK ORDERS
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     with st.container(border=True):
         hdr_l, hdr_r = st.columns([5, 1])
         with hdr_l:
-            _section_hdr("assignment_turned_in", f"Active Work Orders — {len(active_rows)}")
+            _section_hdr("assignment_turned_in", f"Active Work Orders â€” {len(active_rows)}")
         with hdr_r:
             if active_rows:
                 adf_exp = pd.DataFrame(
@@ -317,7 +317,7 @@ def render() -> None:
                 columns=_DISPLAY_COLS,
             )
             st.dataframe(
-                adf.style.applymap(_status_style, subset=["Status"]),
+                adf.style.map(_status_style, subset=["Status"]),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -325,8 +325,8 @@ def render() -> None:
             open_ended = sum(1 for r in active_rows if r["_end"] is None)
             st.markdown(
                 f"<div style='margin-top:8px;font-size:11px;color:#9ca3af;'>"
-                f"{len(active_rows)} active WOs · "
-                f"{total_machines_active} machines deployed · "
+                f"{len(active_rows)} active WOs Â· "
+                f"{total_machines_active} machines deployed Â· "
                 f"{open_ended} open-ended (no end date)</div>",
                 unsafe_allow_html=True,
             )
@@ -344,9 +344,9 @@ def render() -> None:
 
     st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
 
-    # ════════════════════════════════════════════════════════════════════
-    # SECTION 2 — EXPIRING WORK ORDERS
-    # ════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SECTION 2 â€” EXPIRING WORK ORDERS
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     with st.container(border=True):
         _section_hdr("warning", "Expiring Work Orders")
 
@@ -416,8 +416,8 @@ def render() -> None:
 
             st.dataframe(
                 edf.style
-                   .applymap(_status_style,    subset=["Status"])
-                   .applymap(_days_left_style, subset=["Days Left"]),
+                   .map(_status_style,    subset=["Status"])
+                   .map(_days_left_style, subset=["Days Left"]),
                 use_container_width=True,
                 hide_index=True,
             )

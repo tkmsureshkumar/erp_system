@@ -499,7 +499,7 @@ def render() -> None:
         return f"color:{clr};font-weight:700;"
 
     st.dataframe(
-        df.style.applymap(_style_status, subset=["Deployment Status"]),
+        df.style.map(_style_status, subset=["Deployment Status"]),
         use_container_width=True,
         hide_index=True,
         column_config={

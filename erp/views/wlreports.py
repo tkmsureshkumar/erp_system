@@ -1,6 +1,6 @@
-"""
+﻿"""
 erp/views/wlreports.py
-Worklog Reports — Pending, Completed, Pending for Billing.
+Worklog Reports â€” Pending, Completed, Pending for Billing.
 """
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ import streamlit as st
 from ..supabase_client import SupabaseClient
 
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
+# â”€â”€ CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _PAGE_CSS = """
 <style>
-/* ── KPI strip ─────────────────────────────────────────────────────── */
+/* â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .kpi-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -64,7 +64,7 @@ _PAGE_CSS = """
     font-size: 22px; opacity: .12;
 }
 
-/* ── Empty state ─────────────────────────────────────────────────────── */
+/* â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .empty-state-v2 {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
@@ -92,7 +92,7 @@ _PAGE_CSS = """
     max-width: 270px; line-height: 1.6; margin: 0;
 }
 
-/* ── Section header ──────────────────────────────────────────────────── */
+/* â”€â”€ Section header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .form-sec-hdr {
     font-size: 10px; font-weight: 700;
     letter-spacing: .13em; text-transform: uppercase;
@@ -102,7 +102,7 @@ _PAGE_CSS = """
     display: flex; align-items: center; gap: 6px;
 }
 
-/* ── Animations ─────────────────────────────────────────────────────── */
+/* â”€â”€ Animations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes cs-fadeup {
     from { opacity: 0; transform: translateY(10px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -111,7 +111,7 @@ _PAGE_CSS = """
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _parse_date(value) -> date | None:
     if value is None:
@@ -166,7 +166,7 @@ def _section_hdr(icon: str, label: str) -> None:
     )
 
 
-# ── Main render ───────────────────────────────────────────────────────────────
+# â”€â”€ Main render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def render() -> None:
     st.markdown(_PAGE_CSS, unsafe_allow_html=True)
@@ -177,7 +177,7 @@ def render() -> None:
     )
     st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+    # â”€â”€ Load data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         sb             = SupabaseClient()
         machines       = sb.list_machines()
@@ -190,11 +190,11 @@ def render() -> None:
         return
 
     today    = date.today()
-    cust_map = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
-    site_map = {s["id"]: s.get("site_name",     "—") for s in sites_list     if s.get("id")}
+    cust_map = {c["id"]: c.get("customer_name", "â€”") for c in customers_list if c.get("id")}
+    site_map = {s["id"]: s.get("site_name",     "â€”") for s in sites_list     if s.get("id")}
     mach_map = {m["id"]: m for m in machines if m.get("id")}
 
-    # work_log lookup: (wo_id, machine_id, billing_month_str) → worklog dict
+    # work_log lookup: (wo_id, machine_id, billing_month_str) â†’ worklog dict
     wl_lookup: dict[tuple[str, str, str], dict] = {}
     for wl in work_logs:
         key = (
@@ -212,15 +212,15 @@ def render() -> None:
         and (_parse_date(wo.get("end_date")) is None or _parse_date(wo.get("end_date")) >= today)
     ]
 
-    # ── Build per-machine-month records for active WOs ────────────────────────
-    # Each entry: WO + machine + month → worklog status
+    # â”€â”€ Build per-machine-month records for active WOs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Each entry: WO + machine + month â†’ worklog status
     pending_rows:   list[dict] = []
     completed_rows: list[dict] = []
 
     for wo in active_wos:
         wo_id    = wo.get("id", "")
-        customer = cust_map.get(wo.get("customer_id", ""), "—")
-        site     = site_map.get(wo.get("site_id",     ""), "—")
+        customer = cust_map.get(wo.get("customer_id", ""), "â€”")
+        site     = site_map.get(wo.get("site_id",     ""), "â€”")
         wo_start = _parse_date(wo.get("start_date")) or today
 
         mc_raw = wo.get("machine_config")
@@ -236,12 +236,12 @@ def render() -> None:
         for mc_row in mc_list:
             mid    = mc_row.get("machine_id", "")
             mach   = mach_map.get(mid, {})
-            code   = mach.get("asset_code", "") or mc_row.get("machine_label", "") or "—"
+            code   = mach.get("asset_code", "") or mc_row.get("machine_label", "") or "â€”"
             make   = mach.get("make",  "") or ""
             model  = mach.get("model", "") or ""
             label  = code
             if make or model:
-                label += f" — {' '.join(p for p in [make, model] if p)}"
+                label += f" â€” {' '.join(p for p in [make, model] if p)}"
 
             # Check every month from WO start through today
             for yr, mo in _months_range(wo_start, today):
@@ -284,7 +284,7 @@ def render() -> None:
     _PENDING_COLS   = ["Customer", "Site", "Machine", "Worklog Month", "Status"]
     _COMPLETED_COLS = ["Customer", "Site", "Machine", "Worklog Month", "Status"]
 
-    # ── KPI strip ─────────────────────────────────────────────────────────────
+    # â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     n_missing   = sum(1 for r in pending_rows   if r["Status"] == "Missing")
     n_draft     = sum(1 for r in pending_rows   if r["Status"] == "Draft")
     n_completed = len(completed_rows)
@@ -304,16 +304,16 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
-    # ── Tabs ──────────────────────────────────────────────────────────────────
+    # â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     tab_pending, tab_completed, tab_billing = st.tabs([
         f"Pending ({len(pending_rows)})",
         f"Completed ({len(completed_rows)})",
         f"Pending for Billing ({len(completed_rows)})",
     ])
 
-    # ════════════════════════════════════════════════════════════════════
-    # TAB 1 — PENDING WORKLOGS
-    # ════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # TAB 1 â€” PENDING WORKLOGS
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     with tab_pending:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
@@ -370,7 +370,7 @@ def render() -> None:
                 with st.container(border=True):
                     _section_hdr("pending", "Pending Worklogs")
                     st.dataframe(
-                        pdf.style.applymap(_pstyle, subset=["Status"]),
+                        pdf.style.map(_pstyle, subset=["Status"]),
                         use_container_width=True,
                         hide_index=True,
                     )
@@ -388,9 +388,9 @@ def render() -> None:
                     key="wlr_pend_csv",
                 )
 
-    # ════════════════════════════════════════════════════════════════════
-    # TAB 2 — COMPLETED WORKLOGS
-    # ════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # TAB 2 â€” COMPLETED WORKLOGS
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     with tab_completed:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
@@ -436,7 +436,7 @@ def render() -> None:
             with st.container(border=True):
                 _section_hdr("task_alt", "Completed Worklogs")
                 st.dataframe(
-                    cdf.style.applymap(
+                    cdf.style.map(
                         lambda v: "color:#16a34a;font-weight:700;",
                         subset=["Status"],
                     ),
@@ -452,9 +452,9 @@ def render() -> None:
                 key="wlr_comp_csv",
             )
 
-    # ════════════════════════════════════════════════════════════════════
-    # TAB 3 — PENDING FOR BILLING
-    # ════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # TAB 3 â€” PENDING FOR BILLING
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     with tab_billing:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
         st.markdown(
@@ -462,7 +462,7 @@ def render() -> None:
             "padding:12px 16px;margin-bottom:14px;font-size:13px;color:#1E40AF;"
             "display:flex;align-items:center;gap:8px;'>"
             "<span class='msr' style='font-size:18px;'>info</span>"
-            "Showing all submitted worklogs — these are pending invoice generation. "
+            "Showing all submitted worklogs â€” these are pending invoice generation. "
             "Once invoice tracking is added, billed worklogs will be excluded automatically."
             "</div>",
             unsafe_allow_html=True,
@@ -511,7 +511,7 @@ def render() -> None:
             with st.container(border=True):
                 _section_hdr("receipt_long", "Pending for Billing")
                 st.dataframe(
-                    bdf.style.applymap(
+                    bdf.style.map(
                         lambda v: "color:#E87722;font-weight:700;",
                         subset=["Status"],
                     ),

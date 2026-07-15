@@ -1,6 +1,6 @@
-"""
+﻿"""
 erp/views/customerreport.py
-Customer Reports — Revenue Summary and Deployment History per customer.
+Customer Reports â€” Revenue Summary and Deployment History per customer.
 """
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ import streamlit as st
 from ..supabase_client import SupabaseClient
 
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
+# â”€â”€ CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _PAGE_CSS = """
 <style>
-/* ── KPI strip ─────────────────────────────────────────────────────── */
+/* â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .kpi-grid {
     display: grid;
     gap: 14px;
@@ -63,7 +63,7 @@ _PAGE_CSS = """
     font-size: 22px; opacity: .12;
 }
 
-/* ── Section header ─────────────────────────────────────────────────── */
+/* â”€â”€ Section header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .form-sec-hdr {
     font-size: 10px; font-weight: 700;
     letter-spacing: .13em; text-transform: uppercase;
@@ -73,7 +73,7 @@ _PAGE_CSS = """
     display: flex; align-items: center; gap: 6px;
 }
 
-/* ── Empty state ─────────────────────────────────────────────────────── */
+/* â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .empty-state-v2 {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
@@ -101,7 +101,7 @@ _PAGE_CSS = """
     max-width: 270px; line-height: 1.6; margin: 0;
 }
 
-/* ── Animations ─────────────────────────────────────────────────────── */
+/* â”€â”€ Animations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes cs-fadeup {
     from { opacity: 0; transform: translateY(10px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -110,7 +110,7 @@ _PAGE_CSS = """
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _parse_date(value) -> date | None:
     if value is None:
@@ -129,7 +129,7 @@ def _parse_date(value) -> date | None:
 
 def _fmt_date(value) -> str:
     d = _parse_date(value)
-    return d.strftime("%d %b %Y") if d else "—"
+    return d.strftime("%d %b %Y") if d else "â€”"
 
 
 def _parse_mc(mc_raw) -> list[dict]:
@@ -161,7 +161,7 @@ def _status_style(val: str) -> str:
     return ""
 
 
-# ── HTML builders ─────────────────────────────────────────────────────────────
+# â”€â”€ HTML builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _kpi_card(icon: str, label: str, value: int | str,
               sub: str = "", accent: str = "#2563EB") -> str:
@@ -185,19 +185,19 @@ def _section_hdr(icon: str, label: str) -> None:
     )
 
 
-# ── Main render ───────────────────────────────────────────────────────────────
+# â”€â”€ Main render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def render() -> None:
     st.markdown(_PAGE_CSS, unsafe_allow_html=True)
 
-    # ── Page header ────────────────────────────────────────────────────────────
+    # â”€â”€ Page header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     st.markdown(
         "<div class='page-eyebrow'>// Reports</div>"
         "<div class='page-title'>Customer Reports</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Load data ─────────────────────────────────────────────────────────────
+    # â”€â”€ Load data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         sb             = SupabaseClient()
         machines       = sb.list_machines()
@@ -210,15 +210,15 @@ def render() -> None:
         return
 
     today    = date.today()
-    site_map = {s["id"]: s.get("site_name", "—") for s in sites_list if s.get("id")}
+    site_map = {s["id"]: s.get("site_name", "â€”") for s in sites_list if s.get("id")}
     mach_map = {m["id"]: m for m in machines if m.get("id")}
 
-    # ── Build customer aggregation (active WOs only) ───────────────────────────
+    # â”€â”€ Build customer aggregation (active WOs only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     cust_agg: dict[str, dict] = {}
     for c in customers_list:
         if c.get("id"):
             cust_agg[c["id"]] = {
-                "name":        c.get("customer_name", "—"),
+                "name":        c.get("customer_name", "â€”"),
                 "active_wos":  0,
                 "active_mids": set(),
                 "rr":          0.0,
@@ -241,7 +241,7 @@ def render() -> None:
                 cust_agg[cid]["active_mids"].add(mid)
             cust_agg[cid]["rr"] += float(mc.get("rental_per_month") or 0)
 
-    # ── KPI strip ─────────────────────────────────────────────────────────────
+    # â”€â”€ KPI strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     n_customers      = len(customers_list)
     total_active_wos = sum(a["active_wos"] for a in cust_agg.values())
     total_machines   = sum(len(a["active_mids"]) for a in cust_agg.values())
@@ -257,15 +257,15 @@ def render() -> None:
         + _kpi_card("precision_manufacturing","Machines Out",  total_machines,
                     "unique machines deployed",                 "#8B5CF6")
         + _kpi_card("payments",            "Revenue Run Rate",
-                    f"₹{total_rr:,.0f}" if total_rr else "—",
+                    f"â‚¹{total_rr:,.0f}" if total_rr else "â€”",
                     "monthly rental across active WOs",         "#F59E0B")
         + "</div>",
         unsafe_allow_html=True,
     )
 
-    # ════════════════════════════════════════════════════════════════════
-    # SECTION 1 — CUSTOMER REVENUE SUMMARY
-    # ════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SECTION 1 â€” CUSTOMER REVENUE SUMMARY
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     with st.container(border=True):
         _section_hdr("payments", "Customer Revenue Summary")
 
@@ -274,7 +274,7 @@ def render() -> None:
                 "Customer":            a["name"],
                 "Active Machines":     len(a["active_mids"]),
                 "Active Work Orders":  a["active_wos"],
-                "Revenue Run Rate":    f"₹ {a['rr']:,.0f}" if a["rr"] else "—",
+                "Revenue Run Rate":    f"â‚¹ {a['rr']:,.0f}" if a["rr"] else "â€”",
             }
             for a in cust_agg.values()
             if a["active_wos"] > 0
@@ -301,9 +301,9 @@ def render() -> None:
 
     st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
 
-    # ════════════════════════════════════════════════════════════════════
-    # SECTION 2 — CUSTOMER DEPLOYMENT HISTORY
-    # ════════════════════════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # SECTION 2 â€” CUSTOMER DEPLOYMENT HISTORY
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     _section_hdr("history", "Customer Deployment History")
 
     if not customers_list:
@@ -320,7 +320,7 @@ def render() -> None:
         return
 
     cust_sorted = sorted(customers_list, key=lambda c: c.get("customer_name", ""))
-    cust_labels = [c.get("customer_name", "—") for c in cust_sorted]
+    cust_labels = [c.get("customer_name", "â€”") for c in cust_sorted]
     cust_ids    = [c.get("id", "") for c in cust_sorted]
 
     with st.container(border=True):
@@ -347,7 +347,7 @@ def render() -> None:
         "Site History",
     ])
 
-    # ── Work Orders ───────────────────────────────────────────────────────────
+    # â”€â”€ Work Orders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab_wo:
         if not cust_wos:
             st.markdown(
@@ -371,21 +371,21 @@ def render() -> None:
                 rental  = sum(float(r.get("rental_per_month") or 0) for r in mc)
                 sd      = _parse_date(wo.get("start_date"))
                 ed      = _parse_date(wo.get("end_date"))
-                wo_num  = wo.get("wo_number", "—") or "—"
+                wo_num  = wo.get("wo_number", "â€”") or "â€”"
                 cli_wo  = wo.get("client_work_ordernumber", "") or ""
                 wo_disp = f"{wo_num} / {cli_wo}" if cli_wo and cli_wo != wo_num else wo_num
                 wo_rows.append({
                     "Work Order":       wo_disp,
-                    "Site":             site_map.get(wo.get("site_id", ""), "—"),
+                    "Site":             site_map.get(wo.get("site_id", ""), "â€”"),
                     "Start Date":       _fmt_date(sd),
                     "End Date":         _fmt_date(ed) if ed else "Open",
                     "No. of Machines":  len([r for r in mc if r.get("machine_id") or r.get("machine_label")]),
-                    "Monthly Rental":   f"₹ {rental:,.0f}" if rental else "—",
+                    "Monthly Rental":   f"â‚¹ {rental:,.0f}" if rental else "â€”",
                     "Status":           _wo_status(sd, ed, today),
                 })
             wdf = pd.DataFrame(wo_rows)
             st.dataframe(
-                wdf.style.applymap(_status_style, subset=["Status"]),
+                wdf.style.map(_status_style, subset=["Status"]),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -397,7 +397,7 @@ def render() -> None:
                 key="cr_wo_csv",
             )
 
-    # ── Deployments ───────────────────────────────────────────────────────────
+    # â”€â”€ Deployments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab_dep:
         if not cust_deps:
             st.markdown(
@@ -419,7 +419,7 @@ def render() -> None:
                 reverse=True,
             ):
                 wo     = wo_map.get(dep.get("work_order_id", ""), {})
-                wo_num = wo.get("wo_number", "—") or "—"
+                wo_num = wo.get("wo_number", "â€”") or "â€”"
                 md_raw = dep.get("machine_deployments")
                 n_mach = 0
                 if md_raw:
@@ -430,14 +430,14 @@ def render() -> None:
                         pass
                 dep_rows.append({
                     "Work Order":       wo_num,
-                    "Site":             site_map.get(dep.get("site_id", ""), "—"),
+                    "Site":             site_map.get(dep.get("site_id", ""), "â€”"),
                     "Deployment Date":  _fmt_date(dep.get("deployment_date")),
                     "No. of Machines":  n_mach,
-                    "Status":           dep.get("deployment_status", "—") or "—",
+                    "Status":           dep.get("deployment_status", "â€”") or "â€”",
                 })
             ddf = pd.DataFrame(dep_rows)
             st.dataframe(
-                ddf.style.applymap(
+                ddf.style.map(
                     lambda v: "color:#16a34a;font-weight:700;" if str(v).lower() == "active"
                               else ("color:#6b7280;" if str(v).lower() == "closed" else ""),
                     subset=["Status"],
@@ -453,7 +453,7 @@ def render() -> None:
                 key="cr_dep_csv",
             )
 
-    # ── Machines Supplied ─────────────────────────────────────────────────────
+    # â”€â”€ Machines Supplied â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab_mach:
         supplied: dict[str, dict] = {}
         for wo in cust_wos:
@@ -484,12 +484,12 @@ def render() -> None:
             for mid, dates in supplied.items():
                 m = mach_map.get(mid, {})
                 mach_rows.append({
-                    "Machine Code":   m.get("asset_code",         "—") or "—",
-                    "Serial Number":  m.get("serial_number",      "—") or "—",
-                    "Make":           m.get("make",               "—") or "—",
-                    "Model":          m.get("model",              "—") or "—",
-                    "Working Height": m.get("working_capacity",   "—") or "—",
-                    "Current Status": m.get("operational_status", "—") or "—",
+                    "Machine Code":   m.get("asset_code",         "â€”") or "â€”",
+                    "Serial Number":  m.get("serial_number",      "â€”") or "â€”",
+                    "Make":           m.get("make",               "â€”") or "â€”",
+                    "Model":          m.get("model",              "â€”") or "â€”",
+                    "Working Height": m.get("working_capacity",   "â€”") or "â€”",
+                    "Current Status": m.get("operational_status", "â€”") or "â€”",
                     "First Deployed": _fmt_date(dates["first"]),
                     "Last Deployed":  _fmt_date(dates["last"]),
                 })
@@ -508,7 +508,7 @@ def render() -> None:
                 key="cr_mach_csv",
             )
 
-    # ── Site History ──────────────────────────────────────────────────────────
+    # â”€â”€ Site History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab_site:
         site_agg: dict[str, dict] = {}
         for wo in cust_wos:
@@ -547,7 +547,7 @@ def render() -> None:
         else:
             site_rows = [
                 {
-                    "Site":              site_map.get(sid, "—"),
+                    "Site":              site_map.get(sid, "â€”"),
                     "Work Orders":       a["wo_count"],
                     "Machines Supplied": len(a["machines"]),
                     "First Deployment":  _fmt_date(a["first_date"]),
