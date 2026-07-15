@@ -14,6 +14,103 @@ import streamlit as st
 from ..supabase_client import SupabaseClient
 
 
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
+_PAGE_CSS = """
+<style>
+/* ── KPI strip ─────────────────────────────────────────────────────── */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 0 0 28px;
+}
+.kpi-card {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 12px;
+    padding: 18px 22px 14px;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow .18s, transform .18s;
+}
+.kpi-card:hover {
+    box-shadow: 0 6px 20px rgba(0,0,0,.08);
+    transform: translateY(-2px);
+}
+.kpi-accent-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 12px 12px 0 0;
+}
+.kpi-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: #9CA3AF;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+}
+.kpi-value {
+    font-size: 34px; font-weight: 800;
+    color: #111827; line-height: 1;
+    margin-bottom: 6px;
+    font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+    font-size: 11px; color: #6B7280;
+}
+.kpi-icon {
+    position: absolute; top: 16px; right: 18px;
+    font-size: 22px; opacity: .12;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.empty-state-v2 {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 72px 40px;
+    background: #FAFBFC;
+    border: 2px dashed #E2EBF0;
+    border-radius: 16px;
+    text-align: center;
+    animation: cs-fadeup .35s ease;
+}
+.empty-icon-ring {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: linear-gradient(145deg, #EFF6FF, #DBEAFE);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px;
+    margin-bottom: 20px;
+    box-shadow: 0 6px 20px rgba(37,99,235,.14);
+}
+.empty-state-v2 h3 {
+    font-size: 17px; font-weight: 700; color: #111827;
+    margin: 0 0 8px;
+}
+.empty-state-v2 p {
+    font-size: 13px; color: #9CA3AF;
+    max-width: 270px; line-height: 1.6; margin: 0;
+}
+
+/* ── Section header ──────────────────────────────────────────────────── */
+.form-sec-hdr {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: .13em; text-transform: uppercase;
+    color: #E87722;
+    margin-bottom: 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+    display: flex; align-items: center; gap: 6px;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────── */
+@keyframes cs-fadeup {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+"""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_date(value) -> date | None:
@@ -47,11 +144,24 @@ def _months_range(start: date, end: date, max_months: int = 24):
         cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
 
 
-def _section_header(title: str) -> None:
+def _kpi_card(icon: str, label: str, value: int | str,
+              sub: str = "", accent: str = "#2563EB") -> str:
+    return (
+        f"<div class='kpi-card'>"
+        f"<div class='kpi-accent-bar' style='background:{accent};'></div>"
+        f"<span class='kpi-icon msr'>{icon}</span>"
+        f"<div class='kpi-label'>{label}</div>"
+        f"<div class='kpi-value'>{value}</div>"
+        f"<div class='kpi-sub'>{sub}</div>"
+        f"</div>"
+    )
+
+
+def _section_hdr(icon: str, label: str) -> None:
     st.markdown(
-        f"<div style='font-size:10px;font-weight:700;letter-spacing:.13em;"
-        f"text-transform:uppercase;color:#E87722;margin-bottom:14px;'>"
-        f"{title}</div>",
+        f"<div class='form-sec-hdr'>"
+        f"<span class='msr' style='font-size:14px;color:#E87722;'>{icon}</span>"
+        f"{label}</div>",
         unsafe_allow_html=True,
     )
 
@@ -59,6 +169,7 @@ def _section_header(title: str) -> None:
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
+    st.markdown(_PAGE_CSS, unsafe_allow_html=True)
     st.markdown(
         "<div class='page-eyebrow'>// Reports</div>"
         "<div class='page-title'>Worklog Reports</div>",
@@ -103,7 +214,7 @@ def render() -> None:
 
     # ── Build per-machine-month records for active WOs ────────────────────────
     # Each entry: WO + machine + month → worklog status
-    pending_rows:  list[dict] = []
+    pending_rows:   list[dict] = []
     completed_rows: list[dict] = []
 
     for wo in active_wos:
@@ -138,14 +249,14 @@ def render() -> None:
                 wl     = wl_lookup.get((wo_id, mid, bm_str))
 
                 if wl is None:
-                    status    = "Missing"
-                    is_draft  = None
+                    status   = "Missing"
+                    is_draft = None
                 elif wl.get("is_draft", True):
-                    status    = "Draft"
-                    is_draft  = True
+                    status   = "Draft"
+                    is_draft = True
                 else:
-                    status    = "Submitted"
-                    is_draft  = False
+                    status   = "Submitted"
+                    is_draft = False
 
                 row = {
                     "Customer":      customer,
@@ -173,6 +284,26 @@ def render() -> None:
     _PENDING_COLS   = ["Customer", "Site", "Machine", "Worklog Month", "Status"]
     _COMPLETED_COLS = ["Customer", "Site", "Machine", "Worklog Month", "Status"]
 
+    # ── KPI strip ─────────────────────────────────────────────────────────────
+    n_missing   = sum(1 for r in pending_rows   if r["Status"] == "Missing")
+    n_draft     = sum(1 for r in pending_rows   if r["Status"] == "Draft")
+    n_completed = len(completed_rows)
+    n_pending   = len(pending_rows)
+
+    st.markdown(
+        f"<div class='kpi-grid'>"
+        + _kpi_card("pending",   "Pending",   n_pending,
+                    "missing or draft worklogs",  "#EF4444")
+        + _kpi_card("warning",   "Missing",   n_missing,
+                    "no worklog submitted",        "#F59E0B")
+        + _kpi_card("edit_note", "Draft",     n_draft,
+                    "saved but not submitted",     "#E87722")
+        + _kpi_card("task_alt",  "Completed", n_completed,
+                    "submitted worklogs",           "#10B981")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
     # ── Tabs ──────────────────────────────────────────────────────────────────
     tab_pending, tab_completed, tab_billing = st.tabs([
         f"Pending ({len(pending_rows)})",
@@ -187,24 +318,41 @@ def render() -> None:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
         if not pending_rows:
-            st.success("All worklogs for active work orders are up to date.")
-        else:
-            # Quick filter: show current month only vs all pending
-            show_all = st.checkbox(
-                "Show all pending months (including prior months)",
-                value=False,
-                key="wlr_show_all_pending",
+            st.markdown(
+                "<div class='empty-state-v2'>"
+                "<div class='empty-icon-ring'>"
+                "<span class='msr' style='font-size:36px;color:#2563EB;'>task_alt</span>"
+                "</div>"
+                "<h3>All worklogs up to date</h3>"
+                "<p>All worklogs for active work orders are submitted.</p>"
+                "</div>",
+                unsafe_allow_html=True,
             )
-            cur_bm = _billing_month_str(today.year, today.month)
+        else:
+            with st.container(border=True):
+                _section_hdr("tune", "Filter")
+                show_all = st.checkbox(
+                    "Show all pending months (including prior months)",
+                    value=False,
+                    key="wlr_show_all_pending",
+                )
+
+            cur_bm  = _billing_month_str(today.year, today.month)
             display = (
                 pending_rows if show_all
                 else [r for r in pending_rows if r["Worklog Month"] == cur_bm]
             )
 
             if not display and not show_all:
-                st.success(
-                    f"No pending worklogs for {cur_bm}. "
-                    "Check 'Show all pending months' to see prior months."
+                st.markdown(
+                    f"<div class='empty-state-v2'>"
+                    f"<div class='empty-icon-ring'>"
+                    f"<span class='msr' style='font-size:36px;color:#2563EB;'>event_available</span>"
+                    f"</div>"
+                    f"<h3>No pending worklogs for {cur_bm}</h3>"
+                    f"<p>Check 'Show all pending months' to see prior months.</p>"
+                    f"</div>",
+                    unsafe_allow_html=True,
                 )
             else:
                 pdf = pd.DataFrame(
@@ -219,11 +367,14 @@ def render() -> None:
                         return "color:#E87722;font-weight:700;"
                     return ""
 
-                st.dataframe(
-                    pdf.style.applymap(_pstyle, subset=["Status"]),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                with st.container(border=True):
+                    _section_hdr("pending", "Pending Worklogs")
+                    st.dataframe(
+                        pdf.style.applymap(_pstyle, subset=["Status"]),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Missing",  sum(1 for r in display if r["Status"] == "Missing"))
                 c2.metric("Draft",    sum(1 for r in display if r["Status"] == "Draft"))
@@ -244,7 +395,16 @@ def render() -> None:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
         if not completed_rows:
-            st.info("No submitted worklogs found for active work orders.")
+            st.markdown(
+                "<div class='empty-state-v2'>"
+                "<div class='empty-icon-ring'>"
+                "<span class='msr' style='font-size:36px;color:#2563EB;'>assignment</span>"
+                "</div>"
+                "<h3>No completed worklogs</h3>"
+                "<p>No submitted worklogs found for active work orders.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
         else:
             # Month filter
             available_months = sorted(
@@ -252,14 +412,16 @@ def render() -> None:
                 key=lambda s: datetime.strptime(s, "%B %Y"),
                 reverse=True,
             )
-            fp1, _ = st.columns([2, 6])
-            with fp1:
-                st.markdown('<p class="filter-label">Month</p>', unsafe_allow_html=True)
-                sel_month = st.selectbox(
-                    "Month", ["All"] + available_months,
-                    label_visibility="collapsed",
-                    key="wlr_comp_month",
-                )
+            with st.container(border=True):
+                _section_hdr("tune", "Filter")
+                fp1, _ = st.columns([2, 6])
+                with fp1:
+                    st.markdown('<p class="filter-label">Month</p>', unsafe_allow_html=True)
+                    sel_month = st.selectbox(
+                        "Month", ["All"] + available_months,
+                        label_visibility="collapsed",
+                        key="wlr_comp_month",
+                    )
 
             display = (
                 completed_rows if sel_month == "All"
@@ -270,14 +432,18 @@ def render() -> None:
                 [{k: r[k] for k in _COMPLETED_COLS} for r in display],
                 columns=_COMPLETED_COLS,
             )
-            st.dataframe(
-                cdf.style.applymap(
-                    lambda v: "color:#16a34a;font-weight:700;",
-                    subset=["Status"],
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
+
+            with st.container(border=True):
+                _section_hdr("task_alt", "Completed Worklogs")
+                st.dataframe(
+                    cdf.style.applymap(
+                        lambda v: "color:#16a34a;font-weight:700;",
+                        subset=["Status"],
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
             st.download_button(
                 "Export CSV",
                 data=cdf.to_csv(index=False).encode("utf-8"),
@@ -291,28 +457,44 @@ def render() -> None:
     # ════════════════════════════════════════════════════════════════════
     with tab_billing:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
-        st.info(
+        st.markdown(
+            "<div style='background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;"
+            "padding:12px 16px;margin-bottom:14px;font-size:13px;color:#1E40AF;"
+            "display:flex;align-items:center;gap:8px;'>"
+            "<span class='msr' style='font-size:18px;'>info</span>"
             "Showing all submitted worklogs — these are pending invoice generation. "
-            "Once invoice tracking is added, billed worklogs will be excluded automatically.",
-            icon="ℹ️",
+            "Once invoice tracking is added, billed worklogs will be excluded automatically."
+            "</div>",
+            unsafe_allow_html=True,
         )
 
         if not completed_rows:
-            st.success("No submitted worklogs pending billing.")
+            st.markdown(
+                "<div class='empty-state-v2'>"
+                "<div class='empty-icon-ring'>"
+                "<span class='msr' style='font-size:36px;color:#2563EB;'>receipt_long</span>"
+                "</div>"
+                "<h3>No worklogs pending billing</h3>"
+                "<p>No submitted worklogs pending billing found.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
         else:
-            fp2, _ = st.columns([2, 6])
-            with fp2:
-                st.markdown('<p class="filter-label">Month</p>', unsafe_allow_html=True)
-                avail_b = sorted(
-                    {r["Worklog Month"] for r in completed_rows},
-                    key=lambda s: datetime.strptime(s, "%B %Y"),
-                    reverse=True,
-                )
-                sel_b = st.selectbox(
-                    "Month", ["All"] + avail_b,
-                    label_visibility="collapsed",
-                    key="wlr_bill_month",
-                )
+            avail_b = sorted(
+                {r["Worklog Month"] for r in completed_rows},
+                key=lambda s: datetime.strptime(s, "%B %Y"),
+                reverse=True,
+            )
+            with st.container(border=True):
+                _section_hdr("tune", "Filter")
+                fp2, _ = st.columns([2, 6])
+                with fp2:
+                    st.markdown('<p class="filter-label">Month</p>', unsafe_allow_html=True)
+                    sel_b = st.selectbox(
+                        "Month", ["All"] + avail_b,
+                        label_visibility="collapsed",
+                        key="wlr_bill_month",
+                    )
 
             billing_display = (
                 completed_rows if sel_b == "All"
@@ -326,14 +508,16 @@ def render() -> None:
             )
             bdf["Status"] = "Pending Billing"
 
-            st.dataframe(
-                bdf.style.applymap(
-                    lambda v: "color:#E87722;font-weight:700;",
-                    subset=["Status"],
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
+            with st.container(border=True):
+                _section_hdr("receipt_long", "Pending for Billing")
+                st.dataframe(
+                    bdf.style.applymap(
+                        lambda v: "color:#E87722;font-weight:700;",
+                        subset=["Status"],
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
             b1, b2 = st.columns(2)
             b1.metric("Worklogs Pending Billing", len(billing_display))

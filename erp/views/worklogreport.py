@@ -12,6 +12,117 @@ import streamlit as st
 
 from ..supabase_client import SupabaseClient
 
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
+_PAGE_CSS = """
+<style>
+/* ── KPI strip ─────────────────────────────────────────────────────── */
+.kpi-grid-7 {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 14px;
+    margin: 0 0 28px;
+}
+.kpi-card {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 12px;
+    padding: 16px 18px 12px;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow .18s, transform .18s;
+}
+.kpi-card:hover {
+    box-shadow: 0 6px 20px rgba(0,0,0,.08);
+    transform: translateY(-2px);
+}
+.kpi-accent-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 12px 12px 0 0;
+}
+.kpi-label {
+    font-size: 9px; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: #9CA3AF;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 5px;
+}
+.kpi-value {
+    font-size: 26px; font-weight: 800;
+    color: #111827; line-height: 1;
+    margin-bottom: 5px;
+    font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+    font-size: 10px; color: #6B7280;
+}
+.kpi-icon {
+    position: absolute; top: 14px; right: 14px;
+    font-size: 20px; opacity: .12;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.empty-state-v2 {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 72px 40px;
+    background: #FAFBFC;
+    border: 2px dashed #E2EBF0;
+    border-radius: 16px;
+    text-align: center;
+    animation: cs-fadeup .35s ease;
+}
+.empty-icon-ring {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: linear-gradient(145deg, #EFF6FF, #DBEAFE);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px;
+    margin-bottom: 20px;
+    box-shadow: 0 6px 20px rgba(37,99,235,.14);
+}
+.empty-state-v2 h3 {
+    font-size: 17px; font-weight: 700; color: #111827;
+    margin: 0 0 8px;
+}
+.empty-state-v2 p {
+    font-size: 13px; color: #9CA3AF;
+    max-width: 270px; line-height: 1.6; margin: 0;
+}
+
+/* ── Section header ──────────────────────────────────────────────────── */
+.form-sec-hdr {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: .13em; text-transform: uppercase;
+    color: #E87722;
+    margin-bottom: 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+    display: flex; align-items: center; gap: 6px;
+}
+
+/* ── Billing totals bar ──────────────────────────────────────────────── */
+.billing-totals {
+    display: flex; gap: 32px;
+    padding: 12px 18px;
+    background: #F8FAFC;
+    border: 1px solid #E2EBF0;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    align-items: center;
+    animation: cs-fadeup .3s ease;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────── */
+@keyframes cs-fadeup {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+"""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_time_str(value) -> time | None:
@@ -175,22 +286,24 @@ def _billing_summary(df: pd.DataFrame) -> pd.DataFrame:
     ]]
 
 
-def _kpi_card(label: str, value: str, colour: str = "#111827") -> str:
+def _kpi_card(icon: str, label: str, value: int | str,
+              sub: str = "", accent: str = "#2563EB") -> str:
     return (
-        f"<div style='background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;"
-        f"padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);'>"
-        f"<div style='font-size:10px;font-weight:700;letter-spacing:.12em;"
-        f"text-transform:uppercase;color:#9ca3af;margin-bottom:8px;'>{label}</div>"
-        f"<div style='font-size:28px;font-weight:800;color:{colour};line-height:1;'>{value}</div>"
+        f"<div class='kpi-card'>"
+        f"<div class='kpi-accent-bar' style='background:{accent};'></div>"
+        f"<span class='kpi-icon msr'>{icon}</span>"
+        f"<div class='kpi-label'>{label}</div>"
+        f"<div class='kpi-value'>{value}</div>"
+        f"<div class='kpi-sub'>{sub}</div>"
         f"</div>"
     )
 
 
-def _section(title: str) -> None:
+def _section_hdr(icon: str, label: str) -> None:
     st.markdown(
-        f"<div style='border-top:2px solid #E87722;padding-top:10px;margin-bottom:8px;"
-        f"font-size:10px;font-weight:700;letter-spacing:.12em;color:#E87722;"
-        f"text-transform:uppercase;'>{title}</div>",
+        f"<div class='form-sec-hdr'>"
+        f"<span class='msr' style='font-size:14px;color:#E87722;'>{icon}</span>"
+        f"{label}</div>",
         unsafe_allow_html=True,
     )
 
@@ -198,11 +311,10 @@ def _section(title: str) -> None:
 # ── View ──────────────────────────────────────────────────────────────────────
 
 def render() -> None:
+    st.markdown(_PAGE_CSS, unsafe_allow_html=True)
     st.markdown(
-        """
-        <div class="page-eyebrow">// Reports</div>
-        <div class="page-title">Worklog Report</div>
-        """,
+        "<div class='page-eyebrow'>// Reports</div>"
+        "<div class='page-title'>Worklog Report</div>",
         unsafe_allow_html=True,
     )
     st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
@@ -243,41 +355,51 @@ def render() -> None:
     df_all = _flatten_worklogs(work_logs, work_orders, customer_map, site_map)
 
     if df_all.empty:
-        st.info("No worklog data found. Save a work log first.")
+        st.markdown(
+            "<div class='empty-state-v2'>"
+            "<div class='empty-icon-ring'>"
+            "<span class='msr' style='font-size:36px;color:#2563EB;'>assignment</span>"
+            "</div>"
+            "<h3>No worklog data found</h3>"
+            "<p>Save a work log first to see detailed reports here.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         if st.button("Refresh"):
             st.cache_data.clear()
             st.rerun()
         return
 
     # ── Filters ────────────────────────────────────────────────────────────────
-    _section("Filters")
-    fc1, fc2, fc3, fc4, fc5, fc6, fc7 = st.columns([2, 2, 2, 2, 2, 2, 1])
+    with st.container(border=True):
+        _section_hdr("tune", "Filters")
+        fc1, fc2, fc3, fc4, fc5, fc6, fc7 = st.columns([2, 2, 2, 2, 2, 2, 1])
 
-    with fc1:
-        month_opts = ["All"] + sorted(df_all["Billing Month"].dropna().unique().tolist())
-        sel_month  = st.selectbox("Billing Month", month_opts, key="rpt_month")
-    with fc2:
-        cust_opts  = ["All"] + sorted(df_all["Customer"].dropna().unique().tolist())
-        sel_cust   = st.selectbox("Customer", cust_opts, key="rpt_cust")
-    with fc3:
-        wo_opts    = ["All"] + sorted(df_all["WO Number"].dropna().unique().tolist())
-        sel_wo     = st.selectbox("Work Order", wo_opts, key="rpt_wo")
-    with fc4:
-        mach_opts  = ["All"] + sorted(df_all["Machine"].dropna().unique().tolist())
-        sel_mach   = st.selectbox("Machine", mach_opts, key="rpt_mach")
-    with fc5:
-        valid_dates = df_all["Date"].dropna()
-        min_d = valid_dates.min() if not valid_dates.empty else date.today()
-        max_d = valid_dates.max() if not valid_dates.empty else date.today()
-        sel_from = st.date_input("Date From", value=min_d, key="rpt_from")
-    with fc6:
-        sel_to   = st.date_input("Date To",   value=max_d, key="rpt_to")
-    with fc7:
-        st.markdown("<div style='margin-top:22px'></div>", unsafe_allow_html=True)
-        if st.button("Clear", key="rpt_clear"):
-            for k in ["rpt_month", "rpt_cust", "rpt_wo", "rpt_mach", "rpt_from", "rpt_to"]:
-                st.session_state.pop(k, None)
-            st.rerun()
+        with fc1:
+            month_opts = ["All"] + sorted(df_all["Billing Month"].dropna().unique().tolist())
+            sel_month  = st.selectbox("Billing Month", month_opts, key="rpt_month")
+        with fc2:
+            cust_opts  = ["All"] + sorted(df_all["Customer"].dropna().unique().tolist())
+            sel_cust   = st.selectbox("Customer", cust_opts, key="rpt_cust")
+        with fc3:
+            wo_opts    = ["All"] + sorted(df_all["WO Number"].dropna().unique().tolist())
+            sel_wo     = st.selectbox("Work Order", wo_opts, key="rpt_wo")
+        with fc4:
+            mach_opts  = ["All"] + sorted(df_all["Machine"].dropna().unique().tolist())
+            sel_mach   = st.selectbox("Machine", mach_opts, key="rpt_mach")
+        with fc5:
+            valid_dates = df_all["Date"].dropna()
+            min_d = valid_dates.min() if not valid_dates.empty else date.today()
+            max_d = valid_dates.max() if not valid_dates.empty else date.today()
+            sel_from = st.date_input("Date From", value=min_d, key="rpt_from")
+        with fc6:
+            sel_to   = st.date_input("Date To",   value=max_d, key="rpt_to")
+        with fc7:
+            st.markdown("<div style='margin-top:22px'></div>", unsafe_allow_html=True)
+            if st.button("Clear", key="rpt_clear"):
+                for k in ["rpt_month", "rpt_cust", "rpt_wo", "rpt_mach", "rpt_from", "rpt_to"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
 
     # Apply filters
     df = df_all.copy()
@@ -294,126 +416,143 @@ def render() -> None:
 
     working_df = df[df["Start Time"].notna() & (df["Start Time"] != "")]
 
-    # ── KPI Cards ──────────────────────────────────────────────────────────────
+    # ── KPI strip ──────────────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
-    k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
-    for col, label, val, colour in [
-        (k1, "Work Orders",   str(df["WO Number"].nunique()),          "#E87722"),
-        (k2, "Machines",      str(df["Machine"].nunique()),             "#0ea5e9"),
-        (k3, "Working Days",  str(len(working_df)),                    "#10b981"),
-        (k4, "Net Hours",     f"{working_df['Net Time'].sum():,.1f}",  "#8b5cf6"),
-        (k5, "OT Hours",      f"{working_df['OT'].sum():,.1f}",        "#ef4444"),
-        (k6, "HSD (Ltr)",     f"{working_df['HSD in Ltr'].sum():,.1f}","#f59e0b"),
-        (k7, "Breakdown Hrs", f"{working_df['Breakdown Hrs'].sum():,.1f}", "#6b7280"),
-    ]:
-        with col:
-            st.markdown(_kpi_card(label, val, colour), unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='kpi-grid-7'>"
+        + _kpi_card("receipt_long",          "Work Orders",   str(df["WO Number"].nunique()),
+                    "active orders",           "#E87722")
+        + _kpi_card("precision_manufacturing","Machines",      str(df["Machine"].nunique()),
+                    "deployed machines",        "#0EA5E9")
+        + _kpi_card("calendar_today",         "Working Days",  str(len(working_df)),
+                    "shift entries",            "#10B981")
+        + _kpi_card("schedule",               "Net Hours",     f"{working_df['Net Time'].sum():,.1f}",
+                    "total net hours",          "#8B5CF6")
+        + _kpi_card("more_time",              "OT Hours",      f"{working_df['OT'].sum():,.1f}",
+                    "overtime hours",           "#EF4444")
+        + _kpi_card("local_gas_station",      "HSD (Ltr)",     f"{working_df['HSD in Ltr'].sum():,.1f}",
+                    "diesel consumed",          "#F59E0B")
+        + _kpi_card("build",                  "Breakdown Hrs", f"{working_df['Breakdown Hrs'].sum():,.1f}",
+                    "downtime hours",           "#6B7280")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
     # ── Billing Summary ────────────────────────────────────────────────────────
-    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-    _section("Billing Summary — per Machine per Month")
+    with st.container(border=True):
+        _section_hdr("payments", "Billing Summary — per Machine per Month")
 
-    billing_df = _billing_summary(df)
-    if billing_df.empty:
-        st.info("No completed shift data in the selected filters.")
-    else:
-        total_billing    = billing_df["Billing"].sum()
-        total_ot_billing = billing_df["OT Billing"].sum()
-        st.markdown(
-            f"<div style='display:flex;gap:32px;padding:8px 16px;"
-            f"background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;"
-            f"margin-bottom:8px;font-size:12px;align-items:center;'>"
-            f"<span style='color:#6b7280;'>Rental Billing: "
-            f"<strong style='color:#E87722;font-size:18px;'>{total_billing:,.0f}</strong></span>"
-            f"<span style='color:#6b7280;'>OT Billing: "
-            f"<strong style='color:#E87722;font-size:18px;'>{total_ot_billing:,.0f}</strong></span>"
-            f"<span style='color:#6b7280;'>Total: "
-            f"<strong style='color:#111827;font-size:18px;'>{total_billing + total_ot_billing:,.0f}</strong></span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        st.dataframe(
-            billing_df.style.format({
-                "Rental/Month":  "{:,.0f}",
-                "Working Hrs":   "{:.1f}",
-                "Actual Hrs":    "{:.2f}",
-                "Qty":           "{:.4f}",
-                "Billing":       "{:,.0f}",
-                "OT Hrs":        "{:.2f}",
-                "OT Rate":       "{:.2f}",
-                "OT Billing":    "{:,.0f}",
-                "Breakdown Hrs": "{:.2f}",
-                "HSD in Ltr":    "{:.1f}",
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
+        billing_df = _billing_summary(df)
+        if billing_df.empty:
+            st.markdown(
+                "<div class='empty-state-v2'>"
+                "<div class='empty-icon-ring'>"
+                "<span class='msr' style='font-size:36px;color:#2563EB;'>payments</span>"
+                "</div>"
+                "<h3>No billing data</h3>"
+                "<p>No completed shift data in the selected filters.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            total_billing    = billing_df["Billing"].sum()
+            total_ot_billing = billing_df["OT Billing"].sum()
+            st.markdown(
+                f"<div class='billing-totals'>"
+                f"<span style='color:#6B7280;'>Rental Billing: "
+                f"<strong style='color:#E87722;font-size:18px;'>{total_billing:,.0f}</strong></span>"
+                f"<span style='color:#6B7280;'>OT Billing: "
+                f"<strong style='color:#E87722;font-size:18px;'>{total_ot_billing:,.0f}</strong></span>"
+                f"<span style='color:#6B7280;'>Total: "
+                f"<strong style='color:#111827;font-size:18px;'>"
+                f"{total_billing + total_ot_billing:,.0f}</strong></span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                billing_df.style.format({
+                    "Rental/Month":  "{:,.0f}",
+                    "Working Hrs":   "{:.1f}",
+                    "Actual Hrs":    "{:.2f}",
+                    "Qty":           "{:.4f}",
+                    "Billing":       "{:,.0f}",
+                    "OT Hrs":        "{:.2f}",
+                    "OT Rate":       "{:.2f}",
+                    "OT Billing":    "{:,.0f}",
+                    "Breakdown Hrs": "{:.2f}",
+                    "HSD in Ltr":    "{:.1f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     # ── Detailed Shift Log ─────────────────────────────────────────────────────
-    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-    hdr1, hdr2 = st.columns([5, 1])
-    with hdr1:
-        _section("Detailed Shift Log")
-    with hdr2:
-        export_cols = [
+    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+
+    with st.container(border=True):
+        hdr1, hdr2 = st.columns([5, 1])
+        with hdr1:
+            _section_hdr("table_rows", "Detailed Shift Log")
+        with hdr2:
+            export_cols = [
+                "Billing Month", "WO Number", "Customer", "Site", "Machine",
+                "Date", "Weekday", "Start Time", "End Time", "Net Time",
+                "Start HMR", "End HMR", "Breakdown Hrs", "OT", "HSD in Ltr",
+                "Operator", "Remarks", "Billing Type", "Rental/Month", "OT Rate",
+            ]
+            export_cols = [c for c in export_cols if c in df.columns]
+            st.download_button(
+                label="Export CSV",
+                data=df[export_cols].to_csv(index=False).encode("utf-8"),
+                file_name=f"worklog_report_{date.today()}.csv",
+                mime="text/csv",
+                key="export_csv",
+            )
+
+        display_cols = [
             "Billing Month", "WO Number", "Customer", "Site", "Machine",
             "Date", "Weekday", "Start Time", "End Time", "Net Time",
             "Start HMR", "End HMR", "Breakdown Hrs", "OT", "HSD in Ltr",
-            "Operator", "Remarks", "Billing Type", "Rental/Month", "OT Rate",
+            "Operator", "Remarks",
         ]
-        export_cols = [c for c in export_cols if c in df.columns]
-        st.download_button(
-            label="Export CSV",
-            data=df[export_cols].to_csv(index=False).encode("utf-8"),
-            file_name=f"worklog_report_{date.today()}.csv",
-            mime="text/csv",
-            key="export_csv",
+        display_cols = [c for c in display_cols if c in df.columns]
+        detail_df = df[display_cols].copy()
+
+        def _highlight_sunday(row):
+            if str(row.get("Weekday", "")) == "Sunday":
+                return ["background-color:#fef08a; color:#713f12"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            detail_df.style.apply(_highlight_sunday, axis=1).format(
+                {"Net Time": "{:.2f}", "OT": "{:.1f}",
+                 "Breakdown Hrs": "{:.2f}", "HSD in Ltr": "{:.1f}"},
+                na_rep="—",
+            ),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Billing Month": st.column_config.TextColumn("Billing Month", width="small"),
+                "Date":          st.column_config.DateColumn("Date",          width="small"),
+                "Weekday":       st.column_config.TextColumn("Weekday",       width="small"),
+                "Start Time":    st.column_config.TextColumn("Start",         width="small"),
+                "End Time":      st.column_config.TextColumn("End",           width="small"),
+                "Net Time":      st.column_config.NumberColumn("Net Hrs",     format="%.2f", width="small"),
+                "Start HMR":     st.column_config.NumberColumn("HMR In",      format="%.1f", width="small"),
+                "End HMR":       st.column_config.NumberColumn("HMR Out",     format="%.1f", width="small"),
+                "Breakdown Hrs": st.column_config.NumberColumn("B/D Hrs",     format="%.1f", width="small"),
+                "OT":            st.column_config.NumberColumn("OT Hrs",      format="%.1f", width="small"),
+                "HSD in Ltr":    st.column_config.NumberColumn("HSD (Ltr)",   format="%.1f", width="small"),
+                "Operator":      st.column_config.TextColumn("Operator",      width="medium"),
+                "Remarks":       st.column_config.TextColumn("Remarks",       width="medium"),
+            },
         )
 
-    display_cols = [
-        "Billing Month", "WO Number", "Customer", "Site", "Machine",
-        "Date", "Weekday", "Start Time", "End Time", "Net Time",
-        "Start HMR", "End HMR", "Breakdown Hrs", "OT", "HSD in Ltr",
-        "Operator", "Remarks",
-    ]
-    display_cols = [c for c in display_cols if c in df.columns]
-    detail_df = df[display_cols].copy()
-
-    def _highlight_sunday(row):
-        if str(row.get("Weekday", "")) == "Sunday":
-            return ["background-color:#fef08a; color:#713f12"] * len(row)
-        return [""] * len(row)
-
-    st.dataframe(
-        detail_df.style.apply(_highlight_sunday, axis=1).format(
-            {"Net Time": "{:.2f}", "OT": "{:.1f}",
-             "Breakdown Hrs": "{:.2f}", "HSD in Ltr": "{:.1f}"},
-            na_rep="—",
-        ),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Billing Month": st.column_config.TextColumn("Billing Month", width="small"),
-            "Date":          st.column_config.DateColumn("Date",          width="small"),
-            "Weekday":       st.column_config.TextColumn("Weekday",       width="small"),
-            "Start Time":    st.column_config.TextColumn("Start",         width="small"),
-            "End Time":      st.column_config.TextColumn("End",           width="small"),
-            "Net Time":      st.column_config.NumberColumn("Net Hrs",     format="%.2f", width="small"),
-            "Start HMR":     st.column_config.NumberColumn("HMR In",      format="%.1f", width="small"),
-            "End HMR":       st.column_config.NumberColumn("HMR Out",     format="%.1f", width="small"),
-            "Breakdown Hrs": st.column_config.NumberColumn("B/D Hrs",     format="%.1f", width="small"),
-            "OT":            st.column_config.NumberColumn("OT Hrs",      format="%.1f", width="small"),
-            "HSD in Ltr":    st.column_config.NumberColumn("HSD (Ltr)",   format="%.1f", width="small"),
-            "Operator":      st.column_config.TextColumn("Operator",      width="medium"),
-            "Remarks":       st.column_config.TextColumn("Remarks",       width="medium"),
-        },
-    )
-
-    st.markdown(
-        f"<div style='margin-top:8px;font-size:11px;color:#9ca3af;'>"
-        f"Showing {len(detail_df):,} rows · {len(working_df)} working days</div>",
-        unsafe_allow_html=True,
-    )
+        st.markdown(
+            f"<div style='margin-top:8px;font-size:11px;color:#9CA3AF;'>"
+            f"Showing {len(detail_df):,} rows · {len(working_df)} working days</div>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
     if st.button("Refresh Data", key="rpt_refresh"):

@@ -1,8 +1,8 @@
 """
 erp/views/site.py
-Site management — modern enterprise UI.
-Left:  searchable site directory.
-Right: multi-section form (Site Details / Address / Site Contacts).
+Site management — premium SaaS redesign.
+Left  (35%): searchable site directory with modern cards.
+Right (65%): tabbed detail/edit panel.
 
 Mode state  _site_mode:  "none" | "new" | "edit"
 """
@@ -16,10 +16,312 @@ import streamlit as st
 from ..state_config import load_state_names
 from ..supabase_client import SupabaseClient
 
-# ── Contact helpers ────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 
 _CONTACT_COLS = ["name", "designation", "email", "mobile", "remarks"]
 
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
+_PAGE_CSS = """
+<style>
+/* ── KPI strip ─────────────────────────────────────────────────────── */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 0 0 28px;
+}
+.kpi-card {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 12px;
+    padding: 18px 22px 14px;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow .18s, transform .18s;
+}
+.kpi-card:hover {
+    box-shadow: 0 6px 20px rgba(0,0,0,.08);
+    transform: translateY(-2px);
+}
+.kpi-accent-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 12px 12px 0 0;
+}
+.kpi-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: #9CA3AF;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+}
+.kpi-value {
+    font-size: 34px; font-weight: 800;
+    color: #111827; line-height: 1;
+    margin-bottom: 6px;
+    font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+    font-size: 11px; color: #6B7280;
+}
+.kpi-icon {
+    position: absolute; top: 16px; right: 18px;
+    font-size: 22px; opacity: .12;
+}
+
+/* ── Search wrapper ─────────────────────────────────────────────────── */
+.search-wrap { position: relative; margin-bottom: 8px; }
+.search-icon-abs {
+    position: absolute; left: 11px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px; color: #9CA3AF;
+    z-index: 10; pointer-events: none;
+}
+.search-wrap .stTextInput input {
+    padding-left: 34px !important;
+    border-radius: 8px !important;
+}
+
+/* ── Site list cards ─────────────────────────────────────────────────── */
+.cl-wrap { display: flex; flex-direction: column; gap: 6px; }
+.cl-item {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 10px;
+    padding: 11px 13px;
+    display: flex; align-items: center; gap: 11px;
+    transition: box-shadow .16s, border-color .16s, transform .16s;
+    cursor: pointer;
+    pointer-events: none;
+}
+.cl-item:hover {
+    box-shadow: 0 4px 16px rgba(37,99,235,.10);
+    border-color: #93C5FD;
+    transform: translateY(-1px);
+}
+.cl-item.cl-sel {
+    border-color: #2563EB !important;
+    background: #EFF6FF;
+    border-left-width: 3px;
+}
+.cl-avatar {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; color: #fff; flex-shrink: 0;
+}
+.cl-info { flex: 1; min-width: 0; }
+.cl-name {
+    font-size: 13px; font-weight: 600; color: #111827;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cl-sub {
+    font-size: 11px; color: #6B7280; margin-top: 2px;
+    display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+}
+.cl-dot {
+    width: 3px; height: 3px; border-radius: 50%;
+    background: #D1D5DB; flex-shrink: 0;
+}
+.cl-code {
+    font-size: 9px; font-weight: 700;
+    background: #F1F5F9; color: #64748B;
+    padding: 2px 8px; border-radius: 20px;
+    white-space: nowrap; flex-shrink: 0;
+    margin-left: auto;
+}
+.cl-contacts-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10px; font-weight: 600;
+    background: #F0FDF4; color: #166534;
+    border: 1px solid #BBF7D0;
+    padding: 1px 7px; border-radius: 20px;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.empty-state-v2 {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 72px 40px;
+    background: #FAFBFC;
+    border: 2px dashed #E2EBF0;
+    border-radius: 16px;
+    text-align: center;
+    animation: cs-fadeup .35s ease;
+}
+.empty-icon-ring {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: linear-gradient(145deg, #EFF6FF, #DBEAFE);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px;
+    margin-bottom: 20px;
+    box-shadow: 0 6px 20px rgba(37,99,235,.14);
+}
+.empty-state-v2 h3 {
+    font-size: 17px; font-weight: 700; color: #111827;
+    margin: 0 0 8px;
+}
+.empty-state-v2 p {
+    font-size: 13px; color: #9CA3AF;
+    max-width: 270px; line-height: 1.6; margin: 0;
+}
+
+/* ── Site hero banner ────────────────────────────────────────────────── */
+.cust-hero {
+    background: linear-gradient(135deg, #1E2938 0%, #1c3461 100%);
+    border-radius: 14px; padding: 22px 24px;
+    margin-bottom: 18px;
+    display: flex; align-items: center; gap: 16px;
+    position: relative; overflow: hidden;
+    animation: cs-fadeup .3s ease;
+}
+.cust-hero::before {
+    content: '';
+    position: absolute; top: -40px; right: -40px;
+    width: 160px; height: 160px; border-radius: 50%;
+    background: rgba(255,255,255,.04);
+}
+.cust-hero::after {
+    content: '';
+    position: absolute; bottom: -20px; right: 80px;
+    width: 100px; height: 100px; border-radius: 50%;
+    background: rgba(255,255,255,.03);
+}
+.cust-hero-avatar {
+    width: 52px; height: 52px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 800; color: #fff;
+    flex-shrink: 0;
+    box-shadow: 0 4px 16px rgba(0,0,0,.30);
+}
+.cust-hero-name {
+    font-size: 20px; font-weight: 800; color: #fff; line-height: 1.2;
+}
+.cust-hero-meta {
+    font-size: 11px; color: rgba(255,255,255,.42);
+    letter-spacing: .07em; margin-top: 4px;
+}
+.cust-hero-badges {
+    margin-top: 7px; display: flex; gap: 6px; flex-wrap: wrap;
+}
+.hero-badge {
+    font-size: 10px; font-weight: 700;
+    padding: 2px 10px; border-radius: 20px;
+    letter-spacing: .05em; text-transform: uppercase;
+}
+.hero-badge-new {
+    background: rgba(16,185,129,.20); color: #6EE7B7;
+    border: 1px solid rgba(16,185,129,.30);
+}
+.hero-badge-edit {
+    background: rgba(245,158,11,.18); color: #FCD34D;
+    border: 1px solid rgba(245,158,11,.28);
+}
+
+/* ── Form sections ───────────────────────────────────────────────────── */
+.form-sec-hdr {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: .13em; text-transform: uppercase;
+    color: #E87722;
+    margin-bottom: 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+    display: flex; align-items: center; gap: 6px;
+}
+
+/* ── Overview info rows ──────────────────────────────────────────────── */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.info-field {
+    background: #F8FAFC;
+    border: 1px solid #E2EBF0;
+    border-radius: 8px;
+    padding: 11px 14px;
+}
+.info-field-label {
+    font-size: 9px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: #9CA3AF; margin-bottom: 4px;
+}
+.info-field-value {
+    font-size: 13px; font-weight: 600; color: #111827;
+    word-break: break-word;
+}
+.info-field-value.muted {
+    font-weight: 400; color: #9CA3AF;
+}
+
+/* ── Contact row in overview ─────────────────────────────────────────── */
+.contact-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #F1F5F9;
+}
+.contact-row:last-child { border-bottom: none; }
+.contact-initials {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0;
+}
+.contact-name  { font-size: 13px; font-weight: 600; color: #111827; }
+.contact-desig { font-size: 11px; color: #6B7280; margin-top: 1px; }
+.contact-pill  {
+    font-size: 10px; color: #374151;
+    background: #F3F4F6; border-radius: 20px;
+    padding: 2px 9px; margin-left: auto;
+}
+
+/* ── Tabs polish ─────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0 !important;
+    background: transparent !important;
+    border-bottom: 2px solid #E2EBF0 !important;
+    padding: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    font-size: 12px !important; font-weight: 600 !important;
+    color: #6B7280 !important; padding: 8px 18px !important;
+    border-radius: 0 !important;
+    background: transparent !important; border: none !important;
+    margin: 0 !important;
+    border-bottom: 2px solid transparent !important;
+    transition: color .14s !important;
+}
+.stTabs [data-baseweb="tab"]:hover { color: #374151 !important; }
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #2563EB !important;
+    border-bottom: 2px solid #2563EB !important;
+    background: transparent !important;
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+.stTabs [data-baseweb="tab-panel"]     { padding: 18px 0 0 !important; }
+
+/* ── Action button row ───────────────────────────────────────────────── */
+.action-bar {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 22px; padding-top: 18px;
+    border-top: 1px solid #F1F5F9;
+}
+
+/* ── No-results state ─────────────────────────────────────────────────── */
+.no-results {
+    text-align: center; padding: 36px 12px;
+    color: #9CA3AF; font-size: 13px;
+}
+.no-results .nr-icon { font-size: 32px; margin-bottom: 8px; display: block; }
+
+/* ── Animations ─────────────────────────────────────────────────────── */
+@keyframes cs-fadeup {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+"""
+
+
+# ── Data helpers ──────────────────────────────────────────────────────────────
 
 def _parse_contacts(raw) -> list[dict]:
     def _norm(c: dict) -> dict:
@@ -63,8 +365,6 @@ def _df_to_contacts(df: pd.DataFrame) -> list[dict]:
     return result
 
 
-# ── UI helpers ─────────────────────────────────────────────────────────────────
-
 def _initials(name: str) -> str:
     parts = (name or "").strip().split()
     if len(parts) >= 2:
@@ -73,22 +373,11 @@ def _initials(name: str) -> str:
 
 
 def _avatar_color(name: str) -> str:
-    palette = ["#0ea5e9", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444",
-               "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16"]
+    palette = [
+        "#2563EB", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444",
+        "#EC4899", "#14B8A6", "#F97316", "#6366F1", "#84CC16",
+    ]
     return palette[sum(ord(c) for c in (name or "A")) % len(palette)]
-
-
-def _section_hdr(title: str, note: str = "") -> None:
-    note_html = (
-        f"<span style='font-size:11px;color:#6b7280;font-weight:400;"
-        f"margin-left:8px;'>{note}</span>" if note else ""
-    )
-    st.markdown(
-        f"<div style='font-size:10px;font-weight:700;letter-spacing:.12em;"
-        f"text-transform:uppercase;color:#E87722;margin-bottom:10px;'>"
-        f"{title}{note_html}</div>",
-        unsafe_allow_html=True,
-    )
 
 
 def _open_new_form(state_names: list[str]) -> None:
@@ -105,57 +394,113 @@ def _open_new_form(state_names: list[str]) -> None:
     st.session_state["site_payment_terms"] = 0
 
 
-# ── View ──────────────────────────────────────────────────────────────────────
+# ── HTML builders ─────────────────────────────────────────────────────────────
 
-def render() -> None:
+def _kpi_card(icon: str, label: str, value: int | str,
+              sub: str = "", accent: str = "#2563EB") -> str:
+    return (
+        f"<div class='kpi-card'>"
+        f"<div class='kpi-accent-bar' style='background:{accent};'></div>"
+        f"<span class='kpi-icon msr'>{icon}</span>"
+        f"<div class='kpi-label'>{label}</div>"
+        f"<div class='kpi-value'>{value}</div>"
+        f"<div class='kpi-sub'>{sub}</div>"
+        f"</div>"
+    )
 
-    # ── CSS ───────────────────────────────────────────────────────────────────
+
+def _site_card(s: dict, is_sel: bool, n_con: int, customer_name: str) -> str:
+    name      = s.get("site_name", "Unknown")
+    city_v    = s.get("city",  "")
+    state_v   = s.get("state", "")
+    location  = ", ".join(filter(None, [city_v, state_v])) or "No location"
+    color     = _avatar_color(name)
+    sel_cls   = " cl-sel" if is_sel else ""
+    cust_html = (
+        f"<span class='cl-dot'></span><span>{customer_name}</span>"
+        if customer_name else ""
+    )
+    con_badge = (
+        f"<span class='cl-contacts-badge'>"
+        f"<span class='msr' style='font-size:11px;'>people</span>"
+        f"&thinsp;{n_con}</span>"
+    ) if n_con else ""
+
+    return (
+        f"<div class='cl-item{sel_cls}'>"
+        f"<div class='cl-avatar' style='background:{color};'>{_initials(name)}</div>"
+        f"<div class='cl-info'>"
+        f"<div class='cl-name'>{name}</div>"
+        f"<div class='cl-sub'>"
+        f"<span class='msr' style='font-size:12px;opacity:.6;'>location_on</span>"
+        f"{location}"
+        f"{cust_html}"
+        f"{('<span class=\'cl-dot\'></span>' + con_badge) if n_con else ''}"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+    )
+
+
+def _info_field(label: str, value: str, wide: bool = False, muted: bool = False) -> str:
+    val_cls = "info-field-value muted" if (muted or not value or value == "—") else "info-field-value"
+    disp    = value if value else "—"
+    return (
+        f"<div class='info-field' style='grid-column:{'span 2' if wide else 'span 1'};'>"
+        f"<div class='info-field-label'>{label}</div>"
+        f"<div class='{val_cls}'>{disp}</div>"
+        f"</div>"
+    )
+
+
+def _contact_row_html(contact: dict) -> str:
+    name   = contact.get("name", "—") or "—"
+    desig  = contact.get("designation", "") or ""
+    email  = contact.get("email", "")  or ""
+    mobile = contact.get("mobile", "") or ""
+    color  = _avatar_color(name)
+    pill   = email or mobile or ""
+    return (
+        f"<div class='contact-row'>"
+        f"<div class='contact-initials' style='background:{color};'>{_initials(name)}</div>"
+        f"<div>"
+        f"<div class='contact-name'>{name}</div>"
+        f"<div class='contact-desig'>{desig}</div>"
+        f"</div>"
+        f"{'<span class=\"contact-pill\">' + pill[:30] + '</span>' if pill else ''}"
+        f"</div>"
+    )
+
+
+def _section_hdr(icon: str, label: str) -> None:
     st.markdown(
-        """
-        <style>
-        .cust-stat-row {
-            display:flex; gap:12px; flex-wrap:wrap; margin:14px 0 20px;
-        }
-        .cust-stat-pill {
-            background:#f8fafc; border:1px solid #e5e7eb;
-            border-radius:20px; padding:5px 16px;
-            display:flex; align-items:center; gap:6px;
-        }
-        .cust-stat-val { font-size:15px; font-weight:800; color:#E87722; }
-        .cust-stat-lbl { font-size:11px; color:#6b7280; font-weight:500; }
-
-        .cust-banner {
-            background:linear-gradient(135deg,#1c1c2e 0%,#2d2d44 100%);
-            border-radius:10px; padding:18px 20px; margin-bottom:16px;
-            display:flex; align-items:center; gap:14px;
-        }
-        .cust-banner-avatar {
-            width:46px; height:46px; border-radius:50%;
-            display:flex; align-items:center; justify-content:center;
-            font-size:15px; font-weight:800; color:#fff; flex-shrink:0;
-        }
-        .cust-banner-name { font-size:19px; font-weight:800; color:#fff; line-height:1.2; }
-        .cust-banner-code { font-size:11px; color:rgba(255,255,255,.45);
-                            letter-spacing:.08em; margin-top:2px; }
-        .badge-new  { background:#dcfce7; color:#166534; font-size:10px; font-weight:700;
-                      padding:3px 10px; border-radius:20px; text-transform:uppercase;
-                      letter-spacing:.06em; margin-left:auto; white-space:nowrap; }
-        .badge-edit { background:#fff7ed; color:#9a3412; font-size:10px; font-weight:700;
-                      padding:3px 10px; border-radius:20px; text-transform:uppercase;
-                      letter-spacing:.06em; margin-left:auto; white-space:nowrap; }
-
-        .cust-empty {
-            background:#f8fafc; border:2px dashed #e5e7eb;
-            border-radius:12px; text-align:center;
-            padding:60px 32px; color:#9ca3af;
-        }
-        .cust-empty-icon  { font-size:52px; margin-bottom:14px; }
-        .cust-empty-title { font-size:18px; font-weight:700; color:#374151; margin-bottom:8px; }
-        .cust-empty-sub   { font-size:13px; margin-bottom:24px; }
-        </style>
-        """,
+        f"<div class='form-sec-hdr'>"
+        f"<span class='msr' style='font-size:14px;color:#E87722;'>{icon}</span>"
+        f"{label}</div>",
         unsafe_allow_html=True,
     )
+
+
+def _placeholder_tab(icon: str, title: str, description: str) -> None:
+    st.markdown(
+        f"<div style='display:flex;flex-direction:column;align-items:center;"
+        f"padding:52px 24px;text-align:center;'>"
+        f"<div style='width:58px;height:58px;border-radius:14px;"
+        f"background:#F8FAFC;border:1px solid #E2EBF0;"
+        f"display:flex;align-items:center;justify-content:center;"
+        f"font-size:26px;margin-bottom:14px;'>"
+        f"<span class='msr' style='color:#9CA3AF;'>{icon}</span></div>"
+        f"<div style='font-size:15px;font-weight:700;color:#374151;margin-bottom:6px;'>{title}</div>"
+        f"<div style='font-size:12px;color:#9CA3AF;max-width:240px;line-height:1.6;'>{description}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ── Main view ──────────────────────────────────────────────────────────────────
+
+def render() -> None:
+    st.markdown(_PAGE_CSS, unsafe_allow_html=True)
 
     # ── Page header ────────────────────────────────────────────────────────────
     hdr_l, hdr_r = st.columns([5, 1])
@@ -193,7 +538,6 @@ def render() -> None:
     site_map     = {s["id"]: s for s in sites if s.get("id")}
     customer_map = {c["id"]: c for c in customers if c.get("id")}
 
-    # ── Header button (after state_names is available) ─────────────────────────
     with hdr_r:
         st.markdown("<div style='padding-top:18px'></div>", unsafe_allow_html=True)
         if st.button("+ New Site", use_container_width=True,
@@ -201,19 +545,30 @@ def render() -> None:
             _open_new_form(state_names)
             st.rerun()
 
-    # ── Stats bar ──────────────────────────────────────────────────────────────
-    n_sites      = len(sites)
-    n_customers  = len({s.get("customer_id") for s in sites if s.get("customer_id")})
-    n_cities     = len({s.get("city") for s in sites if s.get("city")})
+    # ── KPI strip ──────────────────────────────────────────────────────────────
+    n_sites     = len(sites)
+    n_contacts  = sum(len(_parse_contacts(s.get("site_contact"))) for s in sites)
+    n_cities    = len({s.get("city")  for s in sites if s.get("city")})
+    n_customers = len({s.get("customer_id") for s in sites if s.get("customer_id")})
+
+    contact_counts = {
+        s["id"]: len(_parse_contacts(s.get("site_contact")))
+        for s in sites if s.get("id")
+    }
+
     st.markdown(
-        f"<div class='cust-stat-row'>"
-        f"<div class='cust-stat-pill'><span class='cust-stat-val'>{n_sites}</span>"
-        f"<span class='cust-stat-lbl'>Total Sites</span></div>"
-        f"<div class='cust-stat-pill'><span class='cust-stat-val'>{n_customers}</span>"
-        f"<span class='cust-stat-lbl'>Customers Served</span></div>"
-        f"<div class='cust-stat-pill'><span class='cust-stat-val'>{n_cities}</span>"
-        f"<span class='cust-stat-lbl'>Cities</span></div>"
-        f"</div>",
+        f"<div class='kpi-grid'>"
+        + _kpi_card("domain",     "Total Sites",   n_sites,
+                    f"across {n_cities} {'city' if n_cities == 1 else 'cities'}",
+                    "#2563EB")
+        + _kpi_card("contacts",   "Contacts",      n_contacts,
+                    f"avg {round(n_contacts/n_sites,1) if n_sites else 0} per site",
+                    "#8B5CF6")
+        + _kpi_card("location_city", "Cities",     n_cities,
+                    "unique site locations", "#10B981")
+        + _kpi_card("groups",     "Customers",     n_customers,
+                    "with active sites", "#F59E0B")
+        + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -246,15 +601,24 @@ def render() -> None:
     # ── Two-panel layout ───────────────────────────────────────────────────────
     left_col, right_col = st.columns([4, 7], gap="large")
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # LEFT — Site directory
-    # ──────────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # LEFT PANEL — Directory
+    # ══════════════════════════════════════════════════════════════════════════
     with left_col:
+
+        # Search input with icon overlay
+        st.markdown(
+            "<div class='search-wrap'>"
+            "<span class='search-icon-abs msr'>search</span>",
+            unsafe_allow_html=True,
+        )
         search_q = st.text_input(
             "search", label_visibility="collapsed",
             placeholder="Search by name or city…",
             key="site_search_q",
         )
+        st.markdown("</div>", unsafe_allow_html=True)
+
         q = search_q.strip().lower()
         filtered_map = {
             sid: s for sid, s in site_map.items()
@@ -264,81 +628,70 @@ def render() -> None:
         }
 
         count_txt = (
-            f"{len(filtered_map)} of {n_sites}" if q
-            else f"{n_sites} sites"
+            f"<span style='color:#2563EB;font-weight:700;'>{len(filtered_map)}</span>"
+            f" of {n_sites} sites"
+            if q else
+            f"<span style='font-weight:700;color:#111827;'>{n_sites}</span> sites"
         )
         st.markdown(
-            f"<p style='font-size:11px;color:#9ca3af;margin:2px 0 8px;'>{count_txt}</p>",
+            f"<div style='font-size:11px;color:#6B7280;margin:4px 0 10px;'>{count_txt}</div>",
             unsafe_allow_html=True,
         )
 
         with st.container(height=530):
             if not filtered_map:
                 st.markdown(
-                    "<p style='color:#9ca3af;font-size:13px;text-align:center;"
-                    "padding:40px 0;'>No matches found.</p>",
+                    "<div class='no-results'>"
+                    "<span class='nr-icon msr'>search_off</span>"
+                    "No sites match your search."
+                    "</div>",
                     unsafe_allow_html=True,
                 )
-            for sid, s in filtered_map.items():
-                is_sel      = (sid == selected_id and mode == "edit")
-                name        = s.get("site_name", "Unknown")
-                city_val    = s.get("city", "")
-                cust_name   = customer_map.get(s.get("customer_id", ""), {}).get("customer_name", "") if s.get("customer_id") else ""
-                color       = _avatar_color(name)
+            else:
+                for sid, s in filtered_map.items():
+                    is_sel      = (sid == selected_id and mode == "edit")
+                    name        = s.get("site_name", "Unknown")
+                    n_con       = contact_counts.get(sid, 0)
+                    cust_name   = (
+                        customer_map.get(s.get("customer_id", ""), {}).get("customer_name", "")
+                        if s.get("customer_id") else ""
+                    )
 
-                line2_parts = [cust_name, city_val]
-                line2       = " · ".join(p for p in line2_parts if p) or "—"
+                    st.markdown(
+                        _site_card(s, is_sel, n_con, cust_name),
+                        unsafe_allow_html=True,
+                    )
+                    if st.button(
+                        "✓ Selected" if is_sel else "Open →",
+                        key=f"csel_{sid}",
+                        use_container_width=True,
+                        help=name,
+                        type="primary" if is_sel else "secondary",
+                    ):
+                        st.session_state["_site_mode"]     = "edit"
+                        st.session_state["_site_sel_id"]   = sid
+                        st.session_state["_site_sync_key"] = None   # force sync
+                        st.rerun()
 
-                sel_border = "border-left:3px solid #E87722;" if is_sel else "border-left:3px solid transparent;"
-                sel_bg     = "background:#fff7ed;" if is_sel else "background:#ffffff;"
-                name_w     = "font-weight:700;" if is_sel else "font-weight:500;"
-
-                st.markdown(
-                    f"<div style='{sel_bg}{sel_border}border:1px solid #e5e7eb;"
-                    f"padding:9px 12px;display:flex;align-items:center;gap:10px;"
-                    f"pointer-events:none;'>"
-                    f"<div style='width:34px;height:34px;border-radius:50%;"
-                    f"background:{color};display:flex;align-items:center;"
-                    f"justify-content:center;font-size:12px;font-weight:800;"
-                    f"color:#fff;flex-shrink:0;'>{_initials(name)}</div>"
-                    f"<div style='min-width:0;flex:1;'>"
-                    f"<div style='font-size:13px;{name_w}color:#111827;"
-                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{name}</div>"
-                    f"<div style='font-size:11px;color:#6b7280;margin-top:1px;'>{line2}</div>"
-                    f"</div></div>",
-                    unsafe_allow_html=True,
-                )
-                if st.button(
-                    "Selected ✓" if is_sel else "Open",
-                    key=f"csel_{sid}",
-                    use_container_width=True,
-                    help=name,
-                ):
-                    st.session_state["_site_mode"]     = "edit"
-                    st.session_state["_site_sel_id"]   = sid
-                    st.session_state["_site_sync_key"] = None   # force sync
-                    st.rerun()
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # RIGHT — Detail / form panel
-    # ──────────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # RIGHT PANEL — Detail / form
+    # ══════════════════════════════════════════════════════════════════════════
     with right_col:
 
         # ── EMPTY STATE ───────────────────────────────────────────────────────
         if mode == "none":
             st.markdown(
-                "<div class='cust-empty'>"
-                "<div class='cust-empty-icon'>🏢</div>"
-                "<div class='cust-empty-title'>No site selected</div>"
-                "<p class='cust-empty-sub'>Pick a site from the directory "
-                "or click <strong>+ New Site</strong> above to add one.</p>"
+                "<div class='empty-state-v2'>"
+                "<div class='empty-icon-ring'>🏢</div>"
+                "<h3>No site selected</h3>"
+                "<p>Select a site from the directory on the left, "
+                "or click <strong>+ New Site</strong> to add one.</p>"
                 "</div>",
                 unsafe_allow_html=True,
             )
 
         # ── NEW / EDIT FORM ───────────────────────────────────────────────────
         else:
-            # Header banner
             display_name = (
                 st.session_state.get("site_name")
                 or (selected_site.get("site_name", "") if selected_site else "")
@@ -346,98 +699,176 @@ def render() -> None:
             )
             site_code   = selected_site.get("site_code", "") if selected_site else ""
             col_val     = _avatar_color(display_name)
-            badge       = (
-                "<span class='badge-edit'>Editing</span>"
-                if mode == "edit" else "<span class='badge-new'>New Site</span>"
-            )
-            code_row = (
-                f"<div class='cust-banner-code'>CODE: {site_code}</div>"
-                if site_code else ""
-            )
+            badge_cls   = "hero-badge-edit" if mode == "edit" else "hero-badge-new"
+            badge_lbl   = "Editing" if mode == "edit" else "New Site"
+            meta_line   = f"CODE: {site_code}" if site_code else "Unsaved — fill in details below"
+
+            # Hero banner
             st.markdown(
-                f"<div class='cust-banner'>"
-                f"<div class='cust-banner-avatar' style='background:{col_val};'>"
+                f"<div class='cust-hero'>"
+                f"<div class='cust-hero-avatar' style='background:{col_val};'>"
                 f"{_initials(display_name)}</div>"
-                f"<div style='flex:1;min-width:0;'>"
-                f"<div class='cust-banner-name'>{display_name}</div>{code_row}</div>"
-                f"{badge}</div>",
+                f"<div style='flex:1;min-width:0;position:relative;z-index:1;'>"
+                f"<div class='cust-hero-name'>{display_name}</div>"
+                f"<div class='cust-hero-meta'>{meta_line}</div>"
+                f"<div class='cust-hero-badges'>"
+                f"<span class='hero-badge {badge_cls}'>{badge_lbl}</span>"
+                f"</div></div></div>",
                 unsafe_allow_html=True,
             )
 
-            # Section 1 — Site Details
-            with st.container(border=True):
-                _section_hdr("Site Details")
-                site_name = st.text_input(
-                    "Site Name *", key="site_name",
-                    placeholder="e.g. Mumbai North Hub",
-                )
+            # Existing contacts for display
+            existing_contacts = _parse_contacts(
+                selected_site.get("site_contact") if selected_site else None
+            )
+
+            # ── TABS ──────────────────────────────────────────────────────────
+            tab_overview, tab_edit, tab_contacts_tab, tab_map = st.tabs([
+                "🏢 Overview",
+                "✏️ Edit Details",
+                f"👤 Contacts ({len(existing_contacts)})",
+                "🗺️ Map",
+            ])
+
+            # ── Tab 1: Overview ───────────────────────────────────────────────
+            with tab_overview:
+                if mode == "new":
+                    st.markdown(
+                        "<div style='color:#9CA3AF;font-size:13px;"
+                        "text-align:center;padding:24px 0;'>"
+                        "Save the site first to see the overview.</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    ss = selected_site or {}
+                    cust_disp = (
+                        customer_map.get(ss.get("customer_id", ""), {}).get("customer_name", "")
+                        if ss.get("customer_id") else ""
+                    )
+                    pt_val = ss.get("payment_terms")
+                    pt_disp = f"{pt_val} days" if pt_val else ""
+
+                    _section_hdr("domain", "Site Information")
+                    st.markdown(
+                        f"<div class='info-grid'>"
+                        + _info_field("Site Name",      ss.get("site_name"))
+                        + _info_field("Customer",       cust_disp)
+                        + _info_field("Site Code",      ss.get("site_code"))
+                        + _info_field("Payment Terms",  pt_disp)
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+                    _section_hdr("location_on", "Address")
+                    st.markdown(
+                        f"<div class='info-grid'>"
+                        + _info_field("City",    ss.get("city"))
+                        + _info_field("State",   ss.get("state"))
+                        + _info_field("Pincode", ss.get("pincode"))
+                        + _info_field("Address", ss.get("address"), wide=True)
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    first_c = existing_contacts[0] if existing_contacts else {}
+                    if first_c.get("email") or first_c.get("mobile"):
+                        st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+                        _section_hdr("call", "Primary Contact")
+                        st.markdown(
+                            f"<div class='info-grid'>"
+                            + _info_field("Email",  first_c.get("email"))
+                            + _info_field("Mobile", first_c.get("mobile"))
+                            + "</div>",
+                            unsafe_allow_html=True,
+                        )
+
+            # ── Tab 2: Edit Details ───────────────────────────────────────────
+            with tab_edit:
                 customer_options = {
                     c.get("id"): c.get("customer_name", "Unknown")
                     for c in customers if c.get("id")
                 }
-                customer_id = st.selectbox(
-                    "Customer *",
-                    options=[""] + list(customer_options),
-                    format_func=lambda cid: "Select customer" if not cid
-                        else customer_options.get(cid, "Unknown"),
-                    key="site_customer_id",
-                )
-                st.number_input(
-                    "Payment Terms (days)",
-                    step=1,
-                    min_value=0,
-                    key="site_payment_terms",
-                )
 
-            # Section 2 — Address
-            with st.container(border=True):
-                _section_hdr("Address")
-                address = st.text_area(
-                    "Address", key="site_address",
-                    placeholder="Street, Area, Landmark…", height=72,
-                )
-                a1, a2 = st.columns(2)
-                with a1:
-                    city = st.text_input(
-                        "City", key="site_city", placeholder="e.g. Mumbai"
+                with st.container(border=True):
+                    _section_hdr("domain", "Site Details")
+                    st.text_input(
+                        "Site Name *", key="site_name",
+                        placeholder="e.g. Mumbai North Hub",
                     )
-                with a2:
-                    state_val = st.selectbox(
-                        "State", options=state_names, key="site_state"
+                    st.selectbox(
+                        "Customer *",
+                        options=[""] + list(customer_options),
+                        format_func=lambda cid: "Select customer" if not cid
+                            else customer_options.get(cid, "Unknown"),
+                        key="site_customer_id",
                     )
-                pincode = st.text_input(
-                    "Pincode", key="site_pincode", placeholder="e.g. 400001"
+                    st.number_input(
+                        "Payment Terms (days)",
+                        step=1,
+                        min_value=0,
+                        key="site_payment_terms",
+                    )
+
+                with st.container(border=True):
+                    _section_hdr("location_on", "Address")
+                    st.text_area(
+                        "Address", key="site_address",
+                        placeholder="Street, Area, Landmark…", height=72,
+                    )
+                    a1, a2 = st.columns(2)
+                    with a1:
+                        st.text_input(
+                            "City", key="site_city", placeholder="e.g. Mumbai"
+                        )
+                    with a2:
+                        st.selectbox(
+                            "State", options=state_names, key="site_state"
+                        )
+                    st.text_input(
+                        "Pincode", key="site_pincode", placeholder="e.g. 400001"
+                    )
+
+            # ── Tab 3: Contacts ───────────────────────────────────────────────
+            with tab_contacts_tab:
+                if mode == "edit" and existing_contacts:
+                    _section_hdr("people", f"Contact Persons — {len(existing_contacts)} saved")
+                    st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
+                    for ct in existing_contacts:
+                        st.markdown(_contact_row_html(ct), unsafe_allow_html=True)
+                    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
+
+                with st.container(border=True):
+                    _section_hdr("edit_note", "Edit Contacts")
+                    contacts_df = st.data_editor(
+                        _contacts_to_df(existing_contacts),
+                        column_config={
+                            "name":        st.column_config.TextColumn("Name",        width="medium"),
+                            "designation": st.column_config.TextColumn("Designation", width="medium"),
+                            "email":       st.column_config.TextColumn("Email",       width="medium"),
+                            "mobile":      st.column_config.TextColumn("Mobile",      width="medium"),
+                            "remarks":     st.column_config.TextColumn("Remarks",     width="large"),
+                        },
+                        num_rows="dynamic",
+                        use_container_width=True,
+                        hide_index=True,
+                        key=f"site_contacts_{selected_id or 'new'}",
+                    )
+
+            # ── Tab 4: Map (placeholder) ──────────────────────────────────────
+            with tab_map:
+                _placeholder_tab(
+                    "map",
+                    "Map view coming soon",
+                    "Geographic location and nearby machines for this site will appear here.",
                 )
 
-            # Section 3 — Site Contacts
-            existing_contacts = _parse_contacts(
-                selected_site.get("site_contact") if selected_site else None
-            )
-            with st.container(border=True):
-                _section_hdr(
-                    "Site Contacts",
-                    note=f"{len(existing_contacts)} saved" if existing_contacts else "",
-                )
-                contacts_df = st.data_editor(
-                    _contacts_to_df(existing_contacts),
-                    column_config={
-                        "name":        st.column_config.TextColumn("Name",        width="medium"),
-                        "designation": st.column_config.TextColumn("Designation", width="medium"),
-                        "email":       st.column_config.TextColumn("Email",       width="medium"),
-                        "mobile":      st.column_config.TextColumn("Mobile",      width="medium"),
-                        "remarks":     st.column_config.TextColumn("Remarks",     width="large"),
-                    },
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    hide_index=True,
-                    key=f"site_contacts_{selected_id or 'new'}",
-                )
-
-            # Action buttons
-            sv1, sv2, sv3 = st.columns([4, 1, 1])
+            # ── Action buttons (outside tabs) ─────────────────────────────────
+            st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+            sv1, sv2, sv3, _ = st.columns([3, 1, 1, 2])
             with sv1:
                 save_clicked = st.button(
-                    "Update Site" if mode == "edit" else "Create Site",
+                    "💾  Update Site" if mode == "edit" else "💾  Create Site",
                     type="primary",
                     use_container_width=True,
                     key="site_save_btn",
@@ -449,30 +880,38 @@ def render() -> None:
                     st.session_state["_site_sync_key"] = None
                     st.rerun()
             with sv3:
-                if st.button("Refresh", use_container_width=True, key="site_refresh_btn"):
+                if st.button("↻ Refresh", use_container_width=True, key="site_refresh_btn"):
                     st.session_state["_site_sync_key"] = None
                     st.rerun()
 
             # ── Save logic ─────────────────────────────────────────────────────
             if save_clicked:
-                site_name_val = (site_name or "").strip()
+                # Resolve form values from session state (robust across tab switches)
+                site_name_val   = (st.session_state.get("site_name",        "") or "").strip()
+                customer_id_val = st.session_state.get("site_customer_id",  "")
+                address_val     = (st.session_state.get("site_address",     "") or "").strip()
+                city_val        = (st.session_state.get("site_city",        "") or "").strip()
+                state_v         = st.session_state.get("site_state") or None
+                pincode_val     = (st.session_state.get("site_pincode",     "") or "").strip()
+                payment_terms_v = int(st.session_state.get("site_payment_terms", 0) or 0)
+
                 if not site_name_val:
                     st.error("Site Name is required.")
-                elif not customer_id:
+                elif not customer_id_val:
                     st.error("Customer is required.")
                 else:
                     contacts_list = _df_to_contacts(contacts_df)
                     first = contacts_list[0] if contacts_list else {}
                     payload = dict(
                         site_name=site_name_val,
-                        customer_id=customer_id or None,
-                        address=(address or "").strip() or None,
-                        city=(city or "").strip() or None,
-                        state=state_val or None,
-                        pincode=(pincode or "").strip() or None,
+                        customer_id=customer_id_val or None,
+                        address=address_val or None,
+                        city=city_val or None,
+                        state=state_v,
+                        pincode=pincode_val or None,
                         site_contact=json.dumps(contacts_list) if contacts_list else None,
                         site_contact_number=first.get("mobile") or None,
-                        payment_terms=int(st.session_state.get("site_payment_terms", 0)) or None,
+                        payment_terms=payment_terms_v or None,
                     )
 
                     # Keep st.rerun() OUTSIDE try/except —

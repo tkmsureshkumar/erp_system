@@ -14,6 +14,93 @@ import streamlit as st
 from ..supabase_client import SupabaseClient
 
 
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
+_PAGE_CSS = """
+<style>
+/* ── KPI strip ─────────────────────────────────────────────────────── */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 0 0 28px;
+}
+.kpi-card {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 12px;
+    padding: 18px 22px 14px;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow .18s, transform .18s;
+}
+.kpi-card:hover {
+    box-shadow: 0 6px 20px rgba(0,0,0,.08);
+    transform: translateY(-2px);
+}
+.kpi-accent-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 12px 12px 0 0;
+}
+.kpi-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: #9CA3AF;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+}
+.kpi-value {
+    font-size: 34px; font-weight: 800;
+    color: #111827; line-height: 1;
+    margin-bottom: 6px;
+    font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+    font-size: 11px; color: #6B7280;
+}
+.kpi-icon {
+    position: absolute; top: 16px; right: 18px;
+    font-size: 22px; opacity: .12;
+}
+/* ── Section header ─────────────────────────────────────────────────── */
+.form-sec-hdr {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: .13em; text-transform: uppercase;
+    color: #E87722;
+    margin-bottom: 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+    display: flex; align-items: center; gap: 6px;
+}
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.empty-state-v2 {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 64px 40px;
+    background: #FAFBFC;
+    border: 2px dashed #E2EBF0;
+    border-radius: 16px;
+    text-align: center;
+}
+.empty-icon-ring {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: linear-gradient(145deg, #EFF6FF, #DBEAFE);
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 18px;
+    box-shadow: 0 6px 20px rgba(37,99,235,.14);
+}
+.empty-state-v2 h3 {
+    font-size: 16px; font-weight: 700; color: #111827;
+    margin: 0 0 8px;
+}
+.empty-state-v2 p {
+    font-size: 13px; color: #9CA3AF;
+    max-width: 260px; line-height: 1.6; margin: 0;
+}
+</style>
+"""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_date(value) -> date | None:
@@ -88,18 +175,33 @@ def _operator_from_schedule(schedule_data_raw) -> str:
     return "—"
 
 
-def _section_header(title: str) -> None:
+def _section_hdr(icon: str, label: str) -> None:
     st.markdown(
-        f"<div style='font-size:10px;font-weight:700;letter-spacing:.13em;"
-        f"text-transform:uppercase;color:#E87722;margin-bottom:14px;'>"
-        f"{title}</div>",
+        f"<div class='form-sec-hdr'>"
+        f"<span class='msr' style='font-size:14px;color:#E87722;'>{icon}</span>"
+        f"{label}</div>",
         unsafe_allow_html=True,
+    )
+
+
+def _kpi_card(icon: str, label: str, value: int | str,
+              sub: str = "", accent: str = "#2563EB") -> str:
+    return (
+        f"<div class='kpi-card'>"
+        f"<div class='kpi-accent-bar' style='background:{accent};'></div>"
+        f"<span class='kpi-icon msr'>{icon}</span>"
+        f"<div class='kpi-label'>{label}</div>"
+        f"<div class='kpi-value'>{value}</div>"
+        f"<div class='kpi-sub'>{sub}</div>"
+        f"</div>"
     )
 
 
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
+    st.markdown(_PAGE_CSS, unsafe_allow_html=True)
+
     # ── Page header ──────────────────────────────────────────────────────────
     st.markdown(
         "<div class='page-eyebrow'>// Reports</div>"
@@ -128,9 +230,9 @@ def render() -> None:
         return
 
     # ── Lookup maps ──────────────────────────────────────────────────────────
-    today    = date.today()
-    cust_map = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
-    site_map = {s["id"]: s.get("site_name", "—")     for s in sites_list     if s.get("id")}
+    today     = date.today()
+    cust_map  = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
+    site_map  = {s["id"]: s.get("site_name", "—")     for s in sites_list     if s.get("id")}
     dep_by_wo = {d["work_order_id"]: d for d in deployments if d.get("work_order_id")}
 
     # machine_id → list of currently active work orders
@@ -184,15 +286,15 @@ def render() -> None:
     # ── Build fleet rows ──────────────────────────────────────────────────────
     rows: list[dict] = []
     for m in machines:
-        mid       = m.get("id", "")
-        wo        = (wo_by_machine.get(mid) or [None])[0]
+        mid      = m.get("id", "")
+        wo       = (wo_by_machine.get(mid) or [None])[0]
 
-        customer  = cust_map.get((wo or {}).get("customer_id", ""), "—") if wo else "—"
-        site      = site_map.get((wo or {}).get("site_id", ""),     "—") if wo else "—"
-        rental    = _mc_rental_for_machine(wo.get("machine_config") if wo else None, mid)
-        dep       = dep_by_wo.get((wo or {}).get("id", ""), {}) if wo else {}
-        dep_date  = _deployment_date_for_machine(dep, mid)
-        operator  = log_op_map.get((wo.get("id", ""), mid), "—") if wo else "—"
+        customer = cust_map.get((wo or {}).get("customer_id", ""), "—") if wo else "—"
+        site     = site_map.get((wo or {}).get("site_id", ""),     "—") if wo else "—"
+        rental   = _mc_rental_for_machine(wo.get("machine_config") if wo else None, mid)
+        dep      = dep_by_wo.get((wo or {}).get("id", ""), {}) if wo else {}
+        dep_date = _deployment_date_for_machine(dep, mid)
+        operator = log_op_map.get((wo.get("id", ""), mid), "—") if wo else "—"
 
         rows.append({
             "Serial Number":   m.get("serial_number")    or "—",
@@ -210,41 +312,102 @@ def render() -> None:
             "_machine_type":   m.get("machine_type", ""),
         })
 
+    # ── KPI strip (computed from full dataset, before any filter) ─────────────
+    n_total     = len(rows)
+    n_on_rent   = sum(1 for r in rows if r["Current Status"] == "On Rent")
+    n_available = sum(1 for r in rows if r["Current Status"] == "Available")
+    n_breakdown = sum(
+        1 for r in rows
+        if (r["Current Status"] or "").lower() in ("breakdown", "under repair", "repair")
+    )
+    n_types     = len({r["_machine_type"] for r in rows if r["_machine_type"]})
+
+    st.markdown(
+        "<div class='kpi-grid'>"
+        + _kpi_card(
+            "precision_manufacturing", "Total Fleet", n_total,
+            f"{n_types} machine type{'s' if n_types != 1 else ''}",
+            "#2563EB",
+        )
+        + _kpi_card(
+            "engineering", "On Rent", n_on_rent,
+            f"{round(n_on_rent / n_total * 100) if n_total else 0}% utilization",
+            "#10B981",
+        )
+        + _kpi_card(
+            "check_circle", "Available", n_available,
+            "ready for deployment",
+            "#8B5CF6",
+        )
+        + _kpi_card(
+            "build", "Breakdown / Repair", n_breakdown,
+            "requiring attention",
+            "#EF4444",
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
     # ── Filters ───────────────────────────────────────────────────────────────
-    _section_header("Filters")
+    with st.container(border=True):
+        _section_hdr("filter_list", "Filters")
 
-    fc1, fc2, fc3 = st.columns(3)
-    fc4, fc5, fc6 = st.columns(3)
+        fc1, fc2, fc3 = st.columns(3)
+        fc4, fc5, fc6 = st.columns(3)
 
-    with fc1:
-        st.markdown('<p class="filter-label">Status</p>', unsafe_allow_html=True)
-        status_opts = ["All"] + sorted({r["Current Status"] for r in rows if r["Current Status"] != "—"})
-        sel_status = st.selectbox("Status", status_opts, label_visibility="collapsed", key="fsr_status")
+        with fc1:
+            st.markdown('<p class="filter-label">Status</p>', unsafe_allow_html=True)
+            status_opts = ["All"] + sorted(
+                {r["Current Status"] for r in rows if r["Current Status"] != "—"}
+            )
+            sel_status = st.selectbox(
+                "Status", status_opts, label_visibility="collapsed", key="fsr_status"
+            )
 
-    with fc2:
-        st.markdown('<p class="filter-label">Customer</p>', unsafe_allow_html=True)
-        cust_opts = ["All"] + sorted({r["Customer"] for r in rows if r["Customer"] != "—"})
-        sel_cust = st.selectbox("Customer", cust_opts, label_visibility="collapsed", key="fsr_customer")
+        with fc2:
+            st.markdown('<p class="filter-label">Customer</p>', unsafe_allow_html=True)
+            cust_opts = ["All"] + sorted(
+                {r["Customer"] for r in rows if r["Customer"] != "—"}
+            )
+            sel_cust = st.selectbox(
+                "Customer", cust_opts, label_visibility="collapsed", key="fsr_customer"
+            )
 
-    with fc3:
-        st.markdown('<p class="filter-label">Site</p>', unsafe_allow_html=True)
-        site_opts = ["All"] + sorted({r["Site"] for r in rows if r["Site"] != "—"})
-        sel_site = st.selectbox("Site", site_opts, label_visibility="collapsed", key="fsr_site")
+        with fc3:
+            st.markdown('<p class="filter-label">Site</p>', unsafe_allow_html=True)
+            site_opts = ["All"] + sorted(
+                {r["Site"] for r in rows if r["Site"] != "—"}
+            )
+            sel_site = st.selectbox(
+                "Site", site_opts, label_visibility="collapsed", key="fsr_site"
+            )
 
-    with fc4:
-        st.markdown('<p class="filter-label">Machine Type</p>', unsafe_allow_html=True)
-        mtype_opts = ["All"] + sorted({r["_machine_type"] for r in rows if r["_machine_type"]})
-        sel_mtype = st.selectbox("Machine Type", mtype_opts, label_visibility="collapsed", key="fsr_mtype")
+        with fc4:
+            st.markdown('<p class="filter-label">Machine Type</p>', unsafe_allow_html=True)
+            mtype_opts = ["All"] + sorted(
+                {r["_machine_type"] for r in rows if r["_machine_type"]}
+            )
+            sel_mtype = st.selectbox(
+                "Machine Type", mtype_opts, label_visibility="collapsed", key="fsr_mtype"
+            )
 
-    with fc5:
-        st.markdown('<p class="filter-label">Make</p>', unsafe_allow_html=True)
-        make_opts = ["All"] + sorted({r["Make"] for r in rows if r["Make"] != "—"})
-        sel_make = st.selectbox("Make", make_opts, label_visibility="collapsed", key="fsr_make")
+        with fc5:
+            st.markdown('<p class="filter-label">Make</p>', unsafe_allow_html=True)
+            make_opts = ["All"] + sorted(
+                {r["Make"] for r in rows if r["Make"] != "—"}
+            )
+            sel_make = st.selectbox(
+                "Make", make_opts, label_visibility="collapsed", key="fsr_make"
+            )
 
-    with fc6:
-        st.markdown('<p class="filter-label">Model</p>', unsafe_allow_html=True)
-        model_opts = ["All"] + sorted({r["Model"] for r in rows if r["Model"] != "—"})
-        sel_model = st.selectbox("Model", model_opts, label_visibility="collapsed", key="fsr_model")
+        with fc6:
+            st.markdown('<p class="filter-label">Model</p>', unsafe_allow_html=True)
+            model_opts = ["All"] + sorted(
+                {r["Model"] for r in rows if r["Model"] != "—"}
+            )
+            sel_model = st.selectbox(
+                "Model", model_opts, label_visibility="collapsed", key="fsr_model"
+            )
 
     # ── Apply filters ─────────────────────────────────────────────────────────
     filtered = rows
@@ -262,8 +425,11 @@ def render() -> None:
         filtered = [r for r in filtered if r["Model"] == sel_model]
 
     # ── Table ─────────────────────────────────────────────────────────────────
-    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
-    _section_header(f"Fleet Status — {len(filtered)} machine{'s' if len(filtered) != 1 else ''}")
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+    _section_hdr(
+        "table_view",
+        f"Fleet Status — {len(filtered)} machine{'s' if len(filtered) != 1 else ''}",
+    )
 
     _DISPLAY_COLS = [
         "Serial Number", "Machine Code", "Make", "Model", "Working Height",
@@ -280,7 +446,18 @@ def render() -> None:
             lambda v: f"₹ {v:,.0f}" if isinstance(v, (int, float)) else "—"
         )
 
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Serial Number":   st.column_config.TextColumn("Serial No.",   width="medium"),
+                "Working Height":  st.column_config.TextColumn("Ht/Capacity",  width="small"),
+                "Current Status":  st.column_config.TextColumn("Status",       width="medium"),
+                "Monthly Rental":  st.column_config.TextColumn("Mthly Rental", width="medium"),
+                "Deployment Date": st.column_config.TextColumn("Deployed On",  width="medium"),
+            },
+        )
 
         csv_df = df.copy()
         csv_df["Monthly Rental"] = [
@@ -299,4 +476,13 @@ def render() -> None:
             key="fsr_export",
         )
     else:
-        st.info("No machines match the selected filters.")
+        st.markdown(
+            "<div class='empty-state-v2'>"
+            "<div class='empty-icon-ring'>"
+            "<span class='msr' style='color:#2563EB;font-size:34px;'>search_off</span>"
+            "</div>"
+            "<h3>No machines match filters</h3>"
+            "<p>Try adjusting your filter selections to see fleet machines.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )

@@ -29,7 +29,274 @@ _MC_COLS = [
     "Cycle Start", "Cycle End",
 ]
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
+
+_PAGE_CSS = """
+<style>
+/* ── KPI strip ──────────────────────────────────────────────────────── */
+.wo-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 0 0 28px;
+}
+.kpi-card {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 12px;
+    padding: 18px 22px 14px;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow .18s, transform .18s;
+}
+.kpi-card:hover {
+    box-shadow: 0 6px 20px rgba(0,0,0,.08);
+    transform: translateY(-2px);
+}
+.kpi-accent-bar {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 3px; border-radius: 12px 12px 0 0;
+}
+.kpi-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: #9CA3AF;
+    margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+}
+.kpi-value {
+    font-size: 34px; font-weight: 800;
+    color: #111827; line-height: 1; margin-bottom: 6px;
+    font-variant-numeric: tabular-nums;
+}
+.kpi-sub { font-size: 11px; color: #6B7280; }
+.kpi-icon {
+    position: absolute; top: 16px; right: 18px;
+    font-size: 22px; opacity: .12;
+}
+
+/* ── Search wrapper ─────────────────────────────────────────────────── */
+.search-wrap { position: relative; margin-bottom: 8px; }
+.search-icon-abs {
+    position: absolute; left: 11px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px; color: #9CA3AF;
+    z-index: 10; pointer-events: none;
+}
+.search-wrap .stTextInput input {
+    padding-left: 34px !important;
+    border-radius: 8px !important;
+}
+
+/* ── WO list cards ──────────────────────────────────────────────────── */
+.wo-card {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 10px;
+    padding: 10px 13px 9px;
+    pointer-events: none;
+    transition: box-shadow .16s, border-color .16s, transform .16s;
+}
+.wo-card:hover {
+    box-shadow: 0 4px 16px rgba(232,119,34,.10);
+    border-color: #FBD4B4; transform: translateY(-1px);
+}
+.wo-card.wo-sel {
+    border-color: #E87722 !important;
+    background: #FFF8F4; border-left-width: 3px;
+}
+.wo-card-top {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+}
+.wo-num {
+    font-size: 13px; font-weight: 700; color: #111827;
+    flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wo-card-sub {
+    font-size: 11px; color: #6B7280;
+    display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    margin-bottom: 3px;
+}
+.wo-date-range {
+    font-size: 10px; color: #9CA3AF;
+    display: flex; align-items: center; gap: 4px; margin-top: 3px;
+}
+.wo-rental-badge {
+    font-size: 10px; font-weight: 700;
+    background: #FFF4ED; color: #C2410C;
+    border: 1px solid #FDDCBA;
+    padding: 1px 7px; border-radius: 20px;
+    white-space: nowrap; flex-shrink: 0; margin-left: auto;
+}
+.wo-cl-dot {
+    width: 3px; height: 3px; border-radius: 50%;
+    background: #D1D5DB; flex-shrink: 0; display: inline-block;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.wo-empty {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 72px 40px;
+    background: #FAFBFC; border: 2px dashed #E2EBF0;
+    border-radius: 16px; text-align: center;
+    animation: wo-fadeup .35s ease;
+}
+.wo-empty-ring {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: linear-gradient(145deg, #FFF4ED, #FDE8D4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px; margin-bottom: 20px;
+    box-shadow: 0 6px 20px rgba(232,119,34,.14);
+}
+.wo-empty h3 {
+    font-size: 17px; font-weight: 700; color: #111827; margin: 0 0 8px;
+}
+.wo-empty p {
+    font-size: 13px; color: #9CA3AF;
+    max-width: 270px; line-height: 1.6; margin: 0;
+}
+
+/* ── WO hero banner ─────────────────────────────────────────────────── */
+.wo-hero {
+    background: linear-gradient(135deg, #1A1F2E 0%, #2D1A0E 55%, #3D2410 100%);
+    border-radius: 14px; padding: 22px 24px; margin-bottom: 18px;
+    display: flex; align-items: flex-start; gap: 16px;
+    position: relative; overflow: hidden;
+    animation: wo-fadeup .3s ease;
+}
+.wo-hero::before {
+    content: ''; position: absolute; top: -40px; right: -40px;
+    width: 160px; height: 160px; border-radius: 50%;
+    background: rgba(255,255,255,.04);
+}
+.wo-hero-icon {
+    width: 52px; height: 52px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; background: rgba(232,119,34,.25);
+    border: 1px solid rgba(232,119,34,.35); flex-shrink: 0;
+}
+.wo-hero-num {
+    font-size: 20px; font-weight: 800; color: #fff; line-height: 1.2;
+}
+.wo-hero-meta {
+    font-size: 11px; color: rgba(255,255,255,.45);
+    letter-spacing: .06em; margin-top: 4px;
+}
+.wo-hero-value {
+    margin-left: auto; text-align: right;
+    position: relative; z-index: 1; flex-shrink: 0;
+}
+.wo-hero-value-label {
+    font-size: 9px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: rgba(255,255,255,.40); margin-bottom: 3px;
+}
+.wo-hero-value-num {
+    font-size: 22px; font-weight: 800; color: #FBD4B4;
+    font-variant-numeric: tabular-nums;
+}
+.hero-badge {
+    font-size: 10px; font-weight: 700;
+    padding: 2px 10px; border-radius: 20px;
+    letter-spacing: .05em; text-transform: uppercase;
+    display: inline-block; margin-right: 4px;
+}
+.hero-badge-new {
+    background: rgba(16,185,129,.20); color: #6EE7B7;
+    border: 1px solid rgba(16,185,129,.30);
+}
+.hero-badge-edit {
+    background: rgba(245,158,11,.18); color: #FCD34D;
+    border: 1px solid rgba(245,158,11,.28);
+}
+
+/* ── Form sections ───────────────────────────────────────────────────── */
+.form-sec-hdr {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: .13em; text-transform: uppercase;
+    color: #E87722; margin-bottom: 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+    display: flex; align-items: center; gap: 6px;
+}
+
+/* ── Info grid (overview) ────────────────────────────────────────────── */
+.info-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 10px; margin-bottom: 14px;
+}
+.info-field {
+    background: #F8FAFC; border: 1px solid #E2EBF0;
+    border-radius: 8px; padding: 11px 14px;
+}
+.info-field-label {
+    font-size: 9px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: #9CA3AF; margin-bottom: 4px;
+}
+.info-field-value {
+    font-size: 13px; font-weight: 600; color: #111827; word-break: break-word;
+}
+.info-field-value.muted { font-weight: 400; color: #9CA3AF; }
+
+/* ── Machine summary bar ─────────────────────────────────────────────── */
+.mc-summary-bar {
+    display: flex; gap: 24px; padding: 8px 12px;
+    background: #FFF8F4; border: 1px solid #FDDCBA;
+    border-radius: 8px; margin-top: 8px; font-size: 12px;
+}
+
+/* ── Billing cards ───────────────────────────────────────────────────── */
+.billing-card {
+    background: var(--card, #fff);
+    border: 1px solid var(--border, #E2EBF0);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 8px;
+}
+.billing-card-top {
+    display: flex; align-items: center;
+    justify-content: space-between; margin-bottom: 8px;
+}
+.billing-machine-name { font-size: 13px; font-weight: 700; color: #111827; }
+.billing-amount { font-size: 15px; font-weight: 800; color: #E87722; }
+.billing-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.billing-meta-item { font-size: 11px; color: #6B7280; }
+.billing-meta-item strong { color: #374151; font-weight: 600; }
+
+/* ── Tabs polish ─────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0 !important; background: transparent !important;
+    border-bottom: 2px solid #E2EBF0 !important; padding: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    font-size: 12px !important; font-weight: 600 !important;
+    color: #6B7280 !important; padding: 8px 18px !important;
+    border-radius: 0 !important; background: transparent !important;
+    border: none !important; margin: 0 !important;
+    border-bottom: 2px solid transparent !important;
+    transition: color .14s !important;
+}
+.stTabs [data-baseweb="tab"]:hover { color: #374151 !important; }
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    color: #E87722 !important;
+    border-bottom: 2px solid #E87722 !important;
+    background: transparent !important;
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+.stTabs [data-baseweb="tab-panel"]     { padding: 18px 0 0 !important; }
+
+/* ── No-results ──────────────────────────────────────────────────────── */
+.no-results {
+    text-align: center; padding: 36px 12px;
+    color: #9CA3AF; font-size: 13px;
+}
+.no-results .nr-icon { font-size: 32px; margin-bottom: 8px; display: block; }
+
+/* ── Animations ─────────────────────────────────────────────────────── */
+@keyframes wo-fadeup {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+"""
+
+# ── Parse helpers ─────────────────────────────────────────────────────────────
 
 def _parse_date(value) -> date | None:
     if value is None:
@@ -213,7 +480,8 @@ def _machine_row_dialog(
             "Cycle End", key=p + "ce",
             disabled=(billing_cycle == "Calendar Month"),
         )
-    # ── Shift & Hours ─────────────────────────────────────────────────────────
+
+    # ── Shift & Hours ──────────────────────────────────────────────────────────
     st.markdown(
         "<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
         "text-transform:uppercase;color:#E87722;margin:14px 0 8px;'>"
@@ -346,18 +614,94 @@ def _machine_row_dialog(
             st.rerun()
 
 
+# ── UI helpers ────────────────────────────────────────────────────────────────
+
+def _kpi_card(icon: str, label: str, value, sub: str = "", accent: str = "#E87722") -> str:
+    return (
+        f"<div class='kpi-card'>"
+        f"<div class='kpi-accent-bar' style='background:{accent};'></div>"
+        f"<span class='kpi-icon msr'>{icon}</span>"
+        f"<div class='kpi-label'>{label}</div>"
+        f"<div class='kpi-value'>{value}</div>"
+        f"<div class='kpi-sub'>{sub}</div>"
+        f"</div>"
+    )
+
+
+def _section_hdr(icon: str, label: str) -> None:
+    st.markdown(
+        f"<div class='form-sec-hdr'>"
+        f"<span class='msr' style='font-size:14px;color:#E87722;'>{icon}</span>"
+        f"{label}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _info_field(label: str, value, wide: bool = False, muted: bool = False) -> str:
+    v = str(value) if value not in (None, "", 0) else ""
+    val_cls = "info-field-value muted" if (muted or not v) else "info-field-value"
+    disp    = v if v else "—"
+    span    = "span 2" if wide else "span 1"
+    return (
+        f"<div class='info-field' style='grid-column:{span};'>"
+        f"<div class='info-field-label'>{label}</div>"
+        f"<div class='{val_cls}'>{disp}</div>"
+        f"</div>"
+    )
+
+
+def _placeholder_tab(icon: str, title: str, description: str) -> None:
+    st.markdown(
+        f"<div style='display:flex;flex-direction:column;align-items:center;"
+        f"padding:52px 24px;text-align:center;'>"
+        f"<div style='width:58px;height:58px;border-radius:14px;"
+        f"background:#F8FAFC;border:1px solid #E2EBF0;"
+        f"display:flex;align-items:center;justify-content:center;"
+        f"font-size:26px;margin-bottom:14px;'>"
+        f"<span class='msr' style='color:#9CA3AF;'>{icon}</span></div>"
+        f"<div style='font-size:15px;font-weight:700;color:#374151;margin-bottom:6px;'>{title}</div>"
+        f"<div style='font-size:12px;color:#9CA3AF;max-width:240px;line-height:1.6;'>{description}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+_STATUS_BADGE_MAP = {
+    "Active":    "badge-active",
+    "Draft":     "badge-draft",
+    "Completed": "badge-completed",
+    "Closed":    "badge-closed",
+    "Running":   "badge-running",
+    "Approved":  "badge-approved",
+}
+
+
+def _wo_total_rental(wo: dict) -> float:
+    mc_raw = wo.get("machine_config")
+    if not mc_raw:
+        return 0.0
+    try:
+        recs = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+        return sum(float(r.get("rental_per_month") or 0) for r in (recs if isinstance(recs, list) else []))
+    except Exception:
+        return 0.0
+
+
 # ── View ──────────────────────────────────────────────────────────────────────
 
 def render() -> None:
-    st.markdown(
-        """
-        <div class="page-eyebrow">// Fleet Operations</div>
-        <div class="page-title">Work Orders</div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
+    st.markdown(_PAGE_CSS, unsafe_allow_html=True)
 
+    # ── Page header ────────────────────────────────────────────────────────────
+    hdr_l, hdr_r = st.columns([5, 1])
+    with hdr_l:
+        st.markdown(
+            "<div class='page-eyebrow'>// Fleet Operations</div>"
+            "<div class='page-title'>Work Orders</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Data load ──────────────────────────────────────────────────────────────
     try:
         sb = SupabaseClient()
     except Exception as exc:
@@ -365,7 +709,6 @@ def render() -> None:
         st.write(str(exc))
         return
 
-    # ── Fetchers ───────────────────────────────────────────────────────────────
     def fetch_work_orders() -> list[dict]:
         try:
             return sb.list_work_orders()
@@ -402,12 +745,11 @@ def render() -> None:
 
     # Machine label ↔ ID lookups (use ALL machines so existing WO rows parse correctly)
     machines_by_id: dict[str, dict] = {m["id"]: m for m in machines if m.get("id")}
-    id_to_label  = {
+    id_to_label = {
         m.get("id"): f"{m.get('asset_code', '')} — {m.get('machine_type', '')}".strip("— ")
         for m in machines if m.get("id")
     }
-    label_to_id  = {v: k for k, v in id_to_label.items()}
-    # machine_opts built below after selected_wo is known (excludes Reserved machines)
+    label_to_id = {v: k for k, v in id_to_label.items()}
 
     # Per-machine detail lookup for cascade auto-fill (label → specs)
     label_to_details: dict[str, dict] = {
@@ -421,43 +763,57 @@ def render() -> None:
         if label
     }
 
-    # ── Edit selector ──────────────────────────────────────────────────────────
-    # Optional customer filter — narrows the WO list; blank = show all + allow new.
-    _cids_with_wo = sorted(
-        {wo.get("customer_id") for wo in work_orders if wo.get("customer_id")},
-        key=lambda cid: customer_map.get(cid, {}).get("customer_name", ""),
+    # ── New WO button ──────────────────────────────────────────────────────────
+    with hdr_r:
+        st.markdown("<div style='padding-top:18px'></div>", unsafe_allow_html=True)
+        if st.button("+ New WO", use_container_width=True, type="primary", key="hdr_new_wo"):
+            st.session_state["_wo_mode"]        = "new"
+            st.session_state["_wo_sel_id"]      = ""
+            st.session_state["_editing_wo_id"]  = None   # force field sync
+            st.rerun()
+
+    # ── KPI strip ──────────────────────────────────────────────────────────────
+    n_total  = len(work_orders)
+    n_active = sum(
+        1 for w in work_orders
+        if (w.get("status") or "").lower() in ("active", "running", "approved")
     )
-    _filter_customer_id = st.selectbox(
-        "Filter by Customer",
-        options=[""] + _cids_with_wo,
-        format_func=lambda cid: "All customers" if not cid
-            else customer_map.get(cid, {}).get("customer_name", cid),
-        key="wo_filter_customer_id",
+    n_draft  = sum(
+        1 for w in work_orders
+        if (w.get("status") or "draft").lower() == "draft"
+    )
+    n_closed = sum(
+        1 for w in work_orders
+        if (w.get("status") or "").lower() in ("closed", "completed")
+    )
+    portfolio_rental = sum(_wo_total_rental(w) for w in work_orders)
+
+    st.markdown(
+        f"<div class='wo-kpi-grid'>"
+        + _kpi_card("assignment",    "Total WOs",          n_total,
+                    f"₹{portfolio_rental:,.0f} / mo portfolio", "#E87722")
+        + _kpi_card("play_circle",   "Active",             n_active,
+                    "currently running", "#10B981")
+        + _kpi_card("edit_document", "Draft",              n_draft,
+                    "pending confirmation", "#F59E0B")
+        + _kpi_card("check_circle",  "Closed / Completed", n_closed,
+                    "concluded work orders", "#6B7280")
+        + "</div>",
+        unsafe_allow_html=True,
     )
 
-    # Reset WO selection when the customer filter changes.
-    if st.session_state.get("_wo_prev_filter_customer") != _filter_customer_id:
-        st.session_state["_wo_prev_filter_customer"] = _filter_customer_id
-        st.session_state["selected_wo_id"] = ""
+    # ── Mode / selection state ─────────────────────────────────────────────────
+    if "_wo_mode"   not in st.session_state:
+        st.session_state["_wo_mode"]   = "none"
+    if "_wo_sel_id" not in st.session_state:
+        st.session_state["_wo_sel_id"] = ""
 
-    _filtered_wo_ids = sorted(
-        [wid for wid, wo in wo_map.items()
-         if not _filter_customer_id or wo.get("customer_id") == _filter_customer_id],
-        key=lambda wid: wo_map[wid].get("wo_number", ""),
-    )
-    selected_wo_id = st.selectbox(
-        "Edit existing work order",
-        options=[""] + _filtered_wo_ids,
-        format_func=lambda wid: "New work order" if not wid
-            else f"{wo_map[wid].get('wo_number', 'Unknown')} — "
-                 f"{customer_map.get(wo_map[wid].get('customer_id', ''), {}).get('customer_name', '')}",
-        key="selected_wo_id",
-    )
-    selected_wo = wo_map.get(selected_wo_id)
-    wo_key = selected_wo_id or "new"
+    mode           = st.session_state["_wo_mode"]
+    selected_wo_id = st.session_state["_wo_sel_id"]
+    selected_wo    = wo_map.get(selected_wo_id) if selected_wo_id else None
+    wo_key         = selected_wo_id or "new"
 
-    # Machine dropdown options: exclude Reserved machines, but keep any machine
-    # already allocated to the currently-selected WO (so edits display correctly).
+    # Machine dropdown options: exclude Reserved, keep already-allocated
     current_wo_machine_ids: set[str] = set()
     if selected_wo:
         raw_mc = selected_wo.get("machine_config")
@@ -487,242 +843,479 @@ def render() -> None:
         for k in [f"mc_data_{wo_key}", f"mc_recalc_{wo_key}", f"mc_rows_{wo_key}"]:
             st.session_state.pop(k, None)
 
-    # ── A. Basic Selection ─────────────────────────────────────────────────────
-    st.markdown(
-        "<div style='margin-bottom:6px;border-top:2px solid #E87722;padding-top:10px;"
-        "font-size:10px;font-weight:700;letter-spacing:.12em;color:#E87722;"
-        "text-transform:uppercase;'>A — Basic Selection</div>",
-        unsafe_allow_html=True,
-    )
+    # ── Two-panel layout ───────────────────────────────────────────────────────
+    left_col, right_col = st.columns([4, 7], gap="large")
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        selected_customer_id = st.selectbox(
-            "Customer *",
-            options=[""] + list(customer_map),
-            format_func=lambda cid: "Select customer" if not cid
-                else customer_map[cid].get("customer_name", "Unknown"),
-            key="wo_customer_id",
-        )
-    with col2:
-        filtered_sites = {
-            sid: s for sid, s in site_map.items()
-            if str(s.get("customer_id", "")) == str(selected_customer_id)
-        }
-        if st.session_state.get("wo_site_id") not in filtered_sites:
-            st.session_state["wo_site_id"] = ""
-        selected_site_id = st.selectbox(
-            "Site *",
-            options=[""] + list(filtered_sites),
-            format_func=lambda sid: "Select site" if not sid
-                else filtered_sites[sid].get("site_name", "Unknown"),
-            key="wo_site_id",
-        )
-    with col3:
-        selected_start_date = st.date_input("Start Date *", key="wo_start_date")
-    with col4:
-        selected_end_date = st.date_input("End Date", key="wo_end_date")
+    # ══════════════════════════════════════════════════════════════════════════
+    # LEFT PANEL — WO directory
+    # ══════════════════════════════════════════════════════════════════════════
+    with left_col:
 
-    cwo1, _ = st.columns([2, 2])
-    with cwo1:
-        selected_client_wo = st.text_input(
-            "Client Work Order Number", placeholder="Client WO#",
-            key="wo_client_wo",
-        )
-
-    # ── B. Machine Configuration ───────────────────────────────────────────────
-    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
-    st.markdown(
-        "<div style='margin-bottom:6px;border-top:2px solid #E87722;padding-top:10px;"
-        "font-size:10px;font-weight:700;letter-spacing:.12em;color:#E87722;"
-        "text-transform:uppercase;'>B — Machine Configuration</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<p style='font-size:12px;color:#6b7280;margin:0 0 10px;'>"
-        "Add one or more machines. <strong>Calendar Month</strong> cycle dates "
-        "auto-fill from the WO Start Date.</p>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Initialize mc_rows from WO data or empty ──────────────────────────────
-    if f"mc_rows_{wo_key}" not in st.session_state:
-        if selected_wo and selected_wo.get("machine_config"):
-            raw = selected_wo["machine_config"]
-            try:
-                records = json.loads(raw) if isinstance(raw, str) else raw
-                st.session_state[f"mc_rows_{wo_key}"] = records if isinstance(records, list) else []
-            except Exception:
-                st.session_state[f"mc_rows_{wo_key}"] = []
-        else:
-            st.session_state[f"mc_rows_{wo_key}"] = []
-
-    mc_rows: list[dict] = st.session_state[f"mc_rows_{wo_key}"]
-    ref_date_for_dialog = selected_start_date if isinstance(selected_start_date, date) else None
-
-    # ── Machine rows table ─────────────────────────────────────────────────────
-    if mc_rows:
-        th1, th2, th3, th4, th5, th6 = st.columns([4, 2, 3, 3, 2, 2])
-        for th, lbl in zip(
-            [th1, th2, th3, th4, th5, th6],
-            ["Machine", "Make / Model", "Billing Type", "Billing Cycle", "Rental / Mo", ""],
-        ):
-            th.markdown(
-                f"<div style='font-size:10px;font-weight:700;color:#6b7280;"
-                f"letter-spacing:.08em;text-transform:uppercase;padding-bottom:4px;"
-                f"border-bottom:1px solid #e5e7eb;'>{lbl}</div>",
-                unsafe_allow_html=True,
-            )
-
-        for idx, row in enumerate(mc_rows):
-            c1, c2, c3, c4, c5, c6 = st.columns([4, 2, 3, 3, 2, 2])
-            c1.write(row.get("machine_label") or "—")
-            c2.write(
-                " / ".join(filter(None, [
-                    row.get("make", ""), row.get("model", ""),
-                ])) or "—"
-            )
-            c3.write(row.get("billing_type") or "—")
-            c4.write(row.get("billing_cycle") or "—")
-            c5.write(f"{float(row.get('rental_per_month') or 0):,.0f}")
-            with c6:
-                e1, e2 = st.columns(2)
-                with e1:
-                    if st.button("Edit", key=f"mc_edit_{idx}_{wo_key}", use_container_width=True):
-                        _init_dialog_state(row, label_to_details, ref_date_for_dialog)
-                        _machine_row_dialog(
-                            row_idx=idx, mc_rows=mc_rows, wo_key=wo_key,
-                            machine_opts=machine_opts, label_to_id=label_to_id,
-                            label_to_details=label_to_details, ref_date=ref_date_for_dialog,
-                        )
-                with e2:
-                    if st.button("Del", key=f"mc_del_{idx}_{wo_key}", use_container_width=True):
-                        updated = list(mc_rows)
-                        updated.pop(idx)
-                        st.session_state[f"mc_rows_{wo_key}"] = updated
-                        st.rerun()
-    else:
+        # Search with icon overlay
         st.markdown(
-            "<p style='color:#9ca3af;font-size:13px;padding:12px 0;'>"
-            "No machines added yet — click <strong>+ Add Machine</strong> below.</p>",
+            "<div class='search-wrap'>"
+            "<span class='search-icon-abs msr'>search</span>",
+            unsafe_allow_html=True,
+        )
+        search_q = st.text_input(
+            "search", label_visibility="collapsed",
+            placeholder="Search WOs, customers…",
+            key="wo_search_q",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        q = search_q.strip().lower()
+        filtered_wos = sorted(
+            [
+                w for w in work_orders
+                if not q
+                or q in (w.get("wo_number") or "").lower()
+                or q in customer_map.get(w.get("customer_id", ""), {}).get("customer_name", "").lower()
+                or q in site_map.get(w.get("site_id", ""), {}).get("site_name", "").lower()
+            ],
+            key=lambda w: w.get("wo_number") or "",
+        )
+
+        count_txt = (
+            f"<span style='color:#E87722;font-weight:700;'>{len(filtered_wos)}</span>"
+            f" of {n_total} work orders"
+            if q else
+            f"<span style='font-weight:700;color:#111827;'>{n_total}</span> work orders"
+        )
+        st.markdown(
+            f"<div style='font-size:11px;color:#6B7280;margin:4px 0 10px;'>{count_txt}</div>",
             unsafe_allow_html=True,
         )
 
-    # ── Add Machine button ─────────────────────────────────────────────────────
-    if st.button("+ Add Machine", key=f"mc_add_{wo_key}"):
-        _init_dialog_state({}, label_to_details, ref_date_for_dialog)
-        _machine_row_dialog(
-            row_idx=-1, mc_rows=mc_rows, wo_key=wo_key,
-            machine_opts=machine_opts, label_to_id=label_to_id,
-            label_to_details=label_to_details, ref_date=ref_date_for_dialog,
-        )
-
-    # ── Summary bar ───────────────────────────────────────────────────────────
-    valid_mc = [r for r in mc_rows if r.get("machine_label") or r.get("machine_id")]
-    if valid_mc:
-        total_rental = sum(float(r.get("rental_per_month") or 0) for r in valid_mc)
-        st.markdown(
-            f"<div style='display:flex;gap:32px;padding:8px 12px;"
-            f"background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;"
-            f"margin-top:8px;font-size:12px;'>"
-            f"<span style='color:#6b7280;'>Machines: "
-            f"<strong style='color:#111827;'>{len(valid_mc)}</strong></span>"
-            f"<span style='color:#6b7280;'>Total Rental / Month: "
-            f"<strong style='color:#E87722;'>{total_rental:,.0f}</strong></span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
-
-    # ── Form (submit) ──────────────────────────────────────────────────────────
-    with st.form("wo_form"):
-        if selected_wo:
-            st.markdown(
-                f"<span style='font-size:11px;color:#6b7280;'>WO Number: "
-                f"<strong>{selected_wo.get('wo_number', '—')}</strong></span>",
-                unsafe_allow_html=True,
-            )
-            st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
-
-        submitted = st.form_submit_button(
-            "Update Work Order" if selected_wo else "Create Work Order"
-        )
-
-        if submitted:
-            if not selected_customer_id:
-                st.error("Customer is required.")
-            elif not selected_site_id:
-                st.error("Site is required.")
-            elif not selected_start_date:
-                st.error("Start Date is required.")
+        with st.container(height=530):
+            if not filtered_wos:
+                st.markdown(
+                    "<div class='no-results'>"
+                    "<span class='nr-icon msr'>search_off</span>"
+                    "No work orders match your search."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
             else:
-                mc_rows_save = st.session_state.get(f"mc_rows_{wo_key}", [])
-                valid_rows   = [r for r in mc_rows_save if r.get("machine_label") or r.get("machine_id")]
-                if not valid_rows:
-                    st.error("Add at least one machine.")
-                else:
-                    machine_config_json = json.dumps(valid_rows)
-                    payload = dict(
-                        customer_id=selected_customer_id,
-                        site_id=selected_site_id,
-                        start_date=selected_start_date.isoformat() if isinstance(selected_start_date, date) else None,
-                        end_date=selected_end_date.isoformat()     if isinstance(selected_end_date, date)   else None,
-                        client_work_ordernumber=selected_client_wo or None,
-                        machine_config=machine_config_json,
+                for w in filtered_wos:
+                    wid        = w.get("id", "")
+                    wo_num     = w.get("wo_number") or "—"
+                    cust_name  = customer_map.get(w.get("customer_id", ""), {}).get("customer_name", "")
+                    site_name  = site_map.get(w.get("site_id", ""), {}).get("site_name", "")
+                    status     = w.get("status") or "Draft"
+                    start_d    = w.get("start_date") or ""
+                    end_d      = w.get("end_date") or ""
+                    date_range = f"{start_d} → {end_d}" if start_d else "No dates set"
+                    t_rent     = _wo_total_rental(w)
+                    rental_html = (
+                        f"<span class='wo-rental-badge'>₹{t_rent:,.0f}</span>"
+                        if t_rent else ""
                     )
-                    try:
-                        if selected_wo:
-                            sb.update_work_order(selected_wo_id, payload)
-                            st.success("Work order updated.")
-                        else:
-                            created = sb.insert_work_order(payload)
-                            wo_num  = created.get("wo_number") or created.get("id", "")
-                            st.success(f"Work order created: {wo_num}")
-                        # Mark every allocated machine as Reserved
-                        for row in valid_rows:
-                            mid = row.get("machine_id") or label_to_id.get(row.get("machine_label", ""))
-                            if mid:
-                                try:
-                                    sb.update_machine(mid, {"operational_status": "Reserved"})
-                                except Exception:
-                                    pass
-                        work_orders = fetch_work_orders()
-                    except Exception as exc:
-                        st.error(f"Could not save work order: {exc}")
+                    is_sel  = (wid == selected_wo_id and mode == "edit")
+                    sel_cls = " wo-sel" if is_sel else ""
+                    b_cls   = _STATUS_BADGE_MAP.get(status, "badge-draft")
+                    site_html = (
+                        f"<span class='wo-cl-dot'></span>{site_name}"
+                        if site_name else ""
+                    )
 
-    # ── Work order list ────────────────────────────────────────────────────────
-    st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
-    col_cap, col_btn = st.columns([5, 1])
-    with col_cap:
-        st.markdown('<p class="filter-label">All Work Orders</p>', unsafe_allow_html=True)
-    with col_btn:
-        if st.button("Refresh", key="refresh_wo"):
-            work_orders = fetch_work_orders()
+                    st.markdown(
+                        f"<div class='wo-card{sel_cls}'>"
+                        f"<div class='wo-card-top'>"
+                        f"<span class='wo-num'>{wo_num}</span>"
+                        f"<span class='{b_cls}'>{status}</span>"
+                        f"{rental_html}"
+                        f"</div>"
+                        f"<div class='wo-card-sub'>"
+                        f"<span class='msr' style='font-size:12px;opacity:.6;'>business</span>"
+                        f"{cust_name or '—'}{site_html}"
+                        f"</div>"
+                        f"<div class='wo-date-range'>"
+                        f"<span class='msr' style='font-size:11px;'>calendar_month</span>"
+                        f"{date_range}"
+                        f"</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if st.button(
+                        "✓ Selected" if is_sel else "Open →",
+                        key=f"wosel_{wid}",
+                        use_container_width=True,
+                        help=wo_num,
+                        type="primary" if is_sel else "secondary",
+                    ):
+                        st.session_state["_wo_mode"]       = "edit"
+                        st.session_state["_wo_sel_id"]     = wid
+                        st.session_state["_editing_wo_id"] = None   # force sync
+                        st.rerun()
 
-    if work_orders:
-        rows = []
-        for w in work_orders:
-            mc_raw    = w.get("machine_config")
-            mc_list   = []
-            total_rnt = 0.0
-            if mc_raw:
-                try:
-                    mc_records = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
-                    mc_list    = [r.get("machine_label", "") for r in mc_records if r.get("machine_label")]
-                    total_rnt  = sum(float(r.get("rental_per_month") or 0) for r in mc_records)
-                except Exception:
-                    pass
-            rows.append({
-                "WO Number":    w.get("wo_number", ""),
-                "Customer":     customer_map.get(w.get("customer_id", ""), {}).get("customer_name", ""),
-                "Site":         site_map.get(w.get("site_id", ""), {}).get("site_name", ""),
-                "Start Date":   w.get("start_date", ""),
-                "End Date":     w.get("end_date", ""),
-                "Machines":     len(mc_list),
-                "Machine List": ", ".join(mc_list) if mc_list else "—",
-                "Total Rental": f"{total_rnt:,.0f}" if total_rnt else "—",
-            })
-        st.dataframe(rows, use_container_width=True, hide_index=True)
-    else:
-        st.info("No work orders found.")
+    # ══════════════════════════════════════════════════════════════════════════
+    # RIGHT PANEL
+    # ══════════════════════════════════════════════════════════════════════════
+    with right_col:
+
+        # ── EMPTY STATE ───────────────────────────────────────────────────────
+        if mode == "none":
+            st.markdown(
+                "<div class='wo-empty'>"
+                "<div class='wo-empty-ring'>"
+                "<span class='msr' style='font-size:36px;color:#E87722;'>assignment</span>"
+                "</div>"
+                "<h3>No work order selected</h3>"
+                "<p>Select a work order from the list on the left, "
+                "or click <strong>+ New WO</strong> to create one.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── NEW / EDIT PANEL ──────────────────────────────────────────────────
+        else:
+            wo_num_disp   = (selected_wo.get("wo_number") if selected_wo else None) or "New Work Order"
+            cust_name_disp = customer_map.get(
+                (selected_wo.get("customer_id") if selected_wo else None) or "", {}
+            ).get("customer_name", "")
+            status_disp   = (selected_wo.get("status") if selected_wo else None) or "Draft"
+            b_cls_hero    = _STATUS_BADGE_MAP.get(status_disp, "badge-draft")
+            badge_cls     = "hero-badge-edit" if mode == "edit" else "hero-badge-new"
+            badge_lbl     = "Editing" if mode == "edit" else "New Work Order"
+            meta_line     = f"Customer: {cust_name_disp}" if cust_name_disp else "Unsaved — fill in details below"
+            contract_val  = _wo_total_rental(selected_wo) if selected_wo else 0.0
+
+            contract_html = (
+                f"<div class='wo-hero-value'>"
+                f"<div class='wo-hero-value-label'>Contract / Month</div>"
+                f"<div class='wo-hero-value-num'>₹{contract_val:,.0f}</div>"
+                f"</div>"
+            ) if contract_val else ""
+
+            # Hero banner
+            st.markdown(
+                f"<div class='wo-hero'>"
+                f"<div class='wo-hero-icon'>"
+                f"<span class='msr' style='color:#FBD4B4;'>assignment</span>"
+                f"</div>"
+                f"<div style='flex:1;min-width:0;position:relative;z-index:1;'>"
+                f"<div class='wo-hero-num'>{wo_num_disp}</div>"
+                f"<div class='wo-hero-meta'>{meta_line}</div>"
+                f"<div style='margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;'>"
+                f"<span class='{b_cls_hero}'>{status_disp}</span>"
+                f"<span class='hero-badge {badge_cls}'>{badge_lbl}</span>"
+                f"</div></div>"
+                f"{contract_html}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # ── TABS ──────────────────────────────────────────────────────────
+            tab_overview, tab_mc, tab_billing, tab_docs = st.tabs([
+                "📋 Overview",
+                "⚙️ Machine Config",
+                "💰 Billing",
+                "📄 Documents",
+            ])
+
+            # ── Tab 1: Overview ───────────────────────────────────────────────
+            with tab_overview:
+                # Read-only summary for existing WOs
+                if mode == "edit" and selected_wo:
+                    sw = selected_wo
+                    cust_nm  = customer_map.get(sw.get("customer_id", ""), {}).get("customer_name", "")
+                    site_nm  = site_map.get(sw.get("site_id", ""), {}).get("site_name", "")
+                    mc_count = 0
+                    if sw.get("machine_config"):
+                        try:
+                            mc_r = json.loads(sw["machine_config"]) if isinstance(sw["machine_config"], str) else sw["machine_config"]
+                            mc_count = len([
+                                r for r in (mc_r if isinstance(mc_r, list) else [])
+                                if r.get("machine_label") or r.get("machine_id")
+                            ])
+                        except Exception:
+                            pass
+                    _section_hdr("info", "Work Order Summary")
+                    st.markdown(
+                        f"<div class='info-grid'>"
+                        + _info_field("WO Number",    sw.get("wo_number"))
+                        + _info_field("Status",       sw.get("status") or "Draft")
+                        + _info_field("Customer",     cust_nm)
+                        + _info_field("Site",         site_nm)
+                        + _info_field("Start Date",   sw.get("start_date"))
+                        + _info_field("End Date",     sw.get("end_date"))
+                        + _info_field("Client WO #",  sw.get("client_work_ordernumber"))
+                        + _info_field("Machines",     str(mc_count) if mc_count else None)
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
+
+                # Editable form fields (both new and edit)
+                _section_hdr("edit", "Edit Details" if mode == "edit" else "Work Order Details")
+
+                with st.container(border=True):
+                    _section_hdr("business", "Customer & Site")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        selected_customer_id = st.selectbox(
+                            "Customer *",
+                            options=[""] + list(customer_map),
+                            format_func=lambda cid: "Select customer" if not cid
+                                else customer_map[cid].get("customer_name", "Unknown"),
+                            key="wo_customer_id",
+                        )
+                    with col2:
+                        filtered_sites = {
+                            sid: s for sid, s in site_map.items()
+                            if str(s.get("customer_id", "")) == str(selected_customer_id)
+                        }
+                        if st.session_state.get("wo_site_id") not in filtered_sites:
+                            st.session_state["wo_site_id"] = ""
+                        selected_site_id = st.selectbox(
+                            "Site *",
+                            options=[""] + list(filtered_sites),
+                            format_func=lambda sid: "Select site" if not sid
+                                else filtered_sites[sid].get("site_name", "Unknown"),
+                            key="wo_site_id",
+                        )
+
+                with st.container(border=True):
+                    _section_hdr("calendar_month", "Schedule")
+                    d1, d2 = st.columns(2)
+                    with d1:
+                        selected_start_date = st.date_input("Start Date *", key="wo_start_date")
+                    with d2:
+                        selected_end_date = st.date_input("End Date", key="wo_end_date")
+                    cwo1, _ = st.columns([2, 2])
+                    with cwo1:
+                        selected_client_wo = st.text_input(
+                            "Client Work Order Number", placeholder="Client WO#",
+                            key="wo_client_wo",
+                        )
+
+            # ── Tab 2: Machine Config ─────────────────────────────────────────
+            with tab_mc:
+                ref_date_for_dialog = st.session_state.get("wo_start_date")
+                if not isinstance(ref_date_for_dialog, date):
+                    ref_date_for_dialog = None
+
+                st.markdown(
+                    "<p style='font-size:12px;color:#6b7280;margin:0 0 12px;'>"
+                    "Add one or more machines. <strong>Calendar Month</strong> cycle dates "
+                    "auto-fill from the WO Start Date.</p>",
+                    unsafe_allow_html=True,
+                )
+
+                # Initialize mc_rows from WO data or empty
+                if f"mc_rows_{wo_key}" not in st.session_state:
+                    if selected_wo and selected_wo.get("machine_config"):
+                        raw = selected_wo["machine_config"]
+                        try:
+                            records = json.loads(raw) if isinstance(raw, str) else raw
+                            st.session_state[f"mc_rows_{wo_key}"] = records if isinstance(records, list) else []
+                        except Exception:
+                            st.session_state[f"mc_rows_{wo_key}"] = []
+                    else:
+                        st.session_state[f"mc_rows_{wo_key}"] = []
+
+                mc_rows: list[dict] = st.session_state[f"mc_rows_{wo_key}"]
+
+                # Machine rows table
+                if mc_rows:
+                    th1, th2, th3, th4, th5, th6 = st.columns([4, 2, 3, 3, 2, 2])
+                    for th, lbl in zip(
+                        [th1, th2, th3, th4, th5, th6],
+                        ["Machine", "Make / Model", "Billing Type", "Billing Cycle", "Rental / Mo", ""],
+                    ):
+                        th.markdown(
+                            f"<div style='font-size:10px;font-weight:700;color:#6b7280;"
+                            f"letter-spacing:.08em;text-transform:uppercase;padding-bottom:4px;"
+                            f"border-bottom:1px solid #e5e7eb;'>{lbl}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                    for idx, row in enumerate(mc_rows):
+                        c1, c2, c3, c4, c5, c6 = st.columns([4, 2, 3, 3, 2, 2])
+                        c1.write(row.get("machine_label") or "—")
+                        c2.write(
+                            " / ".join(filter(None, [
+                                row.get("make", ""), row.get("model", ""),
+                            ])) or "—"
+                        )
+                        c3.write(row.get("billing_type") or "—")
+                        c4.write(row.get("billing_cycle") or "—")
+                        c5.write(f"{float(row.get('rental_per_month') or 0):,.0f}")
+                        with c6:
+                            e1, e2 = st.columns(2)
+                            with e1:
+                                if st.button("Edit", key=f"mc_edit_{idx}_{wo_key}", use_container_width=True):
+                                    _init_dialog_state(row, label_to_details, ref_date_for_dialog)
+                                    _machine_row_dialog(
+                                        row_idx=idx, mc_rows=mc_rows, wo_key=wo_key,
+                                        machine_opts=machine_opts, label_to_id=label_to_id,
+                                        label_to_details=label_to_details, ref_date=ref_date_for_dialog,
+                                    )
+                            with e2:
+                                if st.button("Del", key=f"mc_del_{idx}_{wo_key}", use_container_width=True):
+                                    updated = list(mc_rows)
+                                    updated.pop(idx)
+                                    st.session_state[f"mc_rows_{wo_key}"] = updated
+                                    st.rerun()
+                else:
+                    st.markdown(
+                        "<p style='color:#9ca3af;font-size:13px;padding:12px 0;'>"
+                        "No machines added yet — click <strong>+ Add Machine</strong> below.</p>",
+                        unsafe_allow_html=True,
+                    )
+
+                # Add Machine button
+                if st.button("+ Add Machine", key=f"mc_add_{wo_key}"):
+                    _init_dialog_state({}, label_to_details, ref_date_for_dialog)
+                    _machine_row_dialog(
+                        row_idx=-1, mc_rows=mc_rows, wo_key=wo_key,
+                        machine_opts=machine_opts, label_to_id=label_to_id,
+                        label_to_details=label_to_details, ref_date=ref_date_for_dialog,
+                    )
+
+                # Summary bar
+                valid_mc = [r for r in mc_rows if r.get("machine_label") or r.get("machine_id")]
+                if valid_mc:
+                    total_mc_rental = sum(float(r.get("rental_per_month") or 0) for r in valid_mc)
+                    st.markdown(
+                        f"<div class='mc-summary-bar'>"
+                        f"<span style='color:#6b7280;'>Machines: "
+                        f"<strong style='color:#111827;'>{len(valid_mc)}</strong></span>"
+                        f"<span style='color:#6b7280;'>Total Rental / Month: "
+                        f"<strong style='color:#E87722;'>₹{total_mc_rental:,.0f}</strong></span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            # ── Tab 3: Billing ────────────────────────────────────────────────
+            with tab_billing:
+                billing_rows = [
+                    r for r in st.session_state.get(f"mc_rows_{wo_key}", [])
+                    if r.get("machine_label") or r.get("machine_id")
+                ]
+                if billing_rows:
+                    _section_hdr("receipt_long", "Billing Summary")
+                    total_billed = 0.0
+                    for r in billing_rows:
+                        rent = float(r.get("rental_per_month") or 0)
+                        total_billed += rent
+                        cs = r.get("billing_cycle_start_date") or "—"
+                        ce = r.get("billing_cycle_end_date") or "—"
+                        cycle_range = f"{cs} → {ce}" if cs != "—" else "—"
+                        make_model  = " / ".join(filter(None, [r.get("make", ""), r.get("model", "")])) or "—"
+                        st.markdown(
+                            f"<div class='billing-card'>"
+                            f"<div class='billing-card-top'>"
+                            f"<span class='billing-machine-name'>"
+                            f"<span class='msr' style='font-size:13px;vertical-align:-2px;"
+                            f"margin-right:4px;color:#9CA3AF;'>precision_manufacturing</span>"
+                            f"{r.get('machine_label') or '—'}</span>"
+                            f"<span class='billing-amount'>₹{rent:,.0f}</span>"
+                            f"</div>"
+                            f"<div class='billing-meta'>"
+                            f"<div class='billing-meta-item'>Type: <strong>{r.get('billing_type') or '—'}</strong></div>"
+                            f"<div class='billing-meta-item'>Cycle: <strong>{r.get('billing_cycle') or '—'}</strong></div>"
+                            f"<div class='billing-meta-item'>Cycle Dates: <strong>{cycle_range}</strong></div>"
+                            f"<div class='billing-meta-item'>Make / Model: <strong>{make_model}</strong></div>"
+                            f"</div></div>",
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown(
+                        f"<div style='display:flex;justify-content:flex-end;"
+                        f"padding:10px 16px;background:#FFF8F4;border:1px solid #FDDCBA;"
+                        f"border-radius:8px;margin-top:4px;'>"
+                        f"<span style='font-size:13px;color:#6b7280;'>Total / Month:&nbsp;</span>"
+                        f"<span style='font-size:16px;font-weight:800;color:#E87722;'>₹{total_billed:,.0f}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    _placeholder_tab(
+                        "receipt_long",
+                        "No billing data yet",
+                        "Add machines in the Machine Config tab to see billing details here.",
+                    )
+
+            # ── Tab 4: Documents ──────────────────────────────────────────────
+            with tab_docs:
+                _placeholder_tab(
+                    "folder_open",
+                    "Documents coming soon",
+                    "WO attachments, PO copies, and site reports will be managed here.",
+                )
+
+            # ── Action buttons ─────────────────────────────────────────────────
+            st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+            sv1, sv2, sv3, _ = st.columns([3, 1, 1, 2])
+            with sv1:
+                save_clicked = st.button(
+                    "💾  Update Work Order" if mode == "edit" else "💾  Create Work Order",
+                    type="primary",
+                    use_container_width=True,
+                    key="wo_save_btn",
+                )
+            with sv2:
+                if st.button("Cancel", use_container_width=True, key="wo_cancel_btn"):
+                    st.session_state["_wo_mode"]   = "none"
+                    st.session_state["_wo_sel_id"] = ""
+                    st.rerun()
+            with sv3:
+                if st.button("↻ Refresh", use_container_width=True, key="wo_refresh_btn"):
+                    st.session_state["_editing_wo_id"] = None
+                    st.rerun()
+
+            # ── Save logic ─────────────────────────────────────────────────────
+            if save_clicked:
+                _cust_id   = st.session_state.get("wo_customer_id", "")
+                _site_id   = st.session_state.get("wo_site_id", "")
+                _start     = st.session_state.get("wo_start_date")
+                _end       = st.session_state.get("wo_end_date")
+                _client_wo = st.session_state.get("wo_client_wo", "")
+
+                if not _cust_id:
+                    st.error("Customer is required.")
+                elif not _site_id:
+                    st.error("Site is required.")
+                elif not _start:
+                    st.error("Start Date is required.")
+                else:
+                    mc_rows_save = st.session_state.get(f"mc_rows_{wo_key}", [])
+                    valid_rows   = [r for r in mc_rows_save if r.get("machine_label") or r.get("machine_id")]
+                    if not valid_rows:
+                        st.error("Add at least one machine.")
+                    else:
+                        machine_config_json = json.dumps(valid_rows)
+                        payload = dict(
+                            customer_id=_cust_id,
+                            site_id=_site_id,
+                            start_date=_start.isoformat() if isinstance(_start, date) else None,
+                            end_date=_end.isoformat()     if isinstance(_end,   date) else None,
+                            client_work_ordernumber=_client_wo or None,
+                            machine_config=machine_config_json,
+                        )
+                        try:
+                            if selected_wo:
+                                sb.update_work_order(selected_wo_id, payload)
+                                st.success("Work order updated.")
+                            else:
+                                created = sb.insert_work_order(payload)
+                                wo_num  = created.get("wo_number") or created.get("id", "")
+                                st.success(f"Work order created: {wo_num}")
+                                new_id = created.get("id", "")
+                                if new_id:
+                                    st.session_state["_wo_mode"]       = "edit"
+                                    st.session_state["_wo_sel_id"]     = new_id
+                                    st.session_state["_editing_wo_id"] = None
+                            # Mark every allocated machine as Reserved
+                            for row in valid_rows:
+                                mid = row.get("machine_id") or label_to_id.get(row.get("machine_label", ""))
+                                if mid:
+                                    try:
+                                        sb.update_machine(mid, {"operational_status": "Reserved"})
+                                    except Exception:
+                                        pass
+                            work_orders = fetch_work_orders()
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Could not save work order: {exc}")
