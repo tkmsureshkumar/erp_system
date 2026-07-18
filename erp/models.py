@@ -374,3 +374,26 @@ class OperatorOption(BaseModel):
 # Convenience: list[str] of enum values for selectboxes.
 def enum_values(enum_cls: type[Enum]) -> list[str]:
     return [e.value for e in enum_cls]
+
+
+# --------------------------------------------------------------------------- #
+# MACHINE MOVEMENT                                                             #
+# --------------------------------------------------------------------------- #
+class MachineMovementType(str, Enum):
+    LOAD    = "Load"
+    TRANSIT = "Transit"
+    UNLOAD  = "Unload"
+
+
+class MachineMovement(BaseModel):
+    id:            str
+    movement_code: str
+    machine_id:    str
+    asset_code:    str
+    movement_type: MachineMovementType
+    from_location: Optional[str] = None
+    to_location:   Optional[str] = None
+    movement_date: date
+    comments:      Optional[str] = None
+    created_at:    Optional[str] = None
+    created_by:    Optional[str] = None

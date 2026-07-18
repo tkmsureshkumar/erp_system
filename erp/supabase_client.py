@@ -788,6 +788,79 @@ class SupabaseClient:
             return data
         return {}
 
+    # ── Machine movements ─────────────────────────────────────────────────
+
+    def insert_machine_movement(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("machine_movements").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_machine_movements(self, machine_id: str | None = None) -> List[Dict[str, Any]]:
+        query = (
+            self.client.table("machine_movements")
+            .select("*")
+            .order("movement_date", desc=True)
+            .limit(200)
+        )
+        if machine_id:
+            query = query.eq("machine_id", machine_id)
+        resp = query.execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list):
+            return data
+        return []
+
+    def update_machine_movement(self, movement_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = (
+            self.client.table("machine_movements")
+            .update(payload)
+            .eq("id", movement_id)
+            .execute()
+        )
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
     # ── Activity logging ──────────────────────────────────────────────────
 
     def log_activity(
