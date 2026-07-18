@@ -416,7 +416,7 @@ def render() -> None:
                 value=date.today(),
                 key="mm_load_date",
             )
-        if st.button("Record Load", type="primary", key="mm_load_save"):
+        if st.button("Machine Load", type="primary", key="mm_load_save"):
             to_loc = load_to_custom.strip() if load_dest == _OTHER_LOCATION else load_dest
             if not to_loc:
                 st.error("Please specify a destination location.")
