@@ -810,7 +810,7 @@ class SupabaseClient:
             return data
         return {}
 
-    def list_machine_movements(self, machine_id: str | None = None) -> List[Dict[str, Any]]:
+    def list_machine_movements(self, machine_id: str = None) -> List[Dict[str, Any]]:
         query = (
             self.admin_client.table("machine_movements")
             .select("*")
