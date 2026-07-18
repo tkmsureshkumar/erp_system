@@ -791,7 +791,7 @@ class SupabaseClient:
     # ── Machine movements ─────────────────────────────────────────────────
 
     def insert_machine_movement(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        resp = self.client.table("machine_movements").insert(payload).execute()
+        resp = self.admin_client.table("machine_movements").insert(payload).execute()
         data = None
         error = None
         if hasattr(resp, "data"):
@@ -812,7 +812,7 @@ class SupabaseClient:
 
     def list_machine_movements(self, machine_id: str | None = None) -> List[Dict[str, Any]]:
         query = (
-            self.client.table("machine_movements")
+            self.admin_client.table("machine_movements")
             .select("*")
             .order("movement_date", desc=True)
             .limit(200)
@@ -838,7 +838,7 @@ class SupabaseClient:
 
     def update_machine_movement(self, movement_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         resp = (
-            self.client.table("machine_movements")
+            self.admin_client.table("machine_movements")
             .update(payload)
             .eq("id", movement_id)
             .execute()
