@@ -294,6 +294,23 @@ def render() -> None:
         except Exception:
             mc_rows = []
 
+    # ── Location filter: only show machines whose current_location matches the WO site ──
+    _wo_site       = site_map.get(selected_wo.get("site_id", ""), {})
+    _site_name_n   = (_wo_site.get("site_name") or "").strip().lower()
+    _site_city_n   = (_wo_site.get("city")      or "").strip().lower()
+
+    def _location_matches_site(machine_id: str) -> bool:
+        m       = machine_full_map.get(machine_id, {})
+        cur_loc = (m.get("current_location") or "").strip().lower()
+        if not cur_loc:
+            return True   # location not set — include by default
+        name_match = _site_name_n and (_site_name_n in cur_loc or cur_loc in _site_name_n)
+        city_match = _site_city_n and (_site_city_n in cur_loc or cur_loc in _site_city_n)
+        return bool(name_match or city_match)
+
+    filtered_mc_rows = [mr for mr in mc_rows if _location_matches_site(mr.get("machine_id", ""))]
+    excluded_mc_rows = [mr for mr in mc_rows if not _location_matches_site(mr.get("machine_id", ""))]
+
     # Parse saved deployment machine rows (used by both modes)
     _ro_mc_dates: dict[str, dict] = {}
     _raw_mcd_ro = existing_dep.get("machine_deployments")
@@ -366,9 +383,24 @@ def render() -> None:
         )
 
     # Machine detail card (show for both modes, but only with selectbox in editable)
-    if mc_rows:
+    if excluded_mc_rows:
+        excl_names = ", ".join(mr.get("machine_label", "—") for mr in excluded_mc_rows)
+        _excl_site_label = _wo_site.get("site_name") or _wo_site.get("city") or "the work order site"
+        st.markdown(
+            f"<div style='margin-top:12px;padding:10px 14px;background:#FFF7ED;"
+            f"border:1px solid #FED7AA;border-radius:8px;font-size:12px;color:#92400E;"
+            f"display:flex;align-items:flex-start;gap:8px;'>"
+            f"<span class='msr' style='font-size:15px;flex-shrink:0;'>location_off</span>"
+            f"<div><strong>Location mismatch — hidden from selector:</strong> {excl_names}. "
+            f"These machines are not currently located at <strong>{_excl_site_label}</strong>. "
+            f"Move them to the site first via the Machine Movement page.</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    if filtered_mc_rows:
         st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
-        machine_labels = [mr.get("machine_label", f"Machine {i+1}") for i, mr in enumerate(mc_rows)]
+        machine_labels = [mr.get("machine_label", f"Machine {i+1}") for i, mr in enumerate(filtered_mc_rows)]
 
         sel_machine_label = st.selectbox(
             "Select Machine",
@@ -378,8 +410,8 @@ def render() -> None:
         )
 
         sel_mr = next(
-            (mr for mr in mc_rows if mr.get("machine_label") == sel_machine_label),
-            mc_rows[0],
+            (mr for mr in filtered_mc_rows if mr.get("machine_label") == sel_machine_label),
+            filtered_mc_rows[0],
         )
 
         op_status   = machine_status_map.get(sel_mr.get("machine_id", ""), "")
@@ -562,8 +594,8 @@ def render() -> None:
 
     _DEPLOY_TYPES = ["Mob", "Demob", "Other"]
 
-    if mc_rows:
-        _section_b_machines = [sel_mr] if sel_mr else mc_rows
+    if filtered_mc_rows:
+        _section_b_machines = [sel_mr] if sel_mr else filtered_mc_rows
         for idx, mr in enumerate(_section_b_machines):
             mlabel    = mr.get("machine_label", "")
             mid       = mr.get("machine_id") or mlabel
@@ -656,7 +688,7 @@ def render() -> None:
         st.markdown(
             "<div style='padding:20px 16px;background:#f8fafc;border:1px solid #e2e8f0;"
             "border-radius:8px;text-align:center;font-size:13px;color:#9ca3af;'>"
-            "No machines to configure.</div>",
+            "No machines at this site location to configure.</div>",
             unsafe_allow_html=True,
         )
 
