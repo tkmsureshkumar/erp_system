@@ -22,7 +22,7 @@ _MINUTES = [f"{m:02d}" for m in range(0, 60, 5)]   # 00, 05, 10 … 55
 _SCHED_COLS = [
     "Date", "Weekday",
     "Start Time", "End Time", "Net Time",
-    "Start HMR", "End HMR", "Breakdown Hours",
+    "Start HMR", "End HMR", "Net HMR", "Breakdown Hours",
     "OT", "Operator", "Remarks",
 ]
 
@@ -111,6 +111,7 @@ def _build_schedule(
             "Net Time":        None if is_sunday else _net_hours(shift_start, shift_end),
             "Start HMR":       None,
             "End HMR":         None,
+            "Net HMR":         None,
             "Breakdown Hours": None if is_sunday else 0.0,
             "OT":              None if is_sunday else 0,
             "Operator":        "",
@@ -134,6 +135,7 @@ def _schedule_to_json(df: pd.DataFrame) -> str:
             "net_time":        float(row.get("Net Time") or 0) if pd.notna(row.get("Net Time")) else None,
             "start_hmr":       float(row.get("Start HMR")) if pd.notna(row.get("Start HMR")) else None,
             "end_hmr":         float(row.get("End HMR"))   if pd.notna(row.get("End HMR"))   else None,
+            "net_hmr":         float(row.get("Net HMR"))   if pd.notna(row.get("Net HMR"))   else None,
             "breakdown_hours": float(row.get("Breakdown Hours")) if pd.notna(row.get("Breakdown Hours")) else None,
             "ot":              float(row.get("OT")) if pd.notna(row.get("OT")) else None,
             "operator":        str(row.get("Operator") or ""),
@@ -158,6 +160,7 @@ def _json_to_schedule_df(raw) -> pd.DataFrame | None:
                 "Net Time":        r.get("net_time"),
                 "Start HMR":       r.get("start_hmr"),
                 "End HMR":         r.get("end_hmr"),
+                "Net HMR":         r.get("net_hmr"),
                 "Breakdown Hours": r.get("breakdown_hours"),
                 "OT":              r.get("ot"),
                 "Operator":        r.get("operator", ""),
@@ -361,6 +364,8 @@ def _render_shift_editor(
                                    min_value=0, step=0.1, width="small"),
             "End HMR":         st.column_config.NumberColumn("End HMR", format="%.1f",
                                    min_value=0, step=0.1, width="small"),
+            "Net HMR":         st.column_config.NumberColumn("Net HMR", format="%.1f",
+                                   disabled=True, width="small"),
             "Breakdown Hours": st.column_config.NumberColumn("B/D Hrs", format="%.1f",
                                    min_value=0, step=0.5, width="small"),
             "OT":              st.column_config.NumberColumn("OT Hrs", format="%.1f",
@@ -411,6 +416,20 @@ def _render_shift_editor(
                 if cur_ot_na or abs(float(cur_ot) - expected_ot) > 0.001:
                     clean.at[idx, "OT"] = expected_ot
                     needs_recalc = True
+            # Net HMR = End HMR - Start HMR (auto-calculated, read-only)
+            s_hmr = row.get("Start HMR")
+            e_hmr = row.get("End HMR")
+            s_hmr_ok = s_hmr is not None and not (not isinstance(s_hmr, bool) and pd.isna(s_hmr))
+            e_hmr_ok = e_hmr is not None and not (not isinstance(e_hmr, bool) and pd.isna(e_hmr))
+            expected_net_hmr = round(float(e_hmr) - float(s_hmr), 2) if (s_hmr_ok and e_hmr_ok) else None
+            cur_net_hmr    = row.get("Net HMR")
+            cur_nhmr_na    = cur_net_hmr is None or (not isinstance(cur_net_hmr, bool) and pd.isna(cur_net_hmr))
+            if cur_nhmr_na != (expected_net_hmr is None) or (
+                not cur_nhmr_na and expected_net_hmr is not None
+                and abs(float(cur_net_hmr) - expected_net_hmr) > 0.001
+            ):
+                clean.at[idx, "Net HMR"] = expected_net_hmr
+                needs_recalc = True
         if needs_recalc:
             st.session_state[f"sched_data_{base_key}"]   = clean
             st.session_state[f"sched_recalc_{base_key}"] = recalc_count + 1
@@ -819,6 +838,7 @@ def render() -> None:
             + _totals_cell("Working Days", _wd_display)
             + _totals_cell("Net Time (hrs)", f"{float(_d['Net Time'].fillna(0).sum()):.1f}")
             + _totals_cell("Shift OT (hrs)", f"{float(_d['OT'].fillna(0).sum()):.1f}")
+            + _totals_cell("Net HMR", f"{float(_d['Net HMR'].fillna(0).sum()):.1f}")
             + _totals_cell("Breakdown (hrs)", f"{float(_d['Breakdown Hours'].fillna(0).sum()):.1f}")
             + "<td style='padding:8px 14px;' colspan='2'></td>"
             "</tr></tbody></table></div>",
