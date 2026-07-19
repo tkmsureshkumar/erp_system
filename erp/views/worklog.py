@@ -23,7 +23,7 @@ _SCHED_COLS = [
     "Date", "Weekday",
     "Start Time", "End Time", "Net Time",
     "Start HMR", "End HMR", "Breakdown Hours",
-    "OT", "HSD in Ltr", "Operator", "Remarks",
+    "OT", "Operator", "Remarks",
 ]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -113,7 +113,6 @@ def _build_schedule(
             "End HMR":         None,
             "Breakdown Hours": None if is_sunday else 0.0,
             "OT":              None if is_sunday else 0,
-            "HSD in Ltr":      None if is_sunday else 0.0,
             "Operator":        "",
             "Remarks":         "",
         })
@@ -137,7 +136,6 @@ def _schedule_to_json(df: pd.DataFrame) -> str:
             "end_hmr":         float(row.get("End HMR"))   if pd.notna(row.get("End HMR"))   else None,
             "breakdown_hours": float(row.get("Breakdown Hours")) if pd.notna(row.get("Breakdown Hours")) else None,
             "ot":              float(row.get("OT")) if pd.notna(row.get("OT")) else None,
-            "hsd_in_ltr":      float(row.get("HSD in Ltr")) if pd.notna(row.get("HSD in Ltr")) else None,
             "operator":        str(row.get("Operator") or ""),
             "remarks":         str(row.get("Remarks") or ""),
         })
@@ -162,7 +160,6 @@ def _json_to_schedule_df(raw) -> pd.DataFrame | None:
                 "End HMR":         r.get("end_hmr"),
                 "Breakdown Hours": r.get("breakdown_hours"),
                 "OT":              r.get("ot"),
-                "HSD in Ltr":      r.get("hsd_in_ltr"),
                 "Operator":        r.get("operator", ""),
                 "Remarks":         r.get("remarks", ""),
             }
@@ -368,8 +365,6 @@ def _render_shift_editor(
                                    min_value=0, step=0.5, width="small"),
             "OT":              st.column_config.NumberColumn("OT Hrs", format="%.1f",
                                    disabled=True, width="small"),
-            "HSD in Ltr":      st.column_config.NumberColumn("HSD in Ltr", format="%.1f",
-                                   min_value=0, step=0.5, width="small"),
             "Operator":        st.column_config.SelectboxColumn("Operator",
                                    options=operator_names, width="medium"),
             "Remarks":         st.column_config.TextColumn("Remarks", width="medium"),
@@ -825,7 +820,6 @@ def render() -> None:
             + _totals_cell("Net Time (hrs)", f"{float(_d['Net Time'].fillna(0).sum()):.1f}")
             + _totals_cell("Shift OT (hrs)", f"{float(_d['OT'].fillna(0).sum()):.1f}")
             + _totals_cell("Breakdown (hrs)", f"{float(_d['Breakdown Hours'].fillna(0).sum()):.1f}")
-            + _totals_cell("HSD (Ltr)", f"{float(_d['HSD in Ltr'].fillna(0).sum()):.1f}")
             + "<td style='padding:8px 14px;' colspan='2'></td>"
             "</tr></tbody></table></div>",
             unsafe_allow_html=True,
