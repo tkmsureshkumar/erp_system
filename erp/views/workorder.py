@@ -333,8 +333,8 @@ def _parse_machine_config(raw, id_to_label: dict) -> pd.DataFrame:
                 "Billing Type":   r.get("billing_type", BILLING_TYPES[0]),
                 "Billing Cycle":  r.get("billing_cycle", BILLING_CYCLES[0]),
                 "Rental / Month": float(r.get("rental_per_month") or 0.0),
-                "Cycle Start":    _parse_date(r.get("billing_cycle_start_date")),
-                "Cycle End":      _parse_date(r.get("billing_cycle_end_date")),
+                "Cycle Start":    (_parse_date(r.get("billing_cycle_start_date")) or date.today()).day,
+                "Cycle End":      (_parse_date(r.get("billing_cycle_end_date"))   or date.today()).day,
             })
         return pd.DataFrame(rows, columns=_MC_COLS)
     except Exception:
@@ -383,6 +383,8 @@ def _init_dialog_state(row: dict, label_to_details: dict, ref_date) -> None:
     ce = _parse_date(row.get("billing_cycle_end_date"))
     if not cs:
         cs, ce = _default_cycle_dates(ref_date if isinstance(ref_date, date) else None)
+    cs_day = cs.day if isinstance(cs, date) else 1
+    ce_day = ce.day if isinstance(ce, date) else 31
     st.session_state.update({
         p + "machine":      label,
         p + "prev_m":       label,
@@ -392,8 +394,8 @@ def _init_dialog_state(row: dict, label_to_details: dict, ref_date) -> None:
         p + "bt":           row.get("billing_type")  or BILLING_TYPES[0],
         p + "bc":           row.get("billing_cycle") or BILLING_CYCLES[0],
         p + "rental":       float(row.get("rental_per_month") or 0),
-        p + "cs":           cs or date.today(),
-        p + "ce":           ce or date.today(),
+        p + "cs":           cs_day,
+        p + "ce":           ce_day,
         p + "no_of_days":   row.get("no_of_days")            or "",
         p + "shift_hour":   row.get("machine_shift_hour")   or "",
         p + "mob_cost":     float(row.get("mobilization_cost")   or 0),
@@ -463,21 +465,21 @@ def _machine_row_dialog(
         "Rental / Month", min_value=0.0, step=1000.0, format="%.0f", key=p + "rental",
     )
 
-    # Cycle dates — Calendar Month auto-fills from WO start date
-    auto_cs, auto_ce = _default_cycle_dates(ref_date if isinstance(ref_date, date) else None)
+    # Cycle day dropdowns — Calendar Month auto-fills to day 1 → 31
     if billing_cycle == "Calendar Month":
-        st.session_state[p + "cs"] = auto_cs
-        st.session_state[p + "ce"] = auto_ce
+        st.session_state[p + "cs"] = 1
+        st.session_state[p + "ce"] = 31
 
+    _day_opts = list(range(1, 32))
     d1, d2 = st.columns(2)
     with d1:
-        cycle_start = st.date_input(
-            "Cycle Start", key=p + "cs",
+        cycle_start_day = st.selectbox(
+            "Cycle Start (Day)", options=_day_opts, key=p + "cs",
             disabled=(billing_cycle == "Calendar Month"),
         )
     with d2:
-        cycle_end = st.date_input(
-            "Cycle End", key=p + "ce",
+        cycle_end_day = st.selectbox(
+            "Cycle End (Day)", options=_day_opts, key=p + "ce",
             disabled=(billing_cycle == "Calendar Month"),
         )
 
@@ -588,8 +590,8 @@ def _machine_row_dialog(
                     "billing_type":             billing_type or BILLING_TYPES[0],
                     "billing_cycle":            billing_cycle or BILLING_CYCLES[0],
                     "rental_per_month":         float(rental or 0),
-                    "billing_cycle_start_date": cycle_start.isoformat() if isinstance(cycle_start, date) else None,
-                    "billing_cycle_end_date":   cycle_end.isoformat() if isinstance(cycle_end, date) else None,
+                    "billing_cycle_start_date": date(2000, 1, int(cycle_start_day)).isoformat() if cycle_start_day else None,
+                    "billing_cycle_end_date":   date(2000, 1, int(cycle_end_day)).isoformat() if cycle_end_day else None,
                     "no_of_days":               no_of_days   or None,
                     "machine_shift_hour":       shift_hour   or None,
                     "mobilization_cost":        float(mob_cost   or 0),
