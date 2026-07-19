@@ -294,19 +294,16 @@ def render() -> None:
         except Exception:
             mc_rows = []
 
-    # ── Location filter: only show machines whose current_location matches the WO site ──
-    _wo_site       = site_map.get(selected_wo.get("site_id", ""), {})
-    _site_name_n   = (_wo_site.get("site_name") or "").strip().lower()
-    _site_city_n   = (_wo_site.get("city")      or "").strip().lower()
+    # ── Location filter: only show machines whose current_site_id matches the WO site_id ──
+    _wo_site     = site_map.get(selected_wo.get("site_id", ""), {})
+    _wo_site_id  = selected_wo.get("site_id", "")
 
     def _location_matches_site(machine_id: str) -> bool:
-        m       = machine_full_map.get(machine_id, {})
-        cur_loc = (m.get("current_location") or "").strip().lower()
-        if not cur_loc:
-            return True   # location not set — include by default
-        name_match = _site_name_n and (_site_name_n in cur_loc or cur_loc in _site_name_n)
-        city_match = _site_city_n and (_site_city_n in cur_loc or cur_loc in _site_city_n)
-        return bool(name_match or city_match)
+        m = machine_full_map.get(machine_id, {})
+        machine_site_id = m.get("current_site_id") or ""
+        if not machine_site_id:
+            return True   # current_site_id not set — include by default
+        return machine_site_id == _wo_site_id
 
     filtered_mc_rows = [mr for mr in mc_rows if _location_matches_site(mr.get("machine_id", ""))]
     excluded_mc_rows = [mr for mr in mc_rows if not _location_matches_site(mr.get("machine_id", ""))]
