@@ -239,7 +239,6 @@ _PAGE_CSS = """
 </style>
 """
 
-_OTHER_LOCATION = "Other / Yard / Workshop"
 
 # ── HTML helpers ──────────────────────────────────────────────────────────────
 
@@ -726,7 +725,7 @@ def render() -> None:
 
     # ── Site DDL ──────────────────────────────────────────────────────────────
     site_labels  = [_site_label(s) for s in all_sites if s.get("site_code")]
-    site_options = sorted(site_labels) + [_OTHER_LOCATION]
+    site_options = sorted(site_labels)
     asset_code   = selected_machine.get("asset_code", "")
     from_loc     = selected_machine.get("current_location") or ""
 
@@ -736,17 +735,10 @@ def render() -> None:
         la1, la2 = st.columns([3, 2])
         with la1:
             load_dest = st.selectbox("To Location (Site)", options=site_options, key="mm_load_to_site")
-            load_to_custom = ""
-            if load_dest == _OTHER_LOCATION:
-                load_to_custom = st.text_input(
-                    "Custom To Location",
-                    placeholder="e.g. Mumbai Yard, Workshop, Transit Hub",
-                    key="mm_load_to_custom",
-                )
         with la2:
             load_date = st.date_input("Movement Date", value=date.today(), key="mm_load_date")
         if st.button("Machine Load", type="primary", key="mm_load_save"):
-            to_loc = load_to_custom.strip() if load_dest == _OTHER_LOCATION else load_dest
+            to_loc = load_dest
             if not to_loc:
                 st.error("Please specify a destination location.")
             else:
@@ -784,17 +776,10 @@ def render() -> None:
         uc1, uc2 = st.columns([3, 2])
         with uc1:
             unload_dest = st.selectbox("To Location (Site)", options=site_options, key="mm_unload_to_site")
-            unload_to_custom = ""
-            if unload_dest == _OTHER_LOCATION:
-                unload_to_custom = st.text_input(
-                    "Custom To Location",
-                    placeholder="e.g. Mumbai Yard, Workshop",
-                    key="mm_unload_to_custom",
-                )
         with uc2:
             unload_date = st.date_input("Movement Date", value=date.today(), key="mm_unload_date")
         if st.button("Record Unload", type="primary", key="mm_unload_save"):
-            to_loc = unload_to_custom.strip() if unload_dest == _OTHER_LOCATION else unload_dest
+            to_loc = unload_dest
             if not to_loc:
                 st.error("Please specify a destination location.")
             else:
