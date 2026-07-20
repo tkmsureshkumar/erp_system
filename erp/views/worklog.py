@@ -17,7 +17,6 @@ from ..supabase_client import SupabaseClient
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-_MINUTES = [f"{m:02d}" for m in range(0, 60, 5)]   # 00, 05, 10 … 55
 
 _SCHED_COLS = [
     "Date", "Weekday",
@@ -25,6 +24,7 @@ _SCHED_COLS = [
     "Start HMR", "End HMR", "Net HMR", "Breakdown Hours",
     "OT", "Operator", "Remarks",
 ]
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -46,46 +46,96 @@ def _parse_time(value) -> time | None:
         return None
     if isinstance(value, time):
         return value
+    # pd.Timestamp / datetime.datetime — extract time component
+    if isinstance(value, datetime):
+        return value.time()
+    # pd.Timedelta / datetime.timedelta — Arrow round-trips TimeColumn as duration-from-midnight
+    if hasattr(value, "total_seconds"):
+        try:
+            secs = int(value.total_seconds()) % 86400
+            return time(secs // 3600, (secs % 3600) // 60, secs % 60)
+        except Exception:
+            pass
     if isinstance(value, str):
+        value = value.strip()
         for fmt in ("%H:%M", "%H:%M:%S", "%I:%M %p", "%I:%M:%S %p"):
             try:
-                return datetime.strptime(value.strip(), fmt).time()
+                return datetime.strptime(value, fmt).time()
             except ValueError:
                 continue
+        # "HH:MM:SS.ffffff" or ISO fragment with date prefix
+        try:
+            return datetime.fromisoformat(value).time()
+        except (ValueError, TypeError):
+            pass
     return None
 
 
-def _set_ampm_state(key: str, t: time) -> None:
-    """Write hour / minute / period sub-keys for an AM/PM time picker."""
-    h12 = t.hour % 12 or 12
-    nearest_m = _MINUTES[min(range(len(_MINUTES)), key=lambda i: abs(int(_MINUTES[i]) - t.minute))]
-    st.session_state[f"{key}_h"] = str(h12)
-    st.session_state[f"{key}_m"] = nearest_m
-    st.session_state[f"{key}_p"] = "AM" if t.hour < 12 else "PM"
+def _recalc_df(
+    df: pd.DataFrame,
+    shift_start_t: "time | None",
+    shift_end_t: "time | None",
+) -> "tuple[pd.DataFrame, bool]":
+    """Recompute Net Time, OT, and Net HMR from Start/End times in *df*.
 
+    Returns (updated_df, changed). Called both pre-render (on df_to_show) and
+    post-render (on edited) so derived columns are always consistent.
+    """
+    shift_dur = _net_hours(shift_start_t, shift_end_t)
+    out = df.copy()
+    changed = False
 
-def _time_input_ampm(title: str, key: str) -> time:
-    """Render a labelled Hour / Min / AM-PM picker; returns a time object."""
-    st.markdown(
-        f"<div style='font-size:0.875rem;color:#31333f;margin-bottom:2px;'>{title}</div>",
-        unsafe_allow_html=True,
-    )
-    c1, c2, c3 = st.columns([2, 2, 2])
-    with c1:
-        h = st.selectbox("Hour", options=[str(h) for h in range(1, 13)],
-                         key=f"{key}_h", label_visibility="collapsed")
-    with c2:
-        m = st.selectbox("Min",  options=_MINUTES,
-                         key=f"{key}_m", label_visibility="collapsed")
-    with c3:
-        p = st.selectbox("AM/PM", options=["AM", "PM"],
-                         key=f"{key}_p", label_visibility="collapsed")
-    hour_24 = int(h) % 12 + (12 if p == "PM" else 0)
-    return time(hour_24, int(m))
+    for idx, row in out.iterrows():
+        st_ = _parse_time(row.get("Start Time"))
+        et_ = _parse_time(row.get("End Time"))
+        raw_net   = _net_hours(st_, et_)
+        is_sunday = str(row.get("Weekday", "")) == "Sunday"
+
+        if raw_net is not None:
+            if is_sunday:
+                exp_net = None
+                exp_ot  = round(raw_net, 2)
+            elif shift_dur is not None:
+                exp_net = raw_net
+                exp_ot  = round(max(0.0, raw_net - shift_dur), 2)
+            else:
+                exp_net = raw_net
+                exp_ot  = 0.0
+
+            cur_net    = row.get("Net Time")
+            cur_net_na = cur_net is None or _safe_isnan(cur_net)
+            if cur_net_na != (exp_net is None) or (
+                not cur_net_na and exp_net is not None
+                and abs(float(cur_net) - float(exp_net)) > 0.001
+            ):
+                out.at[idx, "Net Time"] = exp_net
+                changed = True
+
+            cur_ot    = row.get("OT")
+            cur_ot_na = cur_ot is None or _safe_isnan(cur_ot)
+            if cur_ot_na or abs(float(cur_ot if not cur_ot_na else 0) - exp_ot) > 0.001:
+                out.at[idx, "OT"] = exp_ot
+                changed = True
+
+        # Net HMR = End HMR − Start HMR
+        s_hmr = row.get("Start HMR")
+        e_hmr = row.get("End HMR")
+        s_ok  = s_hmr is not None and not _safe_isnan(s_hmr)
+        e_ok  = e_hmr is not None and not _safe_isnan(e_hmr)
+        if s_ok and e_ok:
+            exp_hmr    = round(float(e_hmr) - float(s_hmr), 2)
+            cur_hmr    = row.get("Net HMR")
+            cur_hmr_na = cur_hmr is None or _safe_isnan(cur_hmr)
+            if cur_hmr_na or abs(float(cur_hmr) - exp_hmr) > 0.001:
+                out.at[idx, "Net HMR"] = exp_hmr
+                changed = True
+
+    return out, changed
+
 
 
 def _net_hours(start: time | None, end: time | None) -> float | None:
-    if not start or not end:
+    if start is None or end is None:
         return None
     diff = (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
     if diff < 0:
@@ -93,11 +143,14 @@ def _net_hours(start: time | None, end: time | None) -> float | None:
     return round(diff / 60, 2)
 
 
+_DEFAULT_START = time(8, 0)   # 08:00:00
+_DEFAULT_END   = time(21, 0)  # 21:00:00
+_DEFAULT_NET   = _net_hours(_DEFAULT_START, _DEFAULT_END)  # 13.0
+
+
 def _build_schedule(
     start_date: date,
     end_date: date,
-    shift_start: time,
-    shift_end: time,
 ) -> pd.DataFrame:
     rows, cur = [], start_date
     while cur <= end_date:
@@ -106,14 +159,14 @@ def _build_schedule(
         rows.append({
             "Date":            cur,
             "Weekday":         weekday,
-            "Start Time":      None if is_sunday else shift_start,
-            "End Time":        None if is_sunday else shift_end,
-            "Net Time":        None if is_sunday else _net_hours(shift_start, shift_end),
+            "Start Time":      None          if is_sunday else _DEFAULT_START,
+            "End Time":        None          if is_sunday else _DEFAULT_END,
+            "Net Time":        None          if is_sunday else _DEFAULT_NET,
             "Start HMR":       None,
             "End HMR":         None,
             "Net HMR":         None,
-            "Breakdown Hours": None if is_sunday else 0.0,
-            "OT":              None if is_sunday else 0,
+            "Breakdown Hours": None          if is_sunday else 0.0,
+            "OT":              None          if is_sunday else 0.0,
             "Operator":        "",
             "Remarks":         "",
         })
@@ -175,19 +228,91 @@ def _json_to_schedule_df(raw) -> pd.DataFrame | None:
 
 
 def _ensure_ot_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Strip legacy OT/Type columns from saved data."""
+    """Strip legacy columns and deduplicate by Date from saved data."""
     if df.empty:
         return df
     df = df.drop(columns=["Type"], errors="ignore").reset_index(drop=True)
+    if "Date" in df.columns and df["Date"].duplicated().any():
+        df = df.drop_duplicates(subset=["Date"], keep="first").reset_index(drop=True)
     return df
 
 
+
+def _safe_isnan(val) -> bool:
+    if val is None:
+        return True
+    if isinstance(val, float):
+        import math
+        return math.isnan(val)
+    try:
+        return bool(pd.isna(val))
+    except (TypeError, ValueError):
+        return False
+
+
 def _style_schedule(df: pd.DataFrame):
+    # ── Palette ───────────────────────────────────────────────────────────
+    _WKND_BG  = "#DBEAFE"          # soft sky blue — Saturday / Sunday
+    _WKND_FG  = "#1E40AF"          # indigo text on blue
+    _OT_BG    = "#FEF3C7"          # warm amber — positive OT cells
+    _OT_FG    = "#92400E"          # brown text on amber
+    _NONE_FG  = "#9CA3AF"          # cool gray for None / empty cells
+
+    numeric_right = {"Net Time", "Net HMR", "Breakdown Hours", "OT"}
+    time_center   = {"Start Time", "End Time"}
+
     def _row_style(row):
-        if str(row.get("Weekday", "")) == "Sunday":
-            return ["background-color:#fef08a; color:#713f12"] * len(row)
-        return [""] * len(row)
-    return df.style.apply(_row_style, axis=1)
+        weekday    = str(row.get("Weekday", ""))
+        is_weekend = weekday in ("Saturday", "Sunday")
+
+        result = []
+        for col in row.index:
+            val = row[col]
+            if is_weekend:
+                s = f"background-color:{_WKND_BG}; color:{_WKND_FG}; font-weight:600"
+            elif col == "OT":
+                try:
+                    ot = float(val) if not _safe_isnan(val) else 0.0
+                    if ot > 0:
+                        s = f"background-color:{_OT_BG}; color:{_OT_FG}; font-weight:700"
+                    else:
+                        s = ""
+                except (TypeError, ValueError):
+                    s = ""
+            else:
+                s = ""
+
+            if col in numeric_right:
+                s += "; text-align:right"
+            elif col in time_center:
+                s += "; text-align:center"
+
+            result.append(s)
+        return result
+
+    def _none_style(val):
+        if _safe_isnan(val):
+            return f"color:{_NONE_FG}"
+        return ""
+
+    header_styles = [
+        {
+            "selector": "thead th",
+            "props": [
+                ("background-color", "#15803D"),
+                ("color", "#FFFFFF"),
+                ("font-weight", "700"),
+                ("letter-spacing", "0.03em"),
+            ],
+        }
+    ]
+
+    return (
+        df.style
+        .apply(_row_style, axis=1)
+        .map(_none_style)
+        .set_table_styles(header_styles)
+    )
 
 
 def _parse_machine_configs(raw) -> list[dict]:
@@ -228,10 +353,11 @@ def _compute_billing_summary(
                        else int(w["Start Time"].notna().sum())
     std_hours        = _net_hours(shift_start, shift_end) or 0.0
     working_hours    = working_days * std_hours
-    actual           = float(w["Net Time"].fillna(0).sum())
+    actual           = float(w["Net Time"].astype(float).fillna(0).sum())
     qty              = actual / working_hours if working_hours else 0.0
     billing          = rental_per_month * qty
-    ot_hours         = float(w["OT"].fillna(0).sum())
+    ot_hours         = float(w["OT"].astype(float).fillna(0).sum())
+    breakdown_hours  = float(w["Breakdown Hours"].astype(float).fillna(0).sum())
     ot_rate          = float(ot_rate_input or 0.0)
     ot_billing       = ot_hours * ot_rate
     total_billing    = billing + ot_billing
@@ -240,6 +366,7 @@ def _compute_billing_summary(
     return dict(
         rental_per_month=rental_per_month,
         working_days=working_days,
+        std_hours=std_hours,
         working_hours=working_hours,
         actual=actual,
         qty=qty,
@@ -247,69 +374,252 @@ def _compute_billing_summary(
         ot_hours=ot_hours,
         ot_rate=ot_rate,
         ot_billing=ot_billing,
+        breakdown_hours=breakdown_hours,
         total_billing=total_billing,
         deduction=deduction_amt,
         adjusted_billing=adjusted_billing,
     )
 
 
-def _render_billing_summary(s: dict) -> None:
-    def _n(v: float, dec: int = 0) -> str:
-        return f"{v:,.{dec}f}"
+def _render_billing_summary(
+    s: dict,
+    wo_number: str = "",
+    machine_label: str = "",
+    month_label: str = "",
+) -> None:
 
-    rows_data = [
-        ("Rental per month", _n(s["rental_per_month"]),  "Rental / Month"),
-        ("Working days",     _n(s["working_days"]),       "No of Days from Work Order (machine config)"),
-        ("Working hours",    _n(s["working_hours"]),      "Working days × Working hours"),
-        ("Actual",           _n(s["actual"]),             "Sum(Net Time)"),
-        ("Qty",              f"{s['qty']:.4f}",           "Actual ÷ Working hours"),
-        ("Billing",          _n(s["billing"]),            "Rental per month × Qty"),
-        None,
-        ("OT hours",         _n(s["ot_hours"],       2),  "Sum(OT Hrs) from Shift Schedule"),
-        ("OT rate",          _n(s["ot_rate"],        2),  "From OT Rate field"),
-        ("OT billing",       _n(s["ot_billing"]),            "Total OT hours × OT rate"),
-        None,
-        ("Total Billing",    _n(s["total_billing"]),        "Billing + OT Billing"),
-        ("Deduction",        _n(s["deduction"]),            "Manual entry"),
-        ("Adjusted Billing", _n(s["adjusted_billing"]),     "Total Billing − Deduction"),
-    ]
+    def _inr(v: float) -> str:
+        """Indian number system: ₹ X,XX,XXX"""
+        neg = v < 0
+        s_ = str(int(round(abs(v))))
+        if len(s_) > 3:
+            last3 = s_[-3:]
+            rest  = s_[:-3]
+            chunks: list[str] = []
+            while len(rest) > 2:
+                chunks.insert(0, rest[-2:])
+                rest = rest[:-2]
+            if rest:
+                chunks.insert(0, rest)
+            s_ = ",".join(chunks) + "," + last3
+        return ("− " if neg else "") + "₹ " + s_
 
-    tbody = ""
-    shading = ["#ffffff", "#f9fafb"]
-    shade_idx = 0
-    for item in rows_data:
-        if item is None:
-            tbody += (
-                "<tr><td colspan='3' style='height:6px;"
-                "background:#f3f4f6;border-bottom:2px solid #e5e7eb;'></td></tr>"
-            )
-            continue
-        label, value, rule = item
-        bg = shading[shade_idx % 2]
-        shade_idx += 1
-        tbody += (
-            f"<tr style='background:{bg};border-bottom:1px solid #e5e7eb;'>"
-            f"<td style='padding:7px 16px;font-size:13px;font-weight:500;color:#374151;'>{label}</td>"
-            f"<td style='padding:7px 16px;text-align:right;font-size:13px;font-weight:700;"
-            f"color:#E87722;font-variant-numeric:tabular-nums;'>{value}</td>"
-            f"<td style='padding:7px 16px;font-size:12px;color:#6b7280;font-style:italic;'>{rule}</td>"
-            f"</tr>"
-        )
+    def _n2(v: float) -> str:
+        return f"{v:,.2f}"
+
+    rental    = s["rental_per_month"]
+    wd        = s["working_days"]
+    std_h     = s.get("std_hours", 0.0)
+    wh        = s["working_hours"]
+    actual    = s["actual"]
+    qty       = s["qty"]
+    billing   = s["billing"]
+    ot_hrs    = s["ot_hours"]
+    ot_rate   = s["ot_rate"]
+    ot_bill   = s["ot_billing"]
+    bd_hrs    = s.get("breakdown_hours", 0.0)
+    total     = s["total_billing"]
+    ded       = s["deduction"]
+    adj       = s["adjusted_billing"]
+    util_pct  = qty * 100
+
+    # ── Header ─────────────────────────────────────────────────────────────────
+    sub_parts = [p for p in ["Work Log", wo_number, machine_label, month_label] if p]
+    subtitle  = " &bull; ".join(sub_parts)
 
     st.markdown(
-        "<div style='margin-top:8px;border:1px solid #e2e8f0;border-radius:8px;"
-        "overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);'>"
-        "<table style='width:100%;border-collapse:collapse;'>"
-        "<thead><tr style='background:#1c1c2e;'>"
-        "<th style='padding:9px 16px;text-align:left;font-size:10px;font-weight:700;"
-        "letter-spacing:.12em;text-transform:uppercase;color:#d1d5db;'>Field</th>"
-        "<th style='padding:9px 16px;text-align:right;font-size:10px;font-weight:700;"
-        "letter-spacing:.12em;text-transform:uppercase;color:#E87722;'>Value</th>"
-        "<th style='padding:9px 16px;text-align:left;font-size:10px;font-weight:700;"
-        "letter-spacing:.12em;text-transform:uppercase;color:#9ca3af;'>Calculation Rule</th>"
-        f"</tr></thead><tbody>{tbody}</tbody></table></div>",
+        "<div style='display:flex;justify-content:space-between;align-items:flex-start;"
+        "padding:16px 0 12px;border-bottom:2px solid #e5e7eb;margin-bottom:16px;'>"
+        "<div style='display:flex;align-items:center;gap:12px;'>"
+        "<div style='background:#f0f9ff;border-radius:10px;padding:10px;font-size:24px;line-height:1;'>🧾</div>"
+        "<div>"
+        "<div style='font-size:24px;font-weight:800;color:#111827;letter-spacing:-.02em;'>Billing Summary</div>"
+        f"<div style='font-size:13px;color:#6b7280;margin-top:3px;'>{subtitle}</div>"
+        "</div></div>"
+        "<div style='border:1px solid #d1d5db;border-radius:8px;padding:8px 16px;"
+        "background:#fff;display:flex;align-items:center;gap:8px;'>"
+        "<span style='font-size:16px;'>📊</span>"
+        "<span style='font-size:13px;font-weight:600;color:#374151;'>View Calculation Details</span>"
+        "</div></div>",
         unsafe_allow_html=True,
     )
+
+    # ── KPI cards ─────────────────────────────────────────────────────────────
+    def _kpi_card(icon: str, label: str, value: str, sub: str, val_color: str) -> str:
+        return (
+            "<div style='background:#fff;border:1px solid #e5e7eb;border-radius:12px;"
+            "padding:14px 16px;flex:1;min-width:0;'>"
+            f"<div style='font-size:20px;margin-bottom:6px;'>{icon}</div>"
+            f"<div style='font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;"
+            f"color:#9ca3af;margin-bottom:4px;'>{label}</div>"
+            f"<div style='font-size:20px;font-weight:800;color:{val_color};"
+            f"font-variant-numeric:tabular-nums;line-height:1.2;'>{value}</div>"
+            f"<div style='font-size:11px;color:#9ca3af;margin-top:4px;'>{sub}</div>"
+            "</div>"
+        )
+
+    kpi_html = (
+        "<div style='display:flex;gap:12px;margin-bottom:20px;'>"
+        + _kpi_card("📅", "Rental / Month",   _inr(rental),    "Fixed Rental",    "#111827")
+        + _kpi_card("📋", "Working Days",      str(wd),         "From Work Order", "#16a34a")
+        + _kpi_card("🕐", "Worked Hours",      _n2(actual),     "Total Logged",    "#f97316")
+        + _kpi_card("⏱️", "OT Hours",          _n2(ot_hrs),     "Total Logged",    "#3b82f6")
+        + _kpi_card("🔧", "Breakdown Hours",   _n2(bd_hrs),     "Total Logged",    "#f97316")
+        + _kpi_card("💰", "Adjusted Billing",  _inr(adj),       "Excluding Taxes", "#111827")
+        + "</div>"
+    )
+    st.markdown(kpi_html, unsafe_allow_html=True)
+
+    # ── Two-column layout ──────────────────────────────────────────────────────
+    col_left, col_right = st.columns([3, 1], gap="large")
+
+    # ── LEFT: Billing Calculation table ───────────────────────────────────────
+    with col_left:
+        def _section_row(label: str, color: str, bg: str) -> str:
+            return (
+                f"<tr style='background:{bg};'>"
+                "<td colspan='5' style='padding:8px 16px;'>"
+                f"<span style='display:inline-flex;align-items:center;gap:8px;"
+                f"background:{color}18;border:1px solid {color}44;border-radius:6px;"
+                f"padding:3px 10px;font-size:12px;font-weight:700;color:{color};'>"
+                f"&#9632; {label}</span></td></tr>"
+            )
+
+        def _data_row(num: int, field: str, value: str, rule: str,
+                      impact: str = "&mdash;", impact_color: str = "#9ca3af",
+                      bg: str = "#ffffff") -> str:
+            return (
+                f"<tr style='background:{bg};border-bottom:1px solid #f3f4f6;'>"
+                f"<td style='padding:9px 12px 9px 16px;font-size:12px;color:#9ca3af;"
+                f"font-weight:600;width:32px;'>{num}</td>"
+                f"<td style='padding:9px 12px;font-size:13px;color:#374151;"
+                f"font-weight:500;'>{field}</td>"
+                f"<td style='padding:9px 12px;text-align:right;font-size:13px;"
+                f"font-weight:700;color:#E87722;font-variant-numeric:tabular-nums;"
+                f"white-space:nowrap;'>{value}</td>"
+                f"<td style='padding:9px 12px;font-size:12px;color:#6b7280;"
+                f"font-style:italic;'>{rule}</td>"
+                f"<td style='padding:9px 16px 9px 12px;text-align:right;font-size:13px;"
+                f"font-weight:700;color:{impact_color};white-space:nowrap;"
+                f"font-variant-numeric:tabular-nums;'>{impact}</td>"
+                "</tr>"
+            )
+
+        STRIPE = "#f9fafb"
+
+        tbody = (
+            _section_row("Base Rental", "#2563eb", "#eff6ff")
+            + _data_row(1, "Rental per month",       _inr(rental),
+                        "Rental / Month (From Work Order)")
+            + _data_row(2, "Working days",            str(wd),
+                        "No of Days from Work Order (machine config)",  bg=STRIPE)
+            + _data_row(3, "Working hours",           _n2(wh),
+                        f"Working days &times; Working hours per day ({std_h:.2f})")
+            + _data_row(4, "Actual hours (Net Time)", _n2(actual),
+                        "Sum of Net Time from Work Log",                bg=STRIPE)
+            + _data_row(5, "Qty (Utilization Factor)",f"{qty:.4f}",
+                        f"Actual &divide; Working hours ({actual:,.2f} &divide; {wh:,.2f})")
+            + _data_row(6, "Billing (Rental &times; Qty)", _inr(billing),
+                        f"Rental per month &times; Qty ({_inr(rental)} &times; {qty:.4f})",
+                        impact=f"+ {_inr(billing)}", impact_color="#16a34a", bg=STRIPE)
+
+            + _section_row("Overtime", "#d97706", "#fffbeb")
+            + _data_row(7, "OT hours",    _n2(ot_hrs),
+                        "Sum of OT Hrs from Shift Schedule")
+            + _data_row(8, "OT rate",     _inr(ot_rate),
+                        "From OT Rate field in Work Order",             bg=STRIPE)
+            + _data_row(9, "OT billing",  _inr(ot_bill),
+                        f"OT hours &times; OT rate ({_n2(ot_hrs)} &times; {ot_rate:,.0f})",
+                        impact=f"+ {_inr(ot_bill)}", impact_color="#16a34a")
+
+            + _section_row("Final Amounts", "#16a34a", "#f0fdf4")
+            + _data_row(10, "Total Billing",    _inr(total),
+                        f"Billing + OT Billing ({_inr(billing)} + {_inr(ot_bill)})",
+                        impact=f"+ {_inr(total)}", impact_color="#16a34a", bg=STRIPE)
+            + _data_row(11, "Deduction",        f"&minus; {_inr(ded)}",
+                        "Manual entry (if any)",
+                        impact=f"&minus; {_inr(ded)}", impact_color="#dc2626")
+            + _data_row(12, "Adjusted Billing", _inr(adj),
+                        f"Total Billing &minus; Deduction ({_inr(total)} &minus; {_inr(ded)})",
+                        impact=f"= {_inr(adj)}", impact_color="#374151", bg=STRIPE)
+        )
+
+        st.markdown(
+            "<div style='border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;"
+            "box-shadow:0 1px 4px rgba(0,0,0,.06);'>"
+            "<div style='padding:14px 16px 10px;border-bottom:1px solid #e5e7eb;"
+            "background:#fafafa;'>"
+            "<div style='font-size:16px;font-weight:700;color:#111827;display:flex;"
+            "align-items:center;gap:8px;'>🧮 Billing Calculation</div>"
+            "<div style='font-size:12px;color:#6b7280;margin-top:2px;'>"
+            "Detailed breakdown of billing calculation and rules</div></div>"
+            "<table style='width:100%;border-collapse:collapse;'>"
+            "<thead><tr style='background:#f8fafc;border-bottom:2px solid #e5e7eb;'>"
+            "<th style='padding:9px 12px 9px 16px;text-align:left;font-size:10px;font-weight:700;"
+            "letter-spacing:.1em;text-transform:uppercase;color:#9ca3af;width:32px;'>#</th>"
+            "<th style='padding:9px 12px;text-align:left;font-size:10px;font-weight:700;"
+            "letter-spacing:.1em;text-transform:uppercase;color:#374151;'>Field</th>"
+            "<th style='padding:9px 12px;text-align:right;font-size:10px;font-weight:700;"
+            "letter-spacing:.1em;text-transform:uppercase;color:#374151;'>Value</th>"
+            "<th style='padding:9px 12px;text-align:left;font-size:10px;font-weight:700;"
+            "letter-spacing:.1em;text-transform:uppercase;color:#374151;'>Calculation Rule</th>"
+            "<th style='padding:9px 16px 9px 12px;text-align:right;font-size:10px;font-weight:700;"
+            "letter-spacing:.1em;text-transform:uppercase;color:#374151;'>Impact</th>"
+            f"</tr></thead><tbody>{tbody}</tbody></table></div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── RIGHT: Billing Summary sidebar ────────────────────────────────────────
+    with col_right:
+        def _sb_row(label: str, value: str, val_color: str = "#111827",
+                    bold: bool = False) -> str:
+            fw = "800" if bold else "600"
+            return (
+                f"<tr style='border-bottom:1px solid #f3f4f6;'>"
+                f"<td style='padding:9px 12px;font-size:13px;color:#6b7280;"
+                f"font-weight:500;'>{label}</td>"
+                f"<td style='padding:9px 12px;text-align:right;font-size:13px;"
+                f"font-weight:{fw};color:{val_color};"
+                f"font-variant-numeric:tabular-nums;white-space:nowrap;'>{value}</td>"
+                "</tr>"
+            )
+
+        sb_rows = (
+            _sb_row("Rental per month",     _inr(rental))
+            + _sb_row("Working Days",       str(wd))
+            + _sb_row("Worked Hours",       _n2(actual))
+            + _sb_row("Utilization (Qty)",  f"{util_pct:.2f}%")
+            + _sb_row("Base Rental (After Qty)", _inr(billing), "#E87722", True)
+            + _sb_row("OT Hours",           _n2(ot_hrs))
+            + _sb_row("OT Billing",         _inr(ot_bill))
+            + _sb_row("Total Billing",      _inr(total), "#111827", True)
+            + _sb_row("Deduction",          f"&minus; {_inr(ded)}", "#dc2626")
+        )
+
+        st.markdown(
+            "<div style='border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;"
+            "box-shadow:0 1px 4px rgba(0,0,0,.06);'>"
+            "<div style='padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#fafafa;'>"
+            "<div style='font-size:14px;font-weight:700;color:#111827;display:flex;"
+            "align-items:center;gap:6px;'>🧾 Billing Summary</div></div>"
+            "<table style='width:100%;border-collapse:collapse;'>"
+            f"<tbody>{sb_rows}</tbody></table>"
+            "<div style='margin:12px;padding:14px;background:linear-gradient(135deg,#fff7ed,#fef3c7);"
+            "border:1px solid #fed7aa;border-radius:10px;'>"
+            "<div style='font-size:11px;font-weight:700;text-transform:uppercase;"
+            "letter-spacing:.08em;color:#92400e;margin-bottom:6px;'>Adjusted Billing</div>"
+            f"<div style='font-size:26px;font-weight:900;color:#111827;"
+            f"font-variant-numeric:tabular-nums;'>{_inr(adj)}</div>"
+            "<div style='font-size:11px;color:#78716c;margin-top:4px;'>(Excluding Taxes)</div>"
+            "</div>"
+            "<div style='padding:10px 14px;background:#f0f9ff;border-top:1px solid #e0f2fe;"
+            "display:flex;align-items:flex-start;gap:8px;'>"
+            "<span style='font-size:14px;flex-shrink:0;margin-top:1px;'>ℹ️</span>"
+            "<div style='font-size:11px;color:#0369a1;line-height:1.5;'>"
+            "All amounts are excluding taxes.<br><strong>Currency: INR</strong></div>"
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ── Double-shift helpers ──────────────────────────────────────────────────────
@@ -339,6 +649,68 @@ def _json_to_double_dfs(raw) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
         return None, None
 
 
+def _history_fill(
+    blank_df: pd.DataFrame,
+    prev_df: pd.DataFrame,
+    shift_start_t: time,
+    shift_end_t: time,
+) -> pd.DataFrame:
+    """
+    Pre-fill *blank_df* using per-weekday modal Start Time, End Time, and
+    Operator from *prev_df* (the previous month's schedule).  HMR columns
+    are intentionally left blank — they accumulate over machine life and
+    must be entered fresh each month.
+    """
+    if prev_df is None or prev_df.empty:
+        return blank_df
+
+    shift_dur = _net_hours(shift_start_t, shift_end_t)
+
+    # Build per-weekday defaults from previous month
+    defaults: dict = {}
+    for wd in prev_df["Weekday"].dropna().unique():
+        if wd == "Sunday":
+            continue
+        wd_rows = prev_df[
+            (prev_df["Weekday"] == wd) & prev_df["Start Time"].notna()
+        ]
+        if wd_rows.empty:
+            continue
+        sm = wd_rows["Start Time"].mode()
+        em = wd_rows["End Time"].dropna().mode()
+        om = wd_rows["Operator"].dropna().mode()
+        if sm.empty:
+            continue
+        defaults[wd] = {
+            "Start Time": sm.iloc[0],
+            "End Time":   em.iloc[0] if not em.empty else None,
+            "Operator":   str(om.iloc[0]) if not om.empty else "",
+        }
+
+    if not defaults:
+        return blank_df
+
+    result = blank_df.copy()
+    for idx, row in result.iterrows():
+        wd = str(row.get("Weekday", ""))
+        if wd not in defaults:
+            continue
+        d = defaults[wd]
+        prev_st, prev_et = d["Start Time"], d["End Time"]
+        if prev_st is None or prev_et is None:
+            continue
+        result.at[idx, "Start Time"] = prev_st
+        result.at[idx, "End Time"]   = prev_et
+        result.at[idx, "Operator"]   = d["Operator"]
+        raw_net = _net_hours(prev_st, prev_et)
+        if raw_net is not None:
+            result.at[idx, "Net Time"] = raw_net
+            result.at[idx, "OT"] = (
+                round(max(0.0, raw_net - shift_dur), 2) if shift_dur is not None else 0.0
+            )
+    return result
+
+
 def _render_shift_editor(
     base_key: str,
     initial_df: pd.DataFrame,
@@ -351,10 +723,31 @@ def _render_shift_editor(
     editor_key   = f"{base_key}_{recalc_count}"
     df_to_show   = st.session_state.get(f"sched_data_{base_key}", initial_df)
 
+    # Deduplicate rows — stale session state from old copy/paste code can leave
+    # doubled DataFrames; also guards against duplicated DB records.
+    if "Date" in df_to_show.columns and df_to_show["Date"].duplicated().any():
+        df_to_show = df_to_show.drop_duplicates(subset=["Date"], keep="first").reset_index(drop=True)
+        st.session_state[f"sched_data_{base_key}"] = df_to_show
+
+    # Pre-render recalc: fix Net Time / OT / Net HMR that may be stale in
+    # session state (e.g. history-filled times without Net Time, or data loaded
+    # from DB before this formula was deployed).  Uses df_to_show which always
+    # carries proper datetime.time objects so type coercion is not needed here.
+    _pre_df, _pre_changed = _recalc_df(df_to_show, shift_start_t, shift_end_t)
+    if _pre_changed:
+        df_to_show = _pre_df
+        st.session_state[f"sched_data_{base_key}"]   = df_to_show
+        st.session_state[f"sched_recalc_{base_key}"] = recalc_count + 1
+        st.rerun()
+
+    # ── Data editor ────────────────────────────────────────────────────────────
+    editor_height = 38 + len(df_to_show) * 35 + 4
+
     edited = st.data_editor(
         _style_schedule(df_to_show),
+        height=editor_height,
         column_config={
-            "Date":            st.column_config.DateColumn("Date", disabled=True, width="small"),
+            "Date":            st.column_config.DateColumn("Date", disabled=True, width="small", format="DD-MM-YYYY"),
             "Weekday":         st.column_config.TextColumn("Weekday", disabled=True, width="small"),
             "Start Time":      st.column_config.TimeColumn("Start Time", width="small"),
             "End Time":        st.column_config.TimeColumn("End Time", width="small"),
@@ -380,56 +773,16 @@ def _render_shift_editor(
         key=editor_key,
     )
 
+    # Post-render recalc: detect user edits to Start/End Time or HMR and
+    # recompute derived columns.  _recalc_df uses _parse_time on every value
+    # so it handles all types Streamlit's Arrow round-trip may return
+    # (datetime.time, pd.Timestamp, pd.Timedelta, str).
     if edited is not None and not edited.empty:
-        clean        = edited.drop(columns=["Select"], errors="ignore").copy()
-        shift_dur    = _net_hours(shift_start_t, shift_end_t)
-        needs_recalc = False
-        for idx, row in clean.iterrows():
-            st_ = row.get("Start Time")
-            et_ = row.get("End Time")
-            if st_ and not isinstance(st_, time):
-                try:    st_ = _parse_time(str(st_))
-                except Exception: st_ = None
-            if et_ and not isinstance(et_, time):
-                try:    et_ = _parse_time(str(et_))
-                except Exception: et_ = None
-            raw_net   = _net_hours(st_, et_)
-            is_sunday = str(row.get("Weekday", "")) == "Sunday"
-            if raw_net is not None and is_sunday:
-                expected_net, expected_ot = None, round(raw_net, 2)
-            elif raw_net is not None and shift_dur is not None:
-                expected_net = min(raw_net, shift_dur)
-                expected_ot  = round(max(0.0, raw_net - shift_dur), 2)
-            else:
-                expected_net, expected_ot = raw_net, None
-            cur_net    = row.get("Net Time")
-            cur_net_na = cur_net is None or (not isinstance(cur_net, bool) and pd.isna(cur_net))
-            if cur_net_na != (expected_net is None) or (
-                not cur_net_na and expected_net is not None
-                and abs(float(cur_net) - float(expected_net)) > 0.001
-            ):
-                clean.at[idx, "Net Time"] = expected_net
-                needs_recalc = True
-            if expected_ot is not None:
-                cur_ot    = row.get("OT")
-                cur_ot_na = cur_ot is None or (not isinstance(cur_ot, bool) and pd.isna(cur_ot))
-                if cur_ot_na or abs(float(cur_ot) - expected_ot) > 0.001:
-                    clean.at[idx, "OT"] = expected_ot
-                    needs_recalc = True
-            # Net HMR = End HMR - Start HMR (auto-calculated, read-only)
-            s_hmr = row.get("Start HMR")
-            e_hmr = row.get("End HMR")
-            s_hmr_ok = s_hmr is not None and not (not isinstance(s_hmr, bool) and pd.isna(s_hmr))
-            e_hmr_ok = e_hmr is not None and not (not isinstance(e_hmr, bool) and pd.isna(e_hmr))
-            expected_net_hmr = round(float(e_hmr) - float(s_hmr), 2) if (s_hmr_ok and e_hmr_ok) else None
-            cur_net_hmr    = row.get("Net HMR")
-            cur_nhmr_na    = cur_net_hmr is None or (not isinstance(cur_net_hmr, bool) and pd.isna(cur_net_hmr))
-            if cur_nhmr_na != (expected_net_hmr is None) or (
-                not cur_nhmr_na and expected_net_hmr is not None
-                and abs(float(cur_net_hmr) - expected_net_hmr) > 0.001
-            ):
-                clean.at[idx, "Net HMR"] = expected_net_hmr
-                needs_recalc = True
+        clean, needs_recalc = _recalc_df(
+            edited.drop(columns=["Select"], errors="ignore"),
+            shift_start_t,
+            shift_end_t,
+        )
         if needs_recalc:
             st.session_state[f"sched_data_{base_key}"]   = clean
             st.session_state[f"sched_recalc_{base_key}"] = recalc_count + 1
@@ -542,26 +895,37 @@ def render() -> None:
     machine_configs = _parse_machine_configs(selected_wo.get("machine_config"))
 
     # ── WO info card ───────────────────────────────────────────────────────────
+    _wo_start = _parse_date(selected_wo.get("start_date"))
+    _wo_end   = _parse_date(selected_wo.get("end_date"))
+    _wo_start_fmt = _wo_start.strftime("%d-%m-%Y") if _wo_start else "—"
+    _wo_end_fmt   = _wo_end.strftime("%d-%m-%Y")   if _wo_end   else "Ongoing"
+
+    def _wo_field(label: str, value: str, val_color: str = "#111827",
+                  val_size: str = "15px", val_weight: str = "700") -> str:
+        return (
+            "<div style='display:flex;flex-direction:column;gap:3px;'>"
+            f"<div style='font-size:10px;font-weight:800;letter-spacing:.12em;"
+            f"text-transform:uppercase;color:#64748b;'>{label}</div>"
+            f"<div style='font-size:{val_size};font-weight:{val_weight};"
+            f"color:{val_color};line-height:1.2;'>{value}</div>"
+            "</div>"
+        )
+
     st.markdown(
-        "<div style='background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;"
-        "padding:14px 20px;margin-bottom:16px;'>"
-        "<div style='display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;'>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>WO Number</div>"
-        f"<div style='font-size:18px;font-weight:800;color:#E87722;'>{selected_wo.get('wo_number', '—')}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Customer</div>"
-        f"<div style='font-size:14px;font-weight:600;color:#111827;'>{customer_map.get(selected_wo.get('customer_id', ''), {}).get('customer_name', '—')}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Site</div>"
-        f"<div style='font-size:14px;font-weight:600;color:#111827;'>{site_map.get(selected_wo.get('site_id', ''), {}).get('site_name', '—')}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>WO Period</div>"
-        f"<div style='font-size:14px;font-weight:600;color:#111827;'>{selected_wo.get('start_date', '—')} &rarr; {selected_wo.get('end_date', '—')}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Machines</div>"
-        f"<div style='font-size:14px;font-weight:700;color:#E87722;'>{len(machine_configs)}</div></div>"
-        "</div></div>",
+        "<div style='background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;"
+        "padding:14px 22px;margin-bottom:14px;"
+        "box-shadow:0 1px 4px rgba(0,0,0,.06);'>"
+        "<div style='display:flex;flex-wrap:wrap;gap:0;align-items:stretch;'>"
+        + _wo_field("WO Number",  selected_wo.get("wo_number", "—"), "#E87722", "20px", "900")
+        + "<div style='width:1px;background:#e2e8f0;margin:0 20px;'></div>"
+        + _wo_field("Customer",   customer_map.get(selected_wo.get("customer_id", ""), {}).get("customer_name", "—"))
+        + "<div style='width:1px;background:#e2e8f0;margin:0 20px;'></div>"
+        + _wo_field("Site",       site_map.get(selected_wo.get("site_id", ""), {}).get("site_name", "—"))
+        + "<div style='width:1px;background:#e2e8f0;margin:0 20px;'></div>"
+        + _wo_field("WO Period",  f"{_wo_start_fmt} &rarr; {_wo_end_fmt}")
+        + "<div style='width:1px;background:#e2e8f0;margin:0 20px;'></div>"
+        + _wo_field("Machines",   str(len(machine_configs)), "#E87722", "18px", "900")
+        + "</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -586,36 +950,45 @@ def render() -> None:
     sync_key = f"{selected_wo_id}_{machine_idx}"
     if st.session_state.get("_editing_wl_key") != sync_key:
         st.session_state["_editing_wl_key"] = sync_key
-        saved_st = _parse_time(selected_machine.get("shift_start_time")) or time(8, 0)
-        saved_et = _parse_time(selected_machine.get("shift_end_time"))   or time(20, 0)
-        _set_ampm_state("wl_shift_start",    saved_st)
-        _set_ampm_state("wl_shift_end",      saved_et)
-        _set_ampm_state("wl_shift_start_s2", saved_st)
-        _set_ampm_state("wl_shift_end_s2",   saved_et)
         st.session_state["wl_ot_rate"] = float(selected_machine.get("ot_rate") or 0.0)
 
     # ── Machine config card ────────────────────────────────────────────────────
     _rental = selected_machine.get("rental_per_month")
+    _cs_d   = _parse_date(selected_machine.get("billing_cycle_start_date"))
+    _ce_d   = _parse_date(selected_machine.get("billing_cycle_end_date"))
+    _cycle_period_display = (
+        f"Day {_cs_d.day} &rarr; Day {_ce_d.day}"
+        if (_cs_d and _ce_d) else "—"
+    )
+    def _mc_field(label: str, value: str, val_color: str = "#111827",
+                  val_size: str = "15px", val_weight: str = "700") -> str:
+        return (
+            "<div style='display:flex;flex-direction:column;gap:3px;'>"
+            f"<div style='font-size:10px;font-weight:800;letter-spacing:.12em;"
+            f"text-transform:uppercase;color:#92400e;'>{label}</div>"
+            f"<div style='font-size:{val_size};font-weight:{val_weight};"
+            f"color:{val_color};line-height:1.2;'>{value}</div>"
+            "</div>"
+        )
+
+    _rental_display = f"&#8377; {float(_rental):,.0f}" if _rental else "—"
+
     st.markdown(
-        "<div style='background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;"
-        "padding:12px 18px;margin-bottom:16px;'>"
-        "<div style='display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;'>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Machine</div>"
-        f"<div style='font-size:14px;font-weight:700;color:#111827;'>{selected_machine_label}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Billing Type</div>"
-        f"<div style='font-size:13px;font-weight:600;color:#374151;'>{selected_machine.get('billing_type', '—')}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Billing Cycle</div>"
-        f"<div style='font-size:13px;font-weight:600;color:#374151;'>{selected_machine.get('billing_cycle', '—')}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Cycle Period</div>"
-        f"<div style='font-size:13px;font-weight:600;color:#374151;'>{selected_machine.get('billing_cycle_start_date', '—')} &rarr; {selected_machine.get('billing_cycle_end_date', '—')}</div></div>"
-        "<div><div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#9ca3af;'>Rental / Month</div>"
-        f"<div style='font-size:14px;font-weight:700;color:#E87722;'>{f'{float(_rental):,.0f}' if _rental else '—'}</div></div>"
-        "</div></div>",
+        "<div style='background:linear-gradient(135deg,#fff7ed,#fef9f0);"
+        "border:1px solid #fbbf24;border-left:4px solid #E87722;border-radius:10px;"
+        "padding:14px 22px;margin-bottom:14px;"
+        "box-shadow:0 1px 4px rgba(232,119,34,.10);'>"
+        "<div style='display:flex;flex-wrap:wrap;gap:0;align-items:stretch;'>"
+        + _mc_field("Machine",      selected_machine_label,                          "#111827", "16px", "800")
+        + "<div style='width:1px;background:#fcd34d;margin:0 20px;'></div>"
+        + _mc_field("Billing Type", selected_machine.get("billing_type", "—"))
+        + "<div style='width:1px;background:#fcd34d;margin:0 20px;'></div>"
+        + _mc_field("Billing Cycle",selected_machine.get("billing_cycle", "—"))
+        + "<div style='width:1px;background:#fcd34d;margin:0 20px;'></div>"
+        + _mc_field("Cycle Period", _cycle_period_display)
+        + "<div style='width:1px;background:#fcd34d;margin:0 20px;'></div>"
+        + _mc_field("Rental / Month", _rental_display, "#E87722", "18px", "900")
+        + "</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -681,20 +1054,29 @@ def render() -> None:
     selected_month_num   = _month_opts.index(selected_month_name) + 1
     selected_month_label = f"{selected_month_name} {selected_year}"
 
-    if _billing_cycle == "Custom" and _dep_billing_start:
-        # Custom cycle: table starts on the Deployment Billing Start day for each month.
-        _cycle_day  = _dep_billing_start.day
-        _max_cur    = calendar.monthrange(selected_year, selected_month_num)[1]
-        month_start = date(selected_year, selected_month_num, min(_cycle_day, _max_cur))
-        # month_end = day before cycle start day in the NEXT calendar month
-        _ny, _nm    = (selected_year + 1, 1) if selected_month_num == 12 \
-                      else (selected_year, selected_month_num + 1)
-        _max_next   = calendar.monthrange(_ny, _nm)[1]
-        month_end   = date(_ny, _nm, min(_cycle_day - 1, _max_next))
+    # Schedule date range: always use the machine's Cycle Start / Cycle End day.
+    # billing_start_date / billing_end_date are stored as dummy "2000-01-<day>" dates,
+    # so .day gives the configured day number (e.g. 15 and 14).
+    _cycle_start_day = billing_start_date.day if billing_start_date else 1
+    _cycle_end_day   = billing_end_date.day   if billing_end_date   else None
+
+    _max_cur    = calendar.monthrange(selected_year, selected_month_num)[1]
+    month_start = date(selected_year, selected_month_num,
+                       min(_cycle_start_day, _max_cur))
+
+    if _cycle_end_day is not None and _cycle_end_day < _cycle_start_day:
+        # End day falls in the NEXT calendar month (e.g. cycle 15 → 14)
+        _ny, _nm  = (selected_year + 1, 1) if selected_month_num == 12 \
+                    else (selected_year, selected_month_num + 1)
+        _max_next = calendar.monthrange(_ny, _nm)[1]
+        month_end = date(_ny, _nm, min(_cycle_end_day, _max_next))
+    elif _cycle_end_day is not None:
+        # End day is within the same calendar month (e.g. cycle 1 → 31)
+        month_end = date(selected_year, selected_month_num,
+                         min(_cycle_end_day, _max_cur))
     else:
-        last_day    = calendar.monthrange(selected_year, selected_month_num)[1]
-        month_start = date(selected_year, selected_month_num, 1)
-        month_end   = date(selected_year, selected_month_num, last_day)
+        # Fallback: last day of selected month
+        month_end = date(selected_year, selected_month_num, _max_cur)
 
     # Sync ot_rate when WO / machine / month changes (before number_input renders).
     # Loads from DB — picks up both draft and committed records.
@@ -715,13 +1097,30 @@ def render() -> None:
             st.session_state["wl_ot_rate"]   = float(selected_machine.get("ot_rate") or 0.0)
             st.session_state["wl_deduction"] = 0.0
 
-    # ── Shift Configuration ────────────────────────────────────────────────────
-    st.markdown('<p class="filter-label">Shift Configuration</p>', unsafe_allow_html=True)
-    sc1, sc2 = st.columns(2)
-    with sc1:
-        shift_start_time = _time_input_ampm("Shift Start Time", "wl_shift_start")
-    with sc2:
-        shift_end_time = _time_input_ampm("Shift End Time", "wl_shift_end")
+        # Cache previous month's schedule for history auto-fill (one DB fetch per month/machine change)
+        _prev_pm = selected_month_num - 1 if selected_month_num > 1 else 12
+        _prev_py = selected_year if selected_month_num > 1 else selected_year - 1
+        try:
+            _prev_wl = sb.get_worklog_by_month(selected_wo_id, _mkey, _prev_py, _prev_pm)
+        except Exception:
+            _prev_wl = {}
+        if _prev_wl and _prev_wl.get("schedule_data"):
+            _prev_raw = _prev_wl["schedule_data"]
+            if _is_double_schedule(_prev_raw):
+                _p1, _p2 = _json_to_double_dfs(_prev_raw)
+            else:
+                _p1 = _json_to_schedule_df(_prev_raw)
+                _p2 = None
+        else:
+            _p1, _p2 = None, None
+        st.session_state[f"_wl_prev1_{wl_sync_key}"] = _p1
+        st.session_state[f"_wl_prev2_{wl_sync_key}"] = _p2
+
+    _prev_df1: pd.DataFrame | None = st.session_state.get(f"_wl_prev1_{wl_sync_key}")
+    _prev_df2: pd.DataFrame | None = st.session_state.get(f"_wl_prev2_{wl_sync_key}")
+
+    shift_start_time = _parse_time(selected_machine.get("shift_start_time")) or time(8, 0)
+    shift_end_time   = _parse_time(selected_machine.get("shift_end_time"))   or time(20, 0)
 
     or1, or2, _ = st.columns([1, 1, 2])
     with or1:
@@ -781,7 +1180,6 @@ def render() -> None:
     base_key = (
         f"wl_{selected_wo_id}_{machine_idx}"
         f"_{selected_year}_{selected_month_num:02d}"
-        f"_{shift_start_time}_{shift_end_time}"
     )
 
     # Pre-select shift type from the saved DB record when the month/machine changes
@@ -817,9 +1215,12 @@ def render() -> None:
         key = f"sched_data_{base_key}{suffix}"
         if key in st.session_state:
             return st.session_state[key]
-        return fallback if fallback is not None else _build_schedule(
-            month_start, month_end, shift_start_time, shift_end_time
-        )
+        if fallback is not None:
+            return fallback
+        blank = _build_schedule(month_start, month_end)
+        if _prev_df1 is not None:
+            return _history_fill(blank, _prev_df1, shift_start_time, shift_end_time)
+        return blank
 
     # ── Totals helper (defined before editors so it can be called inline) ────────
     _no_of_days_raw = selected_machine.get("no_of_days")
@@ -827,7 +1228,7 @@ def render() -> None:
     _wd_display     = str(_no_of_days) if _no_of_days else "—"
 
     def _show_totals(df: pd.DataFrame, label: str) -> None:
-        _d = df.drop(columns=["Select", "Type"], errors="ignore")
+        _d = df.drop(columns=["Select", "Type", "📋", "📌"], errors="ignore")
         st.markdown(
             "<div style='border:1px solid #374151;border-radius:0 0 6px 6px;"
             "background:#1c1c2e;margin-top:-8px;overflow:hidden;'>"
@@ -836,10 +1237,10 @@ def render() -> None:
             f"<div style='font-size:10px;font-weight:800;letter-spacing:.12em;"
             f"text-transform:uppercase;color:#fff;'>{label}</div></td>"
             + _totals_cell("Working Days", _wd_display)
-            + _totals_cell("Net Time (hrs)", f"{float(_d['Net Time'].fillna(0).sum()):.1f}")
-            + _totals_cell("Shift OT (hrs)", f"{float(_d['OT'].fillna(0).sum()):.1f}")
-            + _totals_cell("Net HMR", f"{float(_d['Net HMR'].fillna(0).sum()):.1f}")
-            + _totals_cell("Breakdown (hrs)", f"{float(_d['Breakdown Hours'].fillna(0).sum()):.1f}")
+            + _totals_cell("Net Time (hrs)", f"{float(_d['Net Time'].astype(float).fillna(0).sum()):.1f}")
+            + _totals_cell("Shift OT (hrs)", f"{float(_d['OT'].astype(float).fillna(0).sum()):.1f}")
+            + _totals_cell("Net HMR", f"{float(_d['Net HMR'].astype(float).fillna(0).sum()):.1f}")
+            + _totals_cell("Breakdown (hrs)", f"{float(_d['Breakdown Hours'].astype(float).fillna(0).sum()):.1f}")
             + "<td style='padding:8px 14px;' colspan='2'></td>"
             "</tr></tbody></table></div>",
             unsafe_allow_html=True,
@@ -872,17 +1273,12 @@ def render() -> None:
             "margin:10px 0 4px;letter-spacing:.01em;'>Night Shift</div>",
             unsafe_allow_html=True,
         )
-        st.markdown('<p class="filter-label">Shift Configuration</p>', unsafe_allow_html=True)
-        _s2c1, _s2c2 = st.columns(2)
-        with _s2c1:
-            shift_start_time_s2 = _time_input_ampm("Shift Start Time", "wl_shift_start_s2")
-        with _s2c2:
-            shift_end_time_s2 = _time_input_ampm("Shift End Time", "wl_shift_end_s2")
+        shift_start_time_s2 = _parse_time(selected_machine.get("shift_start_time")) or time(8, 0)
+        shift_end_time_s2   = _parse_time(selected_machine.get("shift_end_time"))   or time(20, 0)
 
         base_key_s2 = (
             f"wl_{selected_wo_id}_{machine_idx}"
-            f"_{selected_year}_{selected_month_num:02d}"
-            f"_{shift_start_time_s2}_{shift_end_time_s2}_s2"
+            f"_{selected_year}_{selected_month_num:02d}_s2"
         )
 
         if f"sched_data_{base_key_s2}" in st.session_state:
@@ -890,8 +1286,11 @@ def render() -> None:
         elif _db_df2 is not None:
             _initial_s2 = _db_df2
         else:
-            _initial_s2 = _build_schedule(
-                month_start, month_end, shift_start_time_s2, shift_end_time_s2
+            _blank_s2  = _build_schedule(month_start, month_end)
+            _prev_s2   = _prev_df2 if _prev_df2 is not None else _prev_df1
+            _initial_s2 = (
+                _history_fill(_blank_s2, _prev_s2, shift_start_time_s2, shift_end_time_s2)
+                if _prev_s2 is not None else _blank_s2
             )
 
         st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
@@ -918,9 +1317,13 @@ def render() -> None:
             deduction=deduction_input,
         )
         if summary:
-            st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
-            st.markdown('<p class="filter-label">Billing Summary</p>', unsafe_allow_html=True)
-            _render_billing_summary(summary)
+            st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+            _render_billing_summary(
+                summary,
+                wo_number=selected_wo.get("wo_number", ""),
+                machine_label=selected_machine.get("machine_label", ""),
+                month_label=selected_month_label,
+            )
 
     # ── Action buttons ─────────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
@@ -936,10 +1339,10 @@ def render() -> None:
         for idx, row in out.iterrows():
             st_ = row.get("Start Time")
             et_ = row.get("End Time")
-            if st_ and et_:
+            if st_ is not None and et_ is not None:
                 out.at[idx, "Net Time"] = _net_hours(
-                    st_ if isinstance(st_, time) else _parse_time(str(st_)),
-                    et_ if isinstance(et_, time) else _parse_time(str(et_)),
+                    st_ if isinstance(st_, time) else _parse_time(st_),
+                    et_ if isinstance(et_, time) else _parse_time(et_),
                 )
         return out
 

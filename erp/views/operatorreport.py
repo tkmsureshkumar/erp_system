@@ -502,7 +502,7 @@ def render() -> None:
                 "Customer":      st.column_config.TextColumn("Customer",    width="medium"),
                 "Site":          st.column_config.TextColumn("Site",        width="medium"),
                 "Machine":       st.column_config.TextColumn("Machine",     width="medium"),
-                "Date":          st.column_config.DateColumn("Date",        width="small"),
+                "Date":          st.column_config.DateColumn("Date",        width="small", format="DD-MM-YYYY"),
                 "Weekday":       st.column_config.TextColumn("Weekday",     width="small"),
                 "Start Time":    st.column_config.TextColumn("Start",       width="small"),
                 "End Time":      st.column_config.TextColumn("End",         width="small"),

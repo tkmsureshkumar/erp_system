@@ -386,7 +386,6 @@ def _open_new_form(state_names: list[str]) -> None:
     st.session_state["_site_sel_id"]       = ""
     st.session_state["_site_sync_key"]     = "__new__"
     st.session_state["site_name"]          = ""
-    st.session_state["site_customer_id"]   = ""
     st.session_state["site_address"]       = ""
     st.session_state["site_city"]          = ""
     st.session_state["site_state"]         = state_names[0] if state_names else ""
@@ -796,13 +795,14 @@ def render() -> None:
                         "Site Name *", key="site_name",
                         placeholder="e.g. Mumbai North Hub",
                     )
-                    st.selectbox(
-                        "Customer *",
-                        options=[""] + list(customer_options),
-                        format_func=lambda cid: "Select customer" if not cid
-                            else customer_options.get(cid, "Unknown"),
-                        key="site_customer_id",
-                    )
+                    if mode == "edit":
+                        st.selectbox(
+                            "Customer",
+                            options=[""] + list(customer_options),
+                            format_func=lambda cid: "Select customer" if not cid
+                                else customer_options.get(cid, "Unknown"),
+                            key="site_customer_id",
+                        )
                     st.number_input(
                         "Payment Terms (days)",
                         step=1,
@@ -888,7 +888,6 @@ def render() -> None:
             if save_clicked:
                 # Resolve form values from session state (robust across tab switches)
                 site_name_val   = (st.session_state.get("site_name",        "") or "").strip()
-                customer_id_val = st.session_state.get("site_customer_id",  "")
                 address_val     = (st.session_state.get("site_address",     "") or "").strip()
                 city_val        = (st.session_state.get("site_city",        "") or "").strip()
                 state_v         = st.session_state.get("site_state") or None
@@ -897,14 +896,11 @@ def render() -> None:
 
                 if not site_name_val:
                     st.error("Site Name is required.")
-                elif not customer_id_val:
-                    st.error("Customer is required.")
                 else:
                     contacts_list = _df_to_contacts(contacts_df)
                     first = contacts_list[0] if contacts_list else {}
                     payload = dict(
                         site_name=site_name_val,
-                        customer_id=customer_id_val or None,
                         address=address_val or None,
                         city=city_val or None,
                         state=state_v,
@@ -913,6 +909,8 @@ def render() -> None:
                         site_contact_number=first.get("mobile") or None,
                         payment_terms=payment_terms_v or None,
                     )
+                    if mode == "edit":
+                        payload["customer_id"] = st.session_state.get("site_customer_id") or None
 
                     # Keep st.rerun() OUTSIDE try/except —
                     # RerunException(Exception) would otherwise be swallowed.

@@ -1056,7 +1056,7 @@ def render() -> None:
                     _section_hdr("business", "Customer & Site")
                     col1, col2 = st.columns(2)
                     with col1:
-                        selected_customer_id = st.selectbox(
+                        st.selectbox(
                             "Customer *",
                             options=[""] + list(customer_map),
                             format_func=lambda cid: "Select customer" if not cid
@@ -1064,17 +1064,11 @@ def render() -> None:
                             key="wo_customer_id",
                         )
                     with col2:
-                        filtered_sites = {
-                            sid: s for sid, s in site_map.items()
-                            if str(s.get("customer_id", "")) == str(selected_customer_id)
-                        }
-                        if st.session_state.get("wo_site_id") not in filtered_sites:
-                            st.session_state["wo_site_id"] = ""
                         selected_site_id = st.selectbox(
                             "Site *",
-                            options=[""] + list(filtered_sites),
+                            options=[""] + list(site_map),
                             format_func=lambda sid: "Select site" if not sid
-                                else filtered_sites[sid].get("site_name", "Unknown"),
+                                else site_map[sid].get("site_name", "Unknown"),
                             key="wo_site_id",
                         )
 
@@ -1134,7 +1128,7 @@ def render() -> None:
                         )
 
                     for idx, row in enumerate(mc_rows):
-                        c1, c2, c3, c4, c5, c6 = st.columns([4, 2, 3, 3, 2, 2])
+                        c1, c2, c3, c4, c5, c6, c7 = st.columns([4, 2, 3, 3, 2, 1, 1])
                         c1.write(row.get("machine_label") or "—")
                         c2.write(
                             " / ".join(filter(None, [
@@ -1145,21 +1139,19 @@ def render() -> None:
                         c4.write(row.get("billing_cycle") or "—")
                         c5.write(f"{float(row.get('rental_per_month') or 0):,.0f}")
                         with c6:
-                            e1, e2 = st.columns(2)
-                            with e1:
-                                if st.button("Edit", key=f"mc_edit_{idx}_{wo_key}", use_container_width=True):
-                                    _init_dialog_state(row, label_to_details, ref_date_for_dialog)
-                                    _machine_row_dialog(
-                                        row_idx=idx, mc_rows=mc_rows, wo_key=wo_key,
-                                        machine_opts=machine_opts, label_to_id=label_to_id,
-                                        label_to_details=label_to_details, ref_date=ref_date_for_dialog,
-                                    )
-                            with e2:
-                                if st.button("Del", key=f"mc_del_{idx}_{wo_key}", use_container_width=True):
-                                    updated = list(mc_rows)
-                                    updated.pop(idx)
-                                    st.session_state[f"mc_rows_{wo_key}"] = updated
-                                    st.rerun()
+                            if st.button("Edit", key=f"mc_edit_{idx}_{wo_key}", use_container_width=True):
+                                _init_dialog_state(row, label_to_details, ref_date_for_dialog)
+                                _machine_row_dialog(
+                                    row_idx=idx, mc_rows=mc_rows, wo_key=wo_key,
+                                    machine_opts=machine_opts, label_to_id=label_to_id,
+                                    label_to_details=label_to_details, ref_date=ref_date_for_dialog,
+                                )
+                        with c7:
+                            if st.button("Del", key=f"mc_del_{idx}_{wo_key}", use_container_width=True):
+                                updated = list(mc_rows)
+                                updated.pop(idx)
+                                st.session_state[f"mc_rows_{wo_key}"] = updated
+                                st.rerun()
                 else:
                     st.markdown(
                         "<p style='color:#9ca3af;font-size:13px;padding:12px 0;'>"

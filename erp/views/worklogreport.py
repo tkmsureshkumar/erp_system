@@ -533,7 +533,7 @@ def render() -> None:
             hide_index=True,
             column_config={
                 "Billing Month": st.column_config.TextColumn("Billing Month", width="small"),
-                "Date":          st.column_config.DateColumn("Date",          width="small"),
+                "Date":          st.column_config.DateColumn("Date",          width="small", format="DD-MM-YYYY"),
                 "Weekday":       st.column_config.TextColumn("Weekday",       width="small"),
                 "Start Time":    st.column_config.TextColumn("Start",         width="small"),
                 "End Time":      st.column_config.TextColumn("End",           width="small"),

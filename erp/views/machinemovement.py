@@ -744,7 +744,11 @@ def render() -> None:
             else:
                 try:
                     _save_movement(sb, selected_machine, "Load", from_loc or None, to_loc, load_date, None)
-                    st.toast(f"Load movement recorded for {asset_code}.", icon="✅")
+                    try:
+                        sb.update_machine(selected_machine["id"], {"operational_status": "Mobilizing"})
+                    except Exception:
+                        pass
+                    st.toast(f"Load movement recorded for {asset_code}. Status set to Mobilizing.", icon="✅")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save movement: {exc}")
@@ -786,10 +790,13 @@ def render() -> None:
                 try:
                     _save_movement(sb, selected_machine, "Unload", from_loc or None, to_loc, unload_date, None)
                     try:
-                        sb.update_machine(selected_machine["id"], {"current_location": to_loc})
+                        sb.update_machine(selected_machine["id"], {
+                            "current_location": to_loc,
+                            "operational_status": "Reserved",
+                        })
                     except Exception:
                         pass
-                    st.toast(f"Unload recorded for {asset_code}. Location updated to: {to_loc}", icon="✅")
+                    st.toast(f"Unload recorded for {asset_code}. Status set to Reserved.", icon="✅")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save movement: {exc}")

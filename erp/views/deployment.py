@@ -15,8 +15,6 @@ import streamlit as st
 from ..supabase_client import SupabaseClient
 from ..models import DeploymentStatus
 
-_DEP_STATUS_OPTS = [s.value for s in DeploymentStatus]
-
 # WO statuses that mean "no more editing"
 _CLOSED_STATUSES = {"Closed", "Completed", "Cancelled"}
 
@@ -77,20 +75,6 @@ def _section_header(label: str, subtitle: str = "") -> None:
         unsafe_allow_html=True,
     )
 
-
-def _ro_section_header(label: str, subtitle: str = "") -> None:
-    sub = (
-        f"<div style='font-size:12px;color:#6b7280;margin-top:4px;font-weight:400;"
-        f"letter-spacing:0;text-transform:none;'>{subtitle}</div>"
-        if subtitle else ""
-    )
-    st.markdown(
-        f"<div style='margin-bottom:14px;border-left:3px solid #94a3b8;padding:6px 0 6px 14px;'>"
-        f"<div style='font-size:11px;font-weight:700;letter-spacing:.12em;color:#64748B;"
-        f"text-transform:uppercase;'>{label}</div>"
-        f"{sub}</div>",
-        unsafe_allow_html=True,
-    )
 
 
 # ── View ───────────────────────────────────────────────────────────────────────
@@ -478,253 +462,44 @@ def render() -> None:
             unsafe_allow_html=True,
         )
 
-        # ── Section B read-only ──────────────────────────────────────────────
-        _ro_section_header("B — Machine Deployment", "Read-only — work order is closed")
-
-        if mc_rows:
-            for mr in mc_rows:
-                mlabel    = mr.get("machine_label", "—")
-                mid       = mr.get("machine_id") or mlabel
-                op_status = machine_status_map.get(mr.get("machine_id", ""), "")
-                saved     = _ro_mc_dates.get(mid) or _ro_mc_dates.get(mr.get("machine_label", "")) or {}
-                dtype_val = saved.get("deployment_type") or "—"
-
-                st.markdown(
-                    "<div style='background:#f8fafc;border:1px solid #e2e8f0;"
-                    "border-radius:8px;padding:12px 16px 14px;margin-bottom:10px;'>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:14px;'>"
-                    f"<div style='font-size:14px;font-weight:700;color:#111827;'>{mlabel}</div>"
-                    f"{_status_badge(op_status)}"
-                    f"<span class='badge badge-draft'>{dtype_val}</span>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-                rc1, rc2, rc3, rc4 = st.columns(4)
-                with rc1:
-                    st.markdown(
-                        _info_card("Location", saved.get("machine_current_location") or "—"),
-                        unsafe_allow_html=True,
-                    )
-                with rc2:
-                    st.markdown(
-                        _info_card("Loading Date", saved.get("transaction_start_date") or "—"),
-                        unsafe_allow_html=True,
-                    )
-                with rc3:
-                    st.markdown(
-                        _info_card("Site Reach Date", saved.get("site_reached_date") or "—"),
-                        unsafe_allow_html=True,
-                    )
-                with rc4:
-                    st.markdown(
-                        _info_card("Billing Start Date", saved.get("billing_start_date") or "—"),
-                        unsafe_allow_html=True,
-                    )
-                st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(
-                "<div style='padding:20px 16px;background:#f8fafc;border:1px solid #e2e8f0;"
-                "border-radius:8px;text-align:center;font-size:13px;color:#9ca3af;'>"
-                "No machine deployment data.</div>",
-                unsafe_allow_html=True,
-            )
-
-        # ── Section C read-only ──────────────────────────────────────────────
-        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-        _ro_section_header("C — Truck Driver Details", "Read-only — work order is closed")
-
-        st.markdown(
-            "<div style='background:#f8fafc;border:1px solid #e2e8f0;"
-            "border-radius:10px;padding:20px 20px 14px;'>",
-            unsafe_allow_html=True,
-        )
-        tc1, tc2, tc3, tc4 = st.columns(4)
-        with tc1:
-            st.markdown(
-                _info_card("Deployment Status", existing_dep.get("deployment_status") or "—"),
-                unsafe_allow_html=True,
-            )
-        with tc2:
-            st.markdown(
-                _info_card("Lorry Registration", existing_dep.get("lorry_registration_number") or "—"),
-                unsafe_allow_html=True,
-            )
-        with tc3:
-            st.markdown(
-                _info_card("Driver Name", existing_dep.get("lorry_driver_name") or "—"),
-                unsafe_allow_html=True,
-            )
-        with tc4:
-            st.markdown(
-                _info_card("Driver Mobile", existing_dep.get("driver_mobile_number") or "—"),
-                unsafe_allow_html=True,
-            )
-        _notes = existing_dep.get("tracking_notes") or "—"
-        st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div style='background:#fff;border:1px solid #e2e8f0;border-radius:8px;"
-            f"padding:12px 16px;margin-top:4px;'>"
-            f"<div style='font-size:10px;font-weight:700;letter-spacing:.1em;color:#9ca3af;"
-            f"text-transform:uppercase;margin-bottom:6px;'>Tracking Notes</div>"
-            f"<div style='font-size:13px;color:#374151;white-space:pre-wrap;'>{_notes}</div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
         # No save button for closed WOs — done.
         return
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # EDITABLE MODE — Sections B & C with widgets
-    # ══════════════════════════════════════════════════════════════════════════
-
-    # ── Section B — Machine Deployment ────────────────────────────────────────
-    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-    _section_header(
-        "B — Machine Deployment",
-        "Set the deployment type and dates for each machine",
-    )
-
-    _DEPLOY_TYPES = ["Mob", "Demob", "Other"]
-
-    if filtered_mc_rows:
-        _section_b_machines = [sel_mr] if sel_mr else filtered_mc_rows
-        for idx, mr in enumerate(_section_b_machines):
-            mlabel    = mr.get("machine_label", "")
-            mid       = mr.get("machine_id") or mlabel
-            op_status = machine_status_map.get(mr.get("machine_id", ""), "")
-            make_model = " · ".join(filter(None, [mr.get("make", ""), mr.get("model", "")])).strip()
-
-            st.markdown(
-                f"<div style='background:{'#ffffff' if idx % 2 == 0 else '#fafafa'};"
-                f"border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px 4px;"
-                f"margin-bottom:10px;'>",
-                unsafe_allow_html=True,
-            )
-
-            _dtype_key = f"dep_{dep_key}_dtype_{mid}"
-            _DTYPE_NORM = {"Mobilisation": "Mob", "Demobilisation": "Demob"}
-            if st.session_state.get(_dtype_key) not in _DEPLOY_TYPES:
-                st.session_state[_dtype_key] = _DTYPE_NORM.get(
-                    st.session_state.get(_dtype_key, ""), "Mob"
-                )
-
-            r1c1, r1c2, r1c3 = st.columns([2, 1, 2])
-            with r1c1:
-                st.markdown(
-                    f"<div style='padding:6px 0 2px;'>"
-                    f"<div style='font-size:14px;font-weight:700;color:#111827;'>{mlabel}</div>"
-                    + (f"<div style='font-size:11px;color:#9ca3af;'>{make_model}</div>" if make_model else "")
-                    + "</div>",
-                    unsafe_allow_html=True,
-                )
-            with r1c2:
-                st.markdown(
-                    f"<div style='padding:10px 0 2px;'>{_status_badge(op_status)}</div>",
-                    unsafe_allow_html=True,
-                )
-            with r1c3:
-                dtype = st.selectbox(
-                    "Deployment Type",
-                    options=_DEPLOY_TYPES,
-                    key=f"dep_{dep_key}_dtype_{mid}",
-                )
-
-            if dtype == "Mob":
-                ts_key_mob = f"dep_{dep_key}_ts_{mid}"
-                if op_status == "Reserved" and not isinstance(
-                    st.session_state.get(ts_key_mob), date
-                ):
-                    st.session_state[ts_key_mob] = date.today()
-
-                sr_filled             = isinstance(st.session_state.get(f"dep_{dep_key}_sr_{mid}"), date)
-                loading_disabled      = op_status not in ("Reserved", "Mobilizing")
-                site_reach_disabled   = op_status != "Mobilizing"
-                billing_disabled      = not (op_status == "Mobilizing" and sr_filled)
-
-                r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-                with r2c1:
-                    st.text_input("Machine Current Location", placeholder="e.g. Chennai Yard", key=f"dep_{dep_key}_location_{mid}")
-                with r2c2:
-                    st.date_input("Loading Date",       key=f"dep_{dep_key}_ts_{mid}", disabled=loading_disabled)
-                with r2c3:
-                    st.date_input("Site Reach Date",    key=f"dep_{dep_key}_sr_{mid}", disabled=site_reach_disabled)
-                with r2c4:
-                    st.date_input("Billing Start Date", key=f"dep_{dep_key}_bs_{mid}", disabled=billing_disabled)
-
-            elif dtype == "Demob":
-                ts_key_demob = f"dep_{dep_key}_ts_{mid}"
-                if op_status == "On Rent" and not isinstance(
-                    st.session_state.get(ts_key_demob), date
-                ):
-                    st.session_state[ts_key_demob] = date.today()
-
-                demob_loading_disabled    = op_status not in ("On Rent", "Demobilizing")
-                demob_site_reach_disabled = op_status != "Demobilizing"
-
-                r2c1, r2c2, r2c3 = st.columns(3)
-                with r2c1:
-                    st.text_input("Machine Current Location", placeholder="e.g. Chennai Yard", key=f"dep_{dep_key}_location_{mid}")
-                with r2c2:
-                    st.date_input("Loading Date",    key=f"dep_{dep_key}_ts_{mid}", disabled=demob_loading_disabled)
-                with r2c3:
-                    st.date_input("Site Reach Date", key=f"dep_{dep_key}_sr_{mid}", disabled=demob_site_reach_disabled)
-            else:
-                r2c1, r2c2 = st.columns(2)
-                with r2c1:
-                    st.date_input("Transaction Start Date", key=f"dep_{dep_key}_ts_{mid}")
-                with r2c2:
-                    st.date_input("Site Reached Date",      key=f"dep_{dep_key}_sr_{mid}")
-
-            st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        st.markdown(
-            "<div style='padding:20px 16px;background:#f8fafc;border:1px solid #e2e8f0;"
-            "border-radius:8px;text-align:center;font-size:13px;color:#9ca3af;'>"
-            "No machines at this site location to configure.</div>",
-            unsafe_allow_html=True,
-        )
-
-    # ── Section C — Truck Driver Details ──────────────────────────────────────
-    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-    _section_header("C — Truck Driver Details", "Logistics and transport information for this deployment")
-
-    st.markdown(
-        "<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;"
-        "padding:20px 20px 8px;'>",
-        unsafe_allow_html=True,
-    )
-
-    ds1, _ = st.columns([1, 3])
-    with ds1:
-        st.selectbox("Deployment Status", options=_DEP_STATUS_OPTS, key=f"dep_{dep_key}_dep_status")
-
-    st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
-
-    td1, td2, td3 = st.columns(3)
-    with td1:
-        st.text_input("Lorry Registration Number", placeholder="e.g. TN 01 AB 1234", key=f"dep_{dep_key}_lorry_reg")
-    with td2:
-        st.text_input("Lorry Driver Name",          placeholder="Driver full name",    key=f"dep_{dep_key}_driver_name")
-    with td3:
-        st.text_input("Driver Mobile Number",       placeholder="+91 XXXXX XXXXX",     key=f"dep_{dep_key}_driver_mobile")
-
-    st.text_area(
-        "Notes for Tracking",
-        placeholder="Route details, special instructions, or any other tracking notes…",
-        height=110,
-        key=f"dep_{dep_key}_tracking_notes",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    # ── Billing Start Date — pre-sync session state from saved deployment ─────
+    _bsd_sync_key = f"_bsd_sync_{dep_key}"
+    if st.session_state.get(_bsd_sync_key) != dep_key:
+        st.session_state[_bsd_sync_key] = dep_key
+        for _mr in filtered_mc_rows:
+            _mid = _mr.get("machine_id") or _mr.get("machine_label", "")
+            _saved_entry = _ro_mc_dates.get(_mid) or _ro_mc_dates.get(_mr.get("machine_label", "")) or {}
+            _saved_bsd = _saved_entry.get("billing_start_date")
+            _bsd_key = f"dep_{dep_key}_bsd_{_mid}"
+            if _saved_bsd and _bsd_key not in st.session_state:
+                try:
+                    st.session_state[_bsd_key] = date.fromisoformat(str(_saved_bsd))
+                except Exception:
+                    pass
 
     # ── Save ──────────────────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+    _section_header("Billing Start Date", "Set the billing start date for each machine on this deployment")
 
     with st.form("dep_form"):
+        for _mr in filtered_mc_rows:
+            _mid   = _mr.get("machine_id") or _mr.get("machine_label", "")
+            _mlbl  = _mr.get("machine_label", _mid)
+            _bcol1, _bcol2 = st.columns([3, 2])
+            with _bcol1:
+                st.markdown(
+                    f"<div style='font-size:13px;font-weight:600;color:#111827;"
+                    f"padding:6px 0 2px;'>{_mlbl}</div>",
+                    unsafe_allow_html=True,
+                )
+            with _bcol2:
+                st.date_input("Billing Start Date", key=f"dep_{dep_key}_bsd_{_mid}",
+                              label_visibility="collapsed")
+
+        st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
         submitted = st.form_submit_button(
             "✔  Update Deployment" if _dep_exists else "Save Deployment",
             type="primary",
@@ -733,22 +508,14 @@ def render() -> None:
 
         if submitted:
             mc_dates_payload = []
-            for mr in mc_rows:
-                mlabel   = mr.get("machine_label", "")
-                mid      = mr.get("machine_id") or mlabel
-                dtype    = st.session_state.get(f"dep_{dep_key}_dtype_{mid}") or "Mob"
-                ts       = st.session_state.get(f"dep_{dep_key}_ts_{mid}")
-                sr       = st.session_state.get(f"dep_{dep_key}_sr_{mid}")
-                location = st.session_state.get(f"dep_{dep_key}_location_{mid}") or None
-                bs       = st.session_state.get(f"dep_{dep_key}_bs_{mid}")
+            for mr in filtered_mc_rows:
+                mid  = mr.get("machine_id") or mr.get("machine_label", "")
+                mlbl = mr.get("machine_label", mid)
+                bsd  = st.session_state.get(f"dep_{dep_key}_bsd_{mid}")
                 mc_dates_payload.append({
-                    "machine_id":               mr.get("machine_id"),
-                    "machine_label":            mlabel,
-                    "deployment_type":          dtype,
-                    "machine_current_location": location,
-                    "transaction_start_date":   ts.isoformat() if isinstance(ts, date) else None,
-                    "site_reached_date":        sr.isoformat() if isinstance(sr, date) else None,
-                    "billing_start_date":       bs.isoformat() if isinstance(bs, date) else None,
+                    "machine_id":        mr.get("machine_id"),
+                    "machine_label":     mlbl,
+                    "billing_start_date": bsd.isoformat() if isinstance(bsd, date) else None,
                 })
 
             payload = dict(
@@ -758,11 +525,6 @@ def render() -> None:
                 deployment_date=date.today().isoformat(),
                 client_work_ordernumber=selected_wo.get("client_work_ordernumber"),
                 machine_deployments=json.dumps(mc_dates_payload),
-                deployment_status=        st.session_state.get(f"dep_{dep_key}_dep_status")     or DeploymentStatus.ACTIVE.value,
-                lorry_registration_number=st.session_state.get(f"dep_{dep_key}_lorry_reg")      or None,
-                lorry_driver_name=        st.session_state.get(f"dep_{dep_key}_driver_name")    or None,
-                driver_mobile_number=     st.session_state.get(f"dep_{dep_key}_driver_mobile")  or None,
-                tracking_notes=           st.session_state.get(f"dep_{dep_key}_tracking_notes") or None,
             )
 
             try:
@@ -771,63 +533,19 @@ def render() -> None:
                 else:
                     sb.insert_deployment(payload)
 
-                # Update machine operational_status based on deployment type.
-                # Track new statuses to check the auto-close condition.
-                new_status_map = dict(machine_status_map)
+                for mr in filtered_mc_rows:
+                    _mid_val = mr.get("machine_id")
+                    if _mid_val:
+                        _bsd_val = st.session_state.get(f"dep_{dep_key}_bsd_{_mid_val or mr.get('machine_label', '')}")
+                        _new_status = "On Rent" if isinstance(_bsd_val, date) else "Reserved"
+                        try:
+                            sb.update_machine(_mid_val, {"operational_status": _new_status})
+                        except Exception:
+                            pass
 
-                for mr in mc_rows:
-                    machine_id_val = mr.get("machine_id")
-                    mid_val        = machine_id_val or mr.get("machine_label", "")
-                    dtype_val      = st.session_state.get(f"dep_{dep_key}_dtype_{mid_val}") or "Mob"
-                    new_status     = None
-                    if dtype_val == "Mob":
-                        bs_val = st.session_state.get(f"dep_{dep_key}_bs_{mid_val}")
-                        ts_val = st.session_state.get(f"dep_{dep_key}_ts_{mid_val}")
-                        if isinstance(bs_val, date):
-                            new_status = "On Rent"
-                        elif isinstance(ts_val, date):
-                            new_status = "Mobilizing"
-                    elif dtype_val == "Demob":
-                        cur_status = machine_status_map.get(machine_id_val, "")
-                        sr_val = st.session_state.get(f"dep_{dep_key}_sr_{mid_val}")
-                        ts_val = st.session_state.get(f"dep_{dep_key}_ts_{mid_val}")
-                        if cur_status == "On Rent" and isinstance(ts_val, date):
-                            new_status = "Demobilizing"
-                        elif cur_status == "Demobilizing" and isinstance(sr_val, date):
-                            new_status = "Available"
-
-                    if new_status:
-                        if not machine_id_val:
-                            st.warning(
-                                f"Machine '{mr.get('machine_label', '')}' has no ID linked — "
-                                "operational status not updated."
-                            )
-                        else:
-                            try:
-                                sb.update_machine(machine_id_val, {"operational_status": new_status})
-                                new_status_map[machine_id_val] = new_status
-                            except Exception as me:
-                                st.warning(f"Could not update machine status for '{mr.get('machine_label', '')}': {me}")
-
-                # ── Auto-close: if every machine on this WO is now Available ──
-                _mc_ids = [mr.get("machine_id") for mr in mc_rows if mr.get("machine_id")]
-                if _mc_ids and all(new_status_map.get(mid_v) == "Available" for mid_v in _mc_ids):
-                    try:
-                        sb.update_work_order(selected_wo_id, {"status": "Closed"})
-                        st.success(
-                            "✅ Deployment saved. All machines have returned to Available — "
-                            "Work Order automatically closed."
-                        )
-                    except Exception as woe:
-                        st.success("Deployment saved successfully.")
-                        st.warning(f"Could not auto-close the work order: {woe}")
-                else:
-                    st.success(
-                        "✔ Deployment updated." if _dep_exists else "Deployment saved successfully."
-                    )
-
-                # Force re-fetch on next render
+                st.success("✔ Deployment updated." if _dep_exists else "Deployment saved successfully.")
                 st.session_state.pop("_dep_editing_wo_id", None)
+                st.session_state.pop(_bsd_sync_key, None)
 
             except Exception as exc:
                 st.error(f"Could not save deployment: {exc}")
