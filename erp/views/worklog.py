@@ -95,12 +95,15 @@ def _recalc_df(
             if is_sunday:
                 exp_net = None
                 exp_ot  = round(raw_net, 2)
+                exp_bd  = 0.0
             elif shift_dur is not None:
                 exp_net = raw_net
                 exp_ot  = round(max(0.0, raw_net - shift_dur), 2)
+                exp_bd  = round(max(0.0, shift_dur - raw_net), 2)
             else:
                 exp_net = raw_net
                 exp_ot  = 0.0
+                exp_bd  = 0.0
 
             cur_net    = row.get("Net Time")
             cur_net_na = cur_net is None or _safe_isnan(cur_net)
@@ -115,6 +118,12 @@ def _recalc_df(
             cur_ot_na = cur_ot is None or _safe_isnan(cur_ot)
             if cur_ot_na or abs(float(cur_ot if not cur_ot_na else 0) - exp_ot) > 0.001:
                 out.at[idx, "OT"] = exp_ot
+                changed = True
+
+            cur_bd    = row.get("Breakdown Hours")
+            cur_bd_na = cur_bd is None or _safe_isnan(cur_bd)
+            if cur_bd_na or abs(float(cur_bd if not cur_bd_na else 0) - exp_bd) > 0.001:
+                out.at[idx, "Breakdown Hours"] = exp_bd
                 changed = True
 
         # Net HMR = End HMR − Start HMR
@@ -263,7 +272,7 @@ def _style_schedule(df: pd.DataFrame):
 
     def _row_style(row):
         weekday    = str(row.get("Weekday", ""))
-        is_weekend = weekday in ("Saturday", "Sunday")
+        is_weekend = weekday == "Sunday"
 
         result = []
         for col in row.index:
@@ -760,7 +769,7 @@ def _render_shift_editor(
             "Net HMR":         st.column_config.NumberColumn("Net HMR", format="%.1f",
                                    disabled=True, width="small"),
             "Breakdown Hours": st.column_config.NumberColumn("B/D Hrs", format="%.1f",
-                                   min_value=0, step=0.5, width="small"),
+                                   disabled=True, width="small"),
             "OT":              st.column_config.NumberColumn("OT Hrs", format="%.1f",
                                    disabled=True, width="small"),
             "Operator":        st.column_config.SelectboxColumn("Operator",
@@ -1122,7 +1131,10 @@ def render() -> None:
     shift_start_time = _parse_time(selected_machine.get("shift_start_time")) or time(8, 0)
     shift_end_time   = _parse_time(selected_machine.get("shift_end_time"))   or time(20, 0)
 
-    or1, or2, _ = st.columns([1, 1, 2])
+    _no_of_days_raw = selected_machine.get("no_of_days")
+    _no_of_days     = int(_no_of_days_raw) if _no_of_days_raw else None
+
+    or1, or2, or3, _ = st.columns([1, 1, 1, 1])
     with or1:
         ot_rate_input = st.number_input(
             "OT Rate",
@@ -1140,6 +1152,16 @@ def render() -> None:
             format="%.2f",
             help="Amount to subtract from Total Billing to get Adjusted Billing",
             key="wl_deduction",
+        )
+    with or3:
+        working_days_input = st.number_input(
+            "Working Days",
+            min_value=1,
+            max_value=100,
+            value=_no_of_days if _no_of_days else 26,
+            step=1,
+            help="Defaults to No. of Days from Work Order. Edit here to override for this billing calculation.",
+            key="wl_working_days",
         )
 
     # ── Load DB record once (draft banner + schedule init) ────────────────────
@@ -1223,9 +1245,7 @@ def render() -> None:
         return blank
 
     # ── Totals helper (defined before editors so it can be called inline) ────────
-    _no_of_days_raw = selected_machine.get("no_of_days")
-    _no_of_days     = int(_no_of_days_raw) if _no_of_days_raw else None
-    _wd_display     = str(_no_of_days) if _no_of_days else "—"
+    _wd_display = str(int(working_days_input))
 
     def _show_totals(df: pd.DataFrame, label: str) -> None:
         _d = df.drop(columns=["Select", "Type", "📋", "📌"], errors="ignore")
@@ -1313,7 +1333,7 @@ def render() -> None:
         summary = _compute_billing_summary(
             _combined, rental_per_month, shift_start_time, shift_end_time,
             ot_rate_input=ot_rate_input,
-            no_of_days=_no_of_days,
+            no_of_days=int(working_days_input),
             deduction=deduction_input,
         )
         if summary:
