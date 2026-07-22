@@ -20,6 +20,7 @@ from erp.supabase_client import SupabaseClient
 from erp.views import (
     admin,
     asset,
+    closeworkorder,
     currentdeployment,
     customerreport,
     customers,
@@ -741,6 +742,7 @@ _SIDEBAR_ITEMS = [
     ("assets",         "inventory_2",             "Assets",       "OPERATIONS"),
     ("machinemovement", "move_up",                "Machine Move", "OPERATIONS"),
     ("workorders",     "assignment",              "Work Orders",  "OPERATIONS"),
+    ("closeworkorder", "lock",                    "Close WO",     "OPERATIONS"),
     ("deployments",    "local_shipping",          "Deployments",  "OPERATIONS"),
     ("worklog",        "edit_note",               "Worklog",      "OPERATIONS"),
     ("currentdep",     "pin_drop",                "Active Dep",   "REPORTS"),
@@ -900,6 +902,12 @@ elif page == "assets":
 elif page == "workorders":
     if auth.has_page_access("workorders"):
         workorder.render()
+    else:
+        _access_denied()
+
+elif page == "closeworkorder":
+    if auth.has_page_access("closeworkorder"):
+        closeworkorder.render()
     else:
         _access_denied()
 

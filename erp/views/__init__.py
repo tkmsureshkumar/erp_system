@@ -3,6 +3,7 @@
 __all__ = [
     "admin",
     "asset",
+    "closeworkorder",
     "customers",
     "dashboard",
     "deployment",
