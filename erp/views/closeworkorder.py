@@ -778,6 +778,9 @@ def render() -> None:
                     if close_clicked and confirmed:
                         _err = None
                         try:
+                            import json as _json
+                            from datetime import date as _date
+
                             # 1. Update WO status
                             wo_payload: dict = {"status": "Closed"}
                             if closing_remarks and closing_remarks.strip():
@@ -793,6 +796,35 @@ def render() -> None:
                                         "current_site_id":    None,
                                         "current_customer_id": None,
                                     })
+
+                            # 3. Set billing_end_date = today for any machine that
+                            #    is On Rent (has BSD but no BED) in the deployment record
+                            try:
+                                dep_rec = sb.get_deployment_by_wo(wo_id)
+                                if dep_rec.get("id"):
+                                    raw_mcd = dep_rec.get("machine_deployments")
+                                    mcd_list = []
+                                    if raw_mcd:
+                                        try:
+                                            mcd_list = _json.loads(raw_mcd) if isinstance(raw_mcd, str) else raw_mcd
+                                            mcd_list = mcd_list if isinstance(mcd_list, list) else []
+                                        except Exception:
+                                            mcd_list = []
+
+                                    today_str = _date.today().isoformat()
+                                    updated = False
+                                    for entry in mcd_list:
+                                        if entry.get("billing_start_date") and not entry.get("billing_end_date"):
+                                            entry["billing_end_date"] = today_str
+                                            updated = True
+
+                                    if updated:
+                                        sb.update_deployment(dep_rec["id"], {
+                                            "machine_deployments": _json.dumps(mcd_list),
+                                        })
+                            except Exception:
+                                pass  # billing date update is best-effort; don't block closure
+
                         except Exception as exc:
                             _err = str(exc)
 
