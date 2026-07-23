@@ -13,6 +13,8 @@ import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
+from erp.views._lock import status_chip, lifecycle_controls
+from erp import auth
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -920,12 +922,14 @@ def render() -> None:
                         f"<span class='wo-cl-dot'></span>{site_name}"
                         if site_name else ""
                     )
+                    rec_chip = status_chip(w.get("record_status") or "Draft")
 
                     st.markdown(
                         f"<div class='wo-card{sel_cls}'>"
                         f"<div class='wo-card-top'>"
                         f"<span class='wo-num'>{wo_num}</span>"
                         f"<span class='{b_cls}'>{status}</span>"
+                        f"{rec_chip}"
                         f"{rental_html}"
                         f"</div>"
                         f"<div class='wo-card-sub'>"
@@ -977,6 +981,7 @@ def render() -> None:
                 (selected_wo.get("customer_id") if selected_wo else None) or "", {}
             ).get("customer_name", "")
             status_disp   = (selected_wo.get("status") if selected_wo else None) or "Draft"
+            record_status = (selected_wo.get("record_status", "Draft") if selected_wo else "Draft")
             b_cls_hero    = _STATUS_BADGE_MAP.get(status_disp, "badge-draft")
             badge_cls     = "hero-badge-edit" if mode == "edit" else "hero-badge-new"
             badge_lbl     = "Editing" if mode == "edit" else "New Work Order"
@@ -1007,6 +1012,9 @@ def render() -> None:
                 f"</div>",
                 unsafe_allow_html=True,
             )
+
+            if record_status == "Locked" and not auth.is_admin():
+                st.info("🔒 This Work Order is locked and cannot be edited. Use 'Request Edit' below to submit a change request to the Admin.")
 
             # ── TABS ──────────────────────────────────────────────────────────
             tab_overview, tab_mc, tab_billing, tab_docs = st.tabs([
@@ -1257,6 +1265,17 @@ def render() -> None:
             with sv3:
                 if st.button("↻ Refresh", use_container_width=True, key="wo_refresh_btn"):
                     st.session_state["_editing_wo_id"] = None
+                    st.rerun()
+
+            # ── Lifecycle controls ─────────────────────────────────────────────
+            if mode == "edit" and selected_wo:
+                _lc_result = lifecycle_controls(
+                    "Work Order", selected_wo_id,
+                    selected_wo.get("wo_number", ""),
+                    record_status, key_prefix="wo",
+                )
+                if _lc_result is not None:
+                    sb.update_work_order(selected_wo_id, {"record_status": _lc_result})
                     st.rerun()
 
             # ── Save logic ─────────────────────────────────────────────────────

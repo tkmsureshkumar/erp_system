@@ -14,6 +14,8 @@ import streamlit as st
 
 from ..models import ConditionStatus, OperationalStatus
 from ..supabase_client import SupabaseClient
+from erp.views._lock import status_chip, deactivate_controls
+from erp import auth
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -566,14 +568,21 @@ def render() -> None:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+        show_inactive = False
+        if auth.is_admin():
+            show_inactive = st.checkbox("Show Inactive", value=False, key="mach_show_inactive")
+
         q = search_q.strip().lower()
         filtered_map = {
             mid: m for mid, m in machine_map.items()
-            if not q
-            or q in (m.get("asset_code") or "").lower()
-            or q in m.get("machine_type", "").lower()
-            or q in (m.get("make") or "").lower()
-            or q in (m.get("model") or "").lower()
+            if (show_inactive or m.get("is_active", True))
+            and (
+                not q
+                or q in (m.get("asset_code") or "").lower()
+                or q in m.get("machine_type", "").lower()
+                or q in (m.get("make") or "").lower()
+                or q in (m.get("model") or "").lower()
+            )
         }
 
         count_txt = (
@@ -686,6 +695,11 @@ def render() -> None:
                 f"</div></div></div>",
                 unsafe_allow_html=True,
             )
+            if mode == "edit" and selected_machine:
+                st.markdown(
+                    status_chip("Active" if selected_machine.get("is_active", True) else "Inactive"),
+                    unsafe_allow_html=True,
+                )
 
             # ── TABS ──────────────────────────────────────────────────────────
             tab_overview, tab_edit, tab_hist = st.tabs([
@@ -900,9 +914,12 @@ def render() -> None:
                     _section_hdr("sensors", "Status")
                     st1_col, st2_col = st.columns(2)
                     with st1_col:
+                        _status_opts = operational_status_values
+                        if not auth.is_admin():
+                            _status_opts = [o for o in _status_opts if o not in ("Sold", "Scrapped")]
                         st.selectbox(
                             "Operational Status *",
-                            options=operational_status_values,
+                            options=_status_opts,
                             key="m_operational_status",
                         )
                     with st2_col:
@@ -1045,3 +1062,17 @@ def render() -> None:
                             st.session_state["_mach_sync_key"] = None
                         st.toast(_toast_msg, icon="✅")
                         st.rerun()
+
+            if mode == "edit" and selected_machine:
+                _is_active = selected_machine.get("is_active", True)
+                _deact = deactivate_controls(
+                    "Machine", selected_machine_id,
+                    asset_code_disp or machine_type_disp,
+                    _is_active, key_prefix="mach",
+                )
+                if _deact is True:
+                    sb.update_machine(selected_machine_id, {"is_active": True})
+                    st.rerun()
+                elif _deact is False:
+                    sb.update_machine(selected_machine_id, {"is_active": False})
+                    st.rerun()
