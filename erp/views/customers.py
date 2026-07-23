@@ -15,6 +15,8 @@ import streamlit as st
 
 from ..state_config import load_state_names
 from ..supabase_client import SupabaseClient
+from erp.views._lock import status_chip, deactivate_controls
+from erp import auth
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -611,13 +613,20 @@ def render() -> None:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+        show_inactive = False
+        if auth.is_admin():
+            show_inactive = st.checkbox("Show Inactive", value=False, key="cust_show_inactive")
+
         q = search_q.strip().lower()
         filtered_map = {
             cid: c for cid, c in customer_map.items()
-            if not q
-            or q in c.get("customer_name", "").lower()
-            or q in c.get("city", "").lower()
-            or q in (c.get("customer_code") or "").lower()
+            if (show_inactive or c.get("is_active", True))
+            and (
+                not q
+                or q in c.get("customer_name", "").lower()
+                or q in c.get("city", "").lower()
+                or q in (c.get("customer_code") or "").lower()
+            )
         }
 
         count_txt = (
@@ -705,6 +714,11 @@ def render() -> None:
                 f"</div></div></div>",
                 unsafe_allow_html=True,
             )
+            if mode == "edit" and selected_customer:
+                st.markdown(
+                    status_chip("Active" if selected_customer.get("is_active", True) else "Inactive"),
+                    unsafe_allow_html=True,
+                )
 
             # Existing contacts for display
             existing_contacts = _parse_contacts(
@@ -885,3 +899,16 @@ def render() -> None:
                             st.session_state["_cust_sync_key"] = None
                         st.toast(_toast_msg, icon="✅")
                         st.rerun()
+
+            if mode == "edit" and selected_customer:
+                _is_active = selected_customer.get("is_active", True)
+                _cname = selected_customer.get("customer_name", "")
+                _deact = deactivate_controls(
+                    "Customer", selected_id, _cname, _is_active, key_prefix="cust",
+                )
+                if _deact is True:
+                    sb.update_customer(selected_id, {"is_active": True})
+                    st.rerun()
+                elif _deact is False:
+                    sb.update_customer(selected_id, {"is_active": False})
+                    st.rerun()

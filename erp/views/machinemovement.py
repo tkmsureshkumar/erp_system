@@ -28,6 +28,7 @@ import streamlit as st
 
 from erp.supabase_client import SupabaseClient
 from erp import auth as _auth  # noqa: F401
+from erp.views._lock import status_chip
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -515,6 +516,8 @@ def _timeline_html(movements: list) -> str:
             f"<div class='tl-code'>Ref: {code}</div>"
         ) if code else ""
 
+        rec_chip_html = status_chip(m.get("record_status") or "Draft")
+
         is_last    = idx == len(movements) - 1
         line_html  = "" if is_last else "<div class='tl-line'></div>"
 
@@ -539,6 +542,7 @@ def _timeline_html(movements: list) -> str:
             f"    <div class='tl-locs'>{locs_html}</div>"
             f"    {comment_html}"
             f"    {code_html}"
+            f"    <div style='margin-top:6px;'>{rec_chip_html}</div>"
             f"  </div>"
             f"</div>"
         )
