@@ -8,7 +8,7 @@ Two tabs:
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
@@ -274,25 +274,29 @@ def render() -> None:
         st.error(f"Failed to load users: {exc}")
         users_list = []
 
-    n_total  = len(users_list)
-    n_active = sum(1 for u in users_list if u.get("is_active", True))
-    n_admin  = sum(1 for u in users_list if u.get("role") == "Admin")
+    n_total   = len(users_list)
+    n_active  = sum(1 for u in users_list if u.get("is_active", True))
+    n_admin   = sum(1 for u in users_list if u.get("role") == "Admin")
+    n_pending = sb.count_pending_requests()
 
     # ── KPI strip ──────────────────────────────────────────────────────────────
     st.markdown(
         f"<div class='kpi-grid'>"
-        + _kpi_card("people",               "Total Users",  n_total,
+        + _kpi_card("people",               "Total Users",     n_total,
                     "registered accounts", "#2563EB")
-        + _kpi_card("verified_user",         "Active Users", n_active,
+        + _kpi_card("verified_user",         "Active Users",    n_active,
                     f"{n_total - n_active} inactive", "#10B981")
-        + _kpi_card("admin_panel_settings",  "Admins",       n_admin,
-                    "with full access", "#8B5CF6")
+        + _kpi_card("pending_actions",       "Pending Requests", n_pending,
+                    "awaiting approval", "#F59E0B" if n_pending else "#6B7280")
         + "</div>",
         unsafe_allow_html=True,
     )
 
     # ── Tabs ───────────────────────────────────────────────────────────────────
-    tab_users, tab_logs = st.tabs(["👥  Users", "📋  Activity Log"])
+    req_label = f"🔔  Requests ({n_pending})" if n_pending else "🔔  Requests"
+    tab_users, tab_logs, tab_requests = st.tabs(
+        ["👥  Users", "📋  Activity Log", req_label]
+    )
 
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 1 — Users
@@ -547,3 +551,158 @@ def render() -> None:
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
             else:
                 st.info("No activity logs found for the selected filters.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 3 — Edit / Delete Requests
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_requests:
+        _section_hdr("pending_actions", "Edit & Delete Requests")
+
+        # ── Filter ─────────────────────────────────────────────────────────────
+        rq_col1, rq_col2, _ = st.columns([2, 2, 4])
+        with rq_col1:
+            rq_status = st.selectbox(
+                "Status", ["Pending", "Approved", "Rejected", "All"],
+                key="rq_filter_status",
+            )
+        with rq_col2:
+            rq_type = st.selectbox(
+                "Record Type",
+                ["All", "Work Order", "Movement", "Work Log"],
+                key="rq_filter_type",
+            )
+
+        # ── Load requests ──────────────────────────────────────────────────────
+        try:
+            reqs = sb.list_edit_requests(
+                status=None if rq_status == "All" else rq_status,
+                record_type=None if rq_type == "All" else rq_type,
+            )
+        except Exception as exc:
+            st.error(f"Failed to load requests: {exc}")
+            reqs = []
+
+        if not reqs:
+            st.info("No requests found for the selected filters.")
+        else:
+            st.markdown(
+                f"<div class='log-count'><strong>{len(reqs)}</strong> requests found</div>",
+                unsafe_allow_html=True,
+            )
+
+            for req in reqs:
+                req_id    = req.get("id", "")
+                rtype     = req.get("record_type", "—")
+                rlabel    = req.get("record_label") or req.get("record_id", "—")
+                requester = req.get("requested_by_name") or req.get("requested_by_email") or "Unknown"
+                reason    = req.get("reason", "—")
+                rstatus   = req.get("status", "Pending")
+                created   = req.get("created_at", "")
+
+                # Status badge colors
+                status_color = {
+                    "Pending":  ("#FEF3C7", "#92400E"),
+                    "Approved": ("#DCFCE7", "#166534"),
+                    "Rejected": ("#FEE2E2", "#991B1B"),
+                }.get(rstatus, ("#F1F5F9", "#6B7280"))
+                status_html = (
+                    f"<span style='display:inline-block;padding:2px 9px;border-radius:20px;"
+                    f"background:{status_color[0]};color:{status_color[1]};"
+                    f"font-size:10px;font-weight:700;'>{rstatus}</span>"
+                )
+
+                with st.container(border=True):
+                    h1, h2 = st.columns([5, 1])
+                    with h1:
+                        st.markdown(
+                            f"<div style='display:flex;align-items:center;gap:10px;'>"
+                            f"<span style='font-size:13px;font-weight:700;color:#111827;'>"
+                            f"{rtype} — {rlabel}</span>"
+                            f"{status_html}</div>"
+                            f"<div style='font-size:11px;color:#6B7280;margin-top:3px;'>"
+                            f"Requested by <b>{requester}</b> · {created[:10] if created else '—'}</div>"
+                            f"<div style='margin-top:6px;font-size:12px;color:#374151;'>"
+                            f"<b>Reason:</b> {reason}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                    if rstatus == "Pending":
+                        with h2:
+                            if st.button("✅ Approve", key=f"rq_approve_{req_id}", type="primary"):
+                                try:
+                                    now_str = datetime.now(timezone.utc).isoformat()
+                                    sb.update_edit_request(req_id, {
+                                        "status":           "Approved",
+                                        "reviewed_by_id":   str(user.id) if user else None,
+                                        "reviewed_by_name": profile.get("full_name"),
+                                        "reviewed_at":      now_str,
+                                    })
+                                    # Unlock the target record so staff can edit it
+                                    sb.update_record_status(
+                                        rtype, req.get("record_id", ""), "Unlocked"
+                                    )
+                                    sb.log_activity(
+                                        user_id=user.id if user else None,
+                                        user_email=profile.get("email", ""),
+                                        user_name=profile.get("full_name", ""),
+                                        action="APPROVE_EDIT",
+                                        module="Admin",
+                                        record_id=req.get("record_id"),
+                                        record_label=rlabel,
+                                        details={"record_type": rtype, "reason": reason},
+                                    )
+                                    st.success("Request approved — record unlocked.")
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"Failed to approve: {exc}")
+
+                        reject_key = f"rq_show_reject_{req_id}"
+                        if st.button("❌ Reject", key=f"rq_reject_btn_{req_id}", type="secondary"):
+                            st.session_state[reject_key] = True
+
+                        if st.session_state.get(reject_key):
+                            reject_note = st.text_input(
+                                "Rejection reason (optional)", key=f"rq_rnote_{req_id}"
+                            )
+                            if st.button("Confirm Rejection", key=f"rq_confirm_reject_{req_id}"):
+                                try:
+                                    now_str = datetime.now(timezone.utc).isoformat()
+                                    sb.update_edit_request(req_id, {
+                                        "status":           "Rejected",
+                                        "reviewed_by_id":   str(user.id) if user else None,
+                                        "reviewed_by_name": profile.get("full_name"),
+                                        "reviewed_at":      now_str,
+                                        "review_note":      reject_note.strip() or None,
+                                    })
+                                    sb.log_activity(
+                                        user_id=user.id if user else None,
+                                        user_email=profile.get("email", ""),
+                                        user_name=profile.get("full_name", ""),
+                                        action="REJECT_EDIT",
+                                        module="Admin",
+                                        record_id=req.get("record_id"),
+                                        record_label=rlabel,
+                                        details={"record_type": rtype, "note": reject_note},
+                                    )
+                                    st.session_state.pop(reject_key, None)
+                                    st.success("Request rejected.")
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"Failed to reject: {exc}")
+
+                    elif rstatus == "Approved":
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#166534;margin-top:4px;'>"
+                            f"✅ Approved by {req.get('reviewed_by_name','—')} · "
+                            f"{(req.get('reviewed_at') or '')[:10]}"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif rstatus == "Rejected":
+                        note = req.get("review_note") or "—"
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#991B1B;margin-top:4px;'>"
+                            f"❌ Rejected by {req.get('reviewed_by_name','—')} — {note}"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )

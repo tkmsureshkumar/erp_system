@@ -13,17 +13,31 @@ import streamlit as st
 # Page registry  (key → display label)
 # ---------------------------------------------------------------------------
 ALL_PAGES: dict[str, str] = {
-    "dashboard":   "Dashboard",
-    "customers":   "Customers",
-    "sites":       "Sites",
-    "operators":   "Operators",
-    "machines":    "Machines",
-    "assets":      "Assets",
-    "workorders":  "Work Orders",
-    "deployments": "Deployments",
-    "worklog":     "Worklog",
-    "wlreport":    "Worklog Report",
-    "system":      "System",
+    # ── Operations ────────────────────────────────────────────────────────────
+    "dashboard":       "Dashboard",
+    "customers":       "Customers",
+    "sites":           "Sites",
+    "operators":       "Operators",
+    "machines":        "Machines",
+    "assets":          "Assets",
+    "machinemovement": "Machine Movement",
+    "workorders":      "Work Orders",
+    "closeworkorder":  "Close Work Order",
+    "deployments":     "Deployments",
+    "invoice":         "Invoice",
+    "worklog":         "Worklog",
+    # ── Reports ───────────────────────────────────────────────────────────────
+    "currentdep":      "Active Deployments",
+    "fleetstatus":     "Fleet Status",
+    "fleetutil":       "Fleet Utilization",
+    "machinehistory":  "Machine History",
+    "wlreport":        "Worklog Report",
+    "woreport":        "Work Order Report",
+    "wlreports":       "Worklog Status",
+    "custreport":      "Customer Report",
+    "opreport":        "Operator Report",
+    # ── Config ────────────────────────────────────────────────────────────────
+    "system":          "System",
 }
 
 
@@ -49,6 +63,11 @@ def current_profile() -> dict:
 def is_admin() -> bool:
     """Return True when the current user has the Admin role."""
     return current_profile().get("role") == "Admin"
+
+
+def record_is_editable(record_status: str | None) -> bool:
+    """Return True if a record can be directly edited (Draft or temporarily Unlocked)."""
+    return (record_status or "Draft") in ("Draft", "Unlocked")
 
 
 def has_page_access(page_key: str) -> bool:

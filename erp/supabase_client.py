@@ -966,6 +966,72 @@ class SupabaseClient:
             return data
         return {}
 
+    def update_record_status(self, record_type: str, record_id: str, new_status: str) -> None:
+        """Generic status update used by the approval workflow."""
+        mapping: Dict[str, tuple] = {
+            "Work Order":  ("work_orders",      "record_status"),
+            "Movement":    ("machine_movements", "record_status"),
+            "Work Log":    ("work_logs",         "record_status"),
+        }
+        if record_type not in mapping:
+            return
+        table, col = mapping[record_type]
+        self.admin_client.table(table).update({col: new_status}).eq("id", record_id).execute()
+
+    # ── Edit Request methods ───────────────────────────────────────────────────
+
+    def insert_edit_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.admin_client.table("edit_requests").insert(payload).execute()
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return (data[0] if isinstance(data, list) and data else data) or {}
+
+    def list_edit_requests(
+        self, status: str | None = None, record_type: str | None = None
+    ) -> List[Dict[str, Any]]:
+        query = (
+            self.admin_client.table("edit_requests")
+            .select("*")
+            .order("created_at", desc=True)
+        )
+        if status:
+            query = query.eq("status", status)
+        if record_type:
+            query = query.eq("record_type", record_type)
+        resp = query.execute()
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return data if isinstance(data, list) else []
+
+    def update_edit_request(self, request_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = (
+            self.admin_client.table("edit_requests")
+            .update(payload)
+            .eq("id", request_id)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return (data[0] if isinstance(data, list) and data else data) or {}
+
+    def count_pending_requests(self) -> int:
+        try:
+            resp = (
+                self.admin_client.table("edit_requests")
+                .select("id", count="exact")
+                .eq("status", "Pending")
+                .execute()
+            )
+            if hasattr(resp, "count") and resp.count is not None:
+                return int(resp.count)
+            data = resp.data if hasattr(resp, "data") else []
+            return len(data) if isinstance(data, list) else 0
+        except Exception:
+            return 0
+
     def list_invoices_for_wo(self, work_order_id: str) -> List[Dict[str, Any]]:
         resp = (
             self.client.table("invoices")

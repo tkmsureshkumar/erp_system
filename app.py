@@ -827,6 +827,24 @@ def _build_topbar() -> str:
     section   = _PAGE_SECTION.get(page, "OPERATIONS").title()
     pg_label  = _PAGE_LABELS.get(page, "Dashboard")
     initials  = (_user_name or "U")[:2].upper()
+
+    # Pending requests badge for admins
+    _pending_badge = ""
+    if auth.is_admin():
+        try:
+            _sb_notif = SupabaseClient()
+            _n = _sb_notif.count_pending_requests()
+            if _n:
+                _pending_badge = (
+                    f"<span style='position:absolute;top:2px;right:2px;"
+                    f"min-width:17px;height:17px;border-radius:9px;"
+                    f"background:#EF4444;color:#fff;font-size:10px;font-weight:800;"
+                    f"display:flex;align-items:center;justify-content:center;"
+                    f"padding:0 3px;line-height:1;'>{_n}</span>"
+                )
+        except Exception:
+            pass
+
     return (
         "<div class='il-topbar'>"
         "  <div class='il-breadcrumb'>"
@@ -841,9 +859,13 @@ def _build_topbar() -> str:
         "      <span class='msr' style='font-size:16px;'>search</span>"
         "      <span>Search...</span>"
         "    </div>"
-        "    <div class='il-notif-btn'>"
+        f"   <a href='?page=admin' target='_self' style='position:relative;display:flex;"
+        f"align-items:center;justify-content:center;width:36px;height:36px;"
+        f"border-radius:6px;color:#6B7280;text-decoration:none;transition:background .14s;' "
+        f"onmouseover=\"this.style.background='#F8FAFC'\" onmouseout=\"this.style.background=''\">"
         "      <span class='msr' style='font-size:20px;'>notifications</span>"
-        "    </div>"
+        f"      {_pending_badge}"
+        "    </a>"
         "    <div class='il-user-area'>"
         f"     <div class='il-avatar'>{initials}</div>"
         f"     <span class='il-user-name-tb'>{_user_name}</span>"
