@@ -28,6 +28,7 @@ from erp.views import (
     deployment,
     fleetstatus,
     fleetutil,
+    invoice,
     login,
     machinemovement,
     machinehistory,
@@ -744,6 +745,7 @@ _SIDEBAR_ITEMS = [
     ("workorders",     "assignment",              "Work Orders",  "OPERATIONS"),
     ("closeworkorder", "lock",                    "Close WO",     "OPERATIONS"),
     ("deployments",    "local_shipping",          "Deployments",  "OPERATIONS"),
+    ("invoice",        "receipt_long",            "Invoice",      "OPERATIONS"),
     ("worklog",        "edit_note",               "Worklog",      "OPERATIONS"),
     ("currentdep",     "pin_drop",                "Active Dep",   "REPORTS"),
     ("fleetstatus",    "fact_check",              "Fleet Status", "REPORTS"),
@@ -920,6 +922,12 @@ elif page == "deployments":
 elif page == "machinemovement":
     if auth.has_page_access("machinemovement"):
         machinemovement.render()
+    else:
+        _access_denied()
+
+elif page == "invoice":
+    if auth.has_page_access("invoice"):
+        invoice.render()
     else:
         _access_denied()
 

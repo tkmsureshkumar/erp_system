@@ -934,3 +934,47 @@ class SupabaseClient:
             resp.get("data") if isinstance(resp, dict) else None
         )
         return data if isinstance(data, list) else []
+
+    # ── Invoice methods ────────────────────────────────────────────────────────
+
+    def invoice_number_exists(self, invoice_number: str) -> bool:
+        resp = self.client.table("invoices").select("id").eq(
+            "invoice_number", invoice_number
+        ).limit(1).execute()
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return bool(data)
+
+    def insert_invoice(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("invoices").insert(payload).execute()
+        data = None
+        error = None
+        if hasattr(resp, "data"):
+            data = resp.data
+        elif isinstance(resp, dict):
+            data = resp.get("data")
+        if hasattr(resp, "error"):
+            error = resp.error
+        elif isinstance(resp, dict):
+            error = resp.get("error")
+        if error:
+            raise RuntimeError(str(error))
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    def list_invoices_for_wo(self, work_order_id: str) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("invoices")
+            .select("*")
+            .eq("work_order_id", work_order_id)
+            .order("invoice_date", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return data if isinstance(data, list) else []

@@ -21,4 +21,5 @@ __all__ = [
     "worklog",
     "worklogreport",
     "workorder",
+    "invoice",
 ]
