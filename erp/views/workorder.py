@@ -750,7 +750,10 @@ def render() -> None:
     # Machine label ↔ ID lookups (use ALL machines so existing WO rows parse correctly)
     machines_by_id: dict[str, dict] = {m["id"]: m for m in machines if m.get("id")}
     id_to_label = {
-        m.get("id"): f"{m.get('asset_code', '')} — {m.get('machine_type', '')}".strip("— ")
+        m.get("id"): (
+            f"{m.get('asset_code', '')} — {m.get('machine_type', '')}"
+            + (f" | SN: {m.get('serial_number')}" if m.get("serial_number") else "")
+        ).strip("— ")
         for m in machines if m.get("id")
     }
     label_to_id = {v: k for k, v in id_to_label.items()}
@@ -1137,7 +1140,12 @@ def render() -> None:
 
                     for idx, row in enumerate(mc_rows):
                         c1, c2, c3, c4, c5, c6, c7 = st.columns([4, 2, 3, 3, 2, 1, 1])
-                        c1.write(row.get("machine_label") or "—")
+                        _sn_sub = row.get("serial_number") or ""
+                        c1.markdown(
+                            f"**{row.get('machine_label') or '—'}**"
+                            + (f"  \n<span style='font-size:11px;color:#6B7280;'>SN: {_sn_sub}</span>" if _sn_sub else ""),
+                            unsafe_allow_html=True,
+                        )
                         c2.write(
                             " / ".join(filter(None, [
                                 row.get("make", ""), row.get("model", ""),

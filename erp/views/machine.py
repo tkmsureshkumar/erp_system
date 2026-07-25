@@ -455,8 +455,22 @@ def render() -> None:
             st.warning(f"Could not load asset types: {e}")
             return []
 
-    machines   = fetch_machines()
-    assets     = fetch_assets()
+    def fetch_sites() -> list[dict]:
+        try:
+            return sb.list_sites()
+        except Exception as e:
+            st.warning(f"Could not load sites: {e}")
+            return []
+
+    machines = fetch_machines()
+    assets   = fetch_assets()
+    sites    = fetch_sites()
+
+    # Dropdown options for location — active sites only, sorted by name
+    site_location_options: list[str] = [""] + sorted(
+        s.get("site_name", "") for s in sites
+        if s.get("site_name") and s.get("is_active", True)
+    )
 
     operational_status_values = [e.value for e in OperationalStatus]
     condition_status_values   = [e.value for e in ConditionStatus]
@@ -532,7 +546,10 @@ def render() -> None:
         st.session_state["m_original_yom"]              = m.get("original_yom") or 0
         st.session_state["m_operational_yom"]           = str(m.get("operational_yom", "") or "")
         st.session_state["m_working_capacity"]          = str(m.get("working_capacity", "") or "")
-        st.session_state["m_current_location"]          = m.get("current_location", "")
+        _raw_loc = m.get("current_location", "")
+        st.session_state["m_current_location"] = (
+            _raw_loc if _raw_loc in site_location_options else ""
+        )
         st.session_state["m_purchase_date"]             = _parse_date(m.get("purchase_date"))
         st.session_state["m_purchase_cost"]             = float(m.get("purchase_cost") or 0.0)
         st.session_state["m_ownership"]                 = m.get("ownership", OWNERSHIP_OPTIONS[0])
@@ -873,9 +890,11 @@ def render() -> None:
                             key="m_operational_yom", placeholder="e.g. 2020",
                         )
                         st.date_input("Purchase Date", key="m_purchase_date")
-                        st.text_input(
-                            "Current Location", key="m_current_location",
-                            placeholder="e.g. Mumbai Yard",
+                        st.selectbox(
+                            "Current Location *",
+                            options=site_location_options,
+                            format_func=lambda v: "Select site…" if not v else v,
+                            key="m_current_location",
                         )
 
                 # Serial Numbers
@@ -895,19 +914,6 @@ def render() -> None:
                     o1, _ = st.columns([1, 3])
                     with o1:
                         st.selectbox("Ownership *", options=OWNERSHIP_OPTIONS, key="m_ownership")
-
-                # Compliance & Expiry Dates
-                with st.container(border=True):
-                    _section_hdr("verified_user", "Compliance & Expiry Dates")
-                    e1, e2, e3, e4 = st.columns(4)
-                    with e1:
-                        st.date_input("TPI Expiry",      key="m_tpi_expiry")
-                    with e2:
-                        st.date_input("PUC Expiry",      key="m_puc_expiry")
-                    with e3:
-                        st.date_input("Form 11 Expiry",  key="m_form11_expiry")
-                    with e4:
-                        st.date_input("Insurance Expiry", key="m_insurance_expiry")
 
                 # Status
                 with st.container(border=True):
@@ -970,14 +976,10 @@ def render() -> None:
                 original_yom_val          = st.session_state.get("m_original_yom", 0)
                 operational_yom_val       = (st.session_state.get("m_operational_yom", "") or "").strip()
                 working_capacity_val      = (st.session_state.get("m_working_capacity", "") or "").strip()
-                current_location_val      = (st.session_state.get("m_current_location", "") or "").strip()
+                current_location_val      = st.session_state.get("m_current_location") or ""
                 purchase_date_val         = st.session_state.get("m_purchase_date")
                 purchase_cost_val         = st.session_state.get("m_purchase_cost", 0.0)
                 ownership_val             = st.session_state.get("m_ownership", OWNERSHIP_OPTIONS[0])
-                tpi_expiry_val            = st.session_state.get("m_tpi_expiry")
-                puc_expiry_val            = st.session_state.get("m_puc_expiry")
-                form11_expiry_val         = st.session_state.get("m_form11_expiry")
-                insurance_expiry_val      = st.session_state.get("m_insurance_expiry")
                 operational_status_val    = st.session_state.get(
                     "m_operational_status", OperationalStatus.AVAILABLE.value
                 )
@@ -988,6 +990,8 @@ def render() -> None:
                 # Validate required fields
                 if not machine_type_val:
                     st.error("Machine Type is required.")
+                elif not current_location_val:
+                    st.error("Current Location is required — select a site.")
                 elif not operational_status_val:
                     st.error("Operational Status is required.")
                 elif not condition_status_val:
@@ -1007,10 +1011,6 @@ def render() -> None:
                         purchase_date             = purchase_date_val.isoformat() if purchase_date_val else None,
                         purchase_cost             = float(purchase_cost_val) if purchase_cost_val else None,
                         ownership                 = ownership_val,
-                        TPI_expiry                = tpi_expiry_val.isoformat() if tpi_expiry_val else None,
-                        PUC_expiry                = puc_expiry_val.isoformat() if puc_expiry_val else None,
-                        Form_11_expiry            = form11_expiry_val.isoformat() if form11_expiry_val else None,
-                        insurance_expiry          = insurance_expiry_val.isoformat() if insurance_expiry_val else None,
                         operational_status        = operational_status_val,
                         condition_status          = condition_status_val,
                     )

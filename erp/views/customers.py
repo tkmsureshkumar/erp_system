@@ -392,7 +392,6 @@ def _open_new_form(state_names: list[str]) -> None:
     st.session_state["_cust_sel_id"]   = ""
     st.session_state["_cust_sync_key"] = "__new__"
     st.session_state["cust_name"]      = ""
-    st.session_state["cust_gst"]       = ""
     st.session_state["cust_billing"]   = ""
     st.session_state["cust_city"]      = ""
     st.session_state["cust_state"]     = state_names[0] if state_names else ""
@@ -583,7 +582,6 @@ def render() -> None:
         st.session_state["_cust_sync_key"] = sync_key
         c = selected_customer or {}
         st.session_state["cust_name"]    = c.get("customer_name", "")
-        st.session_state["cust_gst"]     = c.get("gst_number",    "")
         st.session_state["cust_billing"] = c.get("billing_address", "")
         st.session_state["cust_city"]    = c.get("city",  "")
         raw_state = c.get("state", "")
@@ -749,7 +747,6 @@ def render() -> None:
                     st.markdown(
                         f"<div class='info-grid'>"
                         + _info_field("Customer Name", sc.get("customer_name"), wide=False)
-                        + _info_field("GST Number",    sc.get("gst_number"))
                         + _info_field("Customer Code", sc.get("customer_code"))
                         + _info_field("City",          sc.get("city"))
                         + _info_field("State",         sc.get("state"), wide=False)
@@ -775,17 +772,10 @@ def render() -> None:
             with tab_edit:
                 with st.container(border=True):
                     _section_hdr("business_center", "Business Information")
-                    bi1, bi2 = st.columns([3, 2])
-                    with bi1:
-                        st.text_input(
-                            "Customer Name *", key="cust_name",
-                            placeholder="e.g. Acme Infrastructure Pvt Ltd",
-                        )
-                    with bi2:
-                        st.text_input(
-                            "GST Number", key="cust_gst",
-                            placeholder="e.g. 27AAPFU0939F1ZV",
-                        )
+                    st.text_input(
+                        "Customer Name *", key="cust_name",
+                        placeholder="e.g. Acme Infrastructure Pvt Ltd",
+                    )
 
                 with st.container(border=True):
                     _section_hdr("location_on", "Address")
@@ -869,7 +859,6 @@ def render() -> None:
                         contact_person  = json.dumps(contacts_list) if contacts_list else None,
                         mobile          = first.get("mobile") or None,
                         email           = first.get("email")  or None,
-                        gst_number      = (st.session_state.get("cust_gst",     "") or "").strip() or None,
                         billing_address = (st.session_state.get("cust_billing", "") or "").strip() or None,
                         city            = (st.session_state.get("cust_city",    "") or "").strip() or None,
                         state           = st.session_state.get("cust_state") or None,

@@ -24,7 +24,7 @@ ALL_PAGES: dict[str, str] = {
     "machinecompliance": "Machine Compliance",
     "workorders":      "Work Orders",
     "closeworkorder":  "Close Work Order",
-    "deployments":     "Deployments",
+    "deployments":     "Start Billing",
     "invoice":         "Invoice",
     "worklog":         "Worklog",
     # ── Reports ───────────────────────────────────────────────────────────────

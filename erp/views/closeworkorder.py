@@ -717,124 +717,230 @@ def render() -> None:
                 if is_closed:
                     st.success(f"This work order is already **{status}**. No further action needed.")
                 else:
-                    # Warning summary
-                    machine_lines = "".join(
-                        f"<li><strong>{mc.get('machine_label', '—')}</strong> — "
-                        f"current status: <em>"
-                        f"{machine_map.get(mc.get('machine_id',''), {}).get('operational_status', 'Unknown')}"
-                        f"</em> → will become <strong style='color:#065F46;'>Available</strong></li>"
-                        for mc in mc_list
-                    )
+                    # Load deployment record to get per-machine billing status
+                    try:
+                        dep_rec  = sb.get_deployment_by_wo(wo_id)
+                        dep_id   = dep_rec.get("id") if dep_rec else None
+                        raw_mcd  = dep_rec.get("machine_deployments") if dep_id else None
+                        if raw_mcd:
+                            _parsed  = json.loads(raw_mcd) if isinstance(raw_mcd, str) else raw_mcd
+                            mcd_list = _parsed if isinstance(_parsed, list) else []
+                        else:
+                            mcd_list = []
+                    except Exception:
+                        dep_id   = None
+                        mcd_list = []
+
+                    # {machine_id: deployment_entry} for quick billing-status lookup
+                    mcd_by_machine: dict[str, dict] = {
+                        str(e.get("machine_id")): e
+                        for e in mcd_list if e.get("machine_id")
+                    }
+
                     st.markdown(
-                        "<div class='close-warning'>"
-                        "<span class='close-warning-icon'>⚠️</span>"
-                        "<div>"
-                        "<div class='close-warning-title'>Review before closing</div>"
-                        "<div class='close-warning-body'>"
-                        "Closing this work order will make the following changes:<br>"
-                        f"<ul style='margin:8px 0 0 0;padding-left:16px;'>"
-                        f"<li>Work Order <strong>{wo_num}</strong> status → "
-                        f"<strong style='color:#991B1B;'>Closed</strong></li>"
-                        f"{machine_lines}"
-                        f"</ul>"
-                        f"<br>This action cannot be automatically undone. "
-                        f"Machines can be re-assigned by editing them individually."
-                        f"</div></div></div>",
+                        "<div style='font-size:12px;color:#6B7280;margin-bottom:12px;'>"
+                        "Check the machines you want to release. Billing stops on the chosen date "
+                        "and the machine returns to <strong>Available</strong>. "
+                        "The Work Order closes automatically when all machines are released."
+                        "</div>",
                         unsafe_allow_html=True,
                     )
 
-                    # Remarks input
+                    # Header row
+                    hc1, hc2, hc3, hc4 = st.columns([1, 5, 3, 3])
+                    for hcol, hlbl in zip(
+                        [hc1, hc2, hc3, hc4],
+                        ["Release?", "Machine", "Billing Status", "Release Date"],
+                    ):
+                        hcol.markdown(
+                            f"<div style='font-size:10px;font-weight:700;color:#6B7280;"
+                            f"letter-spacing:.08em;text-transform:uppercase;"
+                            f"padding-bottom:4px;border-bottom:1px solid #E5E7EB;'>{hlbl}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                    any_releasable = False
+                    for mc in mc_list:
+                        mid              = str(mc.get("machine_id") or "")
+                        label            = mc.get("machine_label") or "—"
+                        sn               = mc.get("serial_number") or ""
+                        dep_e            = mcd_by_machine.get(mid) or {}
+                        bsd              = dep_e.get("billing_start_date")
+                        bed              = dep_e.get("billing_end_date")
+                        already_released = bool(bed)
+
+                        rc1, rc2, rc3, rc4 = st.columns([1, 5, 3, 3])
+                        with rc1:
+                            if already_released:
+                                st.checkbox("Released", value=True, disabled=True,
+                                            key=f"cwo_rel_{mid}",
+                                            label_visibility="collapsed")
+                            else:
+                                any_releasable = True
+                                st.checkbox("Release", value=False,
+                                            key=f"cwo_rel_{mid}",
+                                            label_visibility="collapsed")
+                        with rc2:
+                            st.markdown(
+                                f"**{label}**"
+                                + (f"  \n<span style='font-size:11px;color:#6B7280;'>"
+                                   f"SN: {sn}</span>" if sn else ""),
+                                unsafe_allow_html=True,
+                            )
+                        with rc3:
+                            if already_released:
+                                st.markdown(
+                                    f"<span style='color:#166534;font-size:12px;'>"
+                                    f"Released {bed}</span>",
+                                    unsafe_allow_html=True,
+                                )
+                            elif bsd:
+                                st.markdown(
+                                    f"<span style='color:#92400E;font-size:12px;'>"
+                                    f"Active since {bsd}</span>",
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.markdown(
+                                    "<span style='color:#9CA3AF;font-size:12px;'>"
+                                    "Not started</span>",
+                                    unsafe_allow_html=True,
+                                )
+                        with rc4:
+                            if not already_released:
+                                st.date_input(
+                                    "Date", value=date.today(),
+                                    key=f"cwo_rel_date_{mid}",
+                                    label_visibility="collapsed",
+                                )
+
+                    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
+
+                    # Machines the user has ticked (excluding already-released)
+                    selected_mids = [
+                        str(mc.get("machine_id") or "")
+                        for mc in mc_list
+                        if str(mc.get("machine_id") or "")
+                        and st.session_state.get(
+                            f"cwo_rel_{str(mc.get('machine_id') or '')}"
+                        )
+                        and not (
+                            mcd_by_machine.get(str(mc.get("machine_id") or "")) or {}
+                        ).get("billing_end_date")
+                    ]
+
+                    if not any_releasable:
+                        st.info(
+                            "All machines have already been released. "
+                            "Click below to close the Work Order."
+                        )
+
                     closing_remarks = st.text_area(
                         "Closing Remarks (optional)",
                         placeholder="e.g. Job completed as per contract. All machines demobilized.",
-                        height=90,
+                        height=80,
                         key="cwo_closing_remarks",
                     )
 
-                    # Confirmation checkbox
-                    confirmed = st.checkbox(
-                        f"I confirm closing Work Order **{wo_num}** and releasing "
-                        f"{len(mc_list)} machine{'s' if len(mc_list) != 1 else ''} back to Available.",
-                        key="cwo_confirm_check",
-                    )
-
-                    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
+                    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
                     cl1, cl2, _ = st.columns([3, 2, 3])
 
+                    _btn_disabled = any_releasable and not selected_mids
+                    _btn_label    = (
+                        f"Release {len(selected_mids)} Machine"
+                        f"{'s' if len(selected_mids) != 1 else ''}"
+                        if selected_mids
+                        else ("Close Work Order" if not any_releasable else "Select machines above")
+                    )
                     with cl1:
-                        close_clicked = st.button(
-                            "🔒  Close Work Order",
+                        release_clicked = st.button(
+                            _btn_label,
                             type="primary",
                             use_container_width=True,
-                            disabled=not confirmed,
-                            key="cwo_close_btn",
+                            disabled=_btn_disabled,
+                            key="cwo_release_btn",
                         )
                     with cl2:
-                        if st.button("↻ Refresh", use_container_width=True, key="cwo_refresh_btn"):
-                            st.session_state["_cwo_confirm"] = False
+                        if st.button("Refresh", use_container_width=True, key="cwo_refresh_btn"):
                             st.rerun()
 
-                    # ── Close logic ─────────────────────────────────────────
-                    if close_clicked and confirmed:
-                        _err = None
+                    # ── Release logic ─────────────────────────────────────────
+                    if release_clicked and not _btn_disabled:
+                        _err         = None
+                        n_released   = 0
+                        all_released = False
                         try:
-                            import json as _json
-                            from datetime import date as _date
+                            if selected_mids:
+                                for mid in selected_mids:
+                                    sb.update_machine(mid, {"operational_status": "Available"})
+                                    n_released += 1
 
-                            # 1. Update WO status
-                            wo_payload: dict = {"status": "Closed"}
-                            if closing_remarks and closing_remarks.strip():
-                                wo_payload["closing_remarks"] = closing_remarks.strip()
-                            sb.update_work_order(wo_id, wo_payload)
+                                    rel_date_val = st.session_state.get(
+                                        f"cwo_rel_date_{mid}", date.today()
+                                    )
+                                    rel_date_str = (
+                                        rel_date_val.isoformat()
+                                        if isinstance(rel_date_val, date)
+                                        else date.today().isoformat()
+                                    )
+                                    dep_entry = mcd_by_machine.get(mid)
+                                    if dep_entry is not None:
+                                        dep_entry["billing_end_date"] = rel_date_str
+                                    else:
+                                        mcd_list.append({
+                                            "machine_id":       mid,
+                                            "billing_end_date": rel_date_str,
+                                        })
 
-                            # 2. Release each machine back to Available
-                            for mc in mc_list:
-                                mid = mc.get("machine_id")
-                                if mid:
-                                    sb.update_machine(mid, {
-                                        "operational_status": "Available",
-                                        "current_site_id":    None,
-                                        "current_customer_id": None,
+                                if dep_id:
+                                    sb.update_deployment(dep_id, {
+                                        "machine_deployments": json.dumps(mcd_list),
                                     })
 
-                            # 3. Set billing_end_date = today for any machine that
-                            #    is On Rent (has BSD but no BED) in the deployment record
-                            try:
-                                dep_rec = sb.get_deployment_by_wo(wo_id)
-                                if dep_rec.get("id"):
-                                    raw_mcd = dep_rec.get("machine_deployments")
-                                    mcd_list = []
-                                    if raw_mcd:
-                                        try:
-                                            mcd_list = _json.loads(raw_mcd) if isinstance(raw_mcd, str) else raw_mcd
-                                            mcd_list = mcd_list if isinstance(mcd_list, list) else []
-                                        except Exception:
-                                            mcd_list = []
+                            # Close the WO if every machine is now released
+                            all_released = all(
+                                (mcd_by_machine.get(str(mc.get("machine_id") or "")) or {}).get(
+                                    "billing_end_date"
+                                )
+                                or str(mc.get("machine_id") or "") in selected_mids
+                                or not mc.get("machine_id")
+                                for mc in mc_list
+                            )
 
-                                    today_str = _date.today().isoformat()
-                                    updated = False
-                                    for entry in mcd_list:
-                                        if entry.get("billing_start_date") and not entry.get("billing_end_date"):
-                                            entry["billing_end_date"] = today_str
-                                            updated = True
-
-                                    if updated:
-                                        sb.update_deployment(dep_rec["id"], {
-                                            "machine_deployments": _json.dumps(mcd_list),
-                                        })
-                            except Exception:
-                                pass  # billing date update is best-effort; don't block closure
+                            if all_released or not any_releasable:
+                                wo_payload: dict = {"status": "Closed"}
+                                if closing_remarks and closing_remarks.strip():
+                                    wo_payload["closing_remarks"] = closing_remarks.strip()
+                                sb.update_work_order(wo_id, wo_payload)
 
                         except Exception as exc:
                             _err = str(exc)
 
                         if _err:
-                            st.error(f"Failed to close work order: {_err}")
+                            st.error(f"Failed to release machines: {_err}")
                         else:
-                            st.toast(
-                                f"Work Order {wo_num} closed. "
-                                f"{len(mc_list)} machine{'s' if len(mc_list) != 1 else ''} set to Available.",
-                                icon="✅",
-                            )
-                            st.session_state["_cwo_confirm"] = False
+                            if all_released or not any_releasable:
+                                st.toast(
+                                    f"Work Order {wo_num} closed."
+                                    + (
+                                        f" {n_released} machine"
+                                        f"{'s' if n_released != 1 else ''} released."
+                                        if n_released else ""
+                                    ),
+                                    icon="✅",
+                                )
+                            else:
+                                remaining = sum(
+                                    1 for mc in mc_list
+                                    if not (
+                                        mcd_by_machine.get(str(mc.get("machine_id") or "")) or {}
+                                    ).get("billing_end_date")
+                                    and str(mc.get("machine_id") or "") not in selected_mids
+                                )
+                                st.toast(
+                                    f"{n_released} machine"
+                                    f"{'s' if n_released != 1 else ''} released. "
+                                    f"{remaining} still billing — WO remains open.",
+                                    icon="🔓",
+                                )
                             st.rerun()

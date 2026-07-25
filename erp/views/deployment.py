@@ -1,9 +1,9 @@
 """
 erp/views/deployment.py
-Deployment tracking — links a Work Order to logistics: machine dates and truck driver.
+Start Billing — set billing start dates for machines on an active Work Order.
 
-Auto-closes the work order when every machine on the WO returns to "Available".
-Shows the entire form in read-only mode once the WO is Closed.
+Shows the form in read-only mode once the WO is Closed.
+Billing end dates are managed exclusively via the Close WO module.
 """
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ def _section_header(label: str, subtitle: str = "") -> None:
 
 
 def _table_header_row() -> None:
-    h1, h2, h3, h4 = st.columns([2, 1.5, 1.5, 1.5])
+    h1, h2, h3 = st.columns([2, 1.5, 1.5])
     _th = (
         "font-size:10px;font-weight:700;letter-spacing:.1em;color:#64748B;"
         "text-transform:uppercase;padding:6px 0 8px;"
@@ -114,8 +114,6 @@ def _table_header_row() -> None:
         st.markdown(f"<span style='{_th}'>Billing Status</span>", unsafe_allow_html=True)
     with h3:
         st.markdown(f"<span style='{_th}'>Billing Start Date</span>", unsafe_allow_html=True)
-    with h4:
-        st.markdown(f"<span style='{_th}'>Billing End Date</span>", unsafe_allow_html=True)
 
 
 # ── View ───────────────────────────────────────────────────────────────────────
@@ -124,7 +122,7 @@ def render() -> None:
     st.markdown(
         """
         <div class="page-eyebrow">// Fleet Operations</div>
-        <div class="page-title">Deployment</div>
+        <div class="page-title">Start Billing</div>
         """,
         unsafe_allow_html=True,
     )
@@ -253,7 +251,7 @@ def render() -> None:
             "<div style='display:inline-flex;align-items:center;gap:6px;margin:6px 0 18px;"
             "background:#dcfce7;border:1px solid #bbf7d0;border-radius:20px;"
             "padding:4px 12px;font-size:11px;font-weight:600;color:#166534;'>"
-            "&#10003; Deployment record exists — editing</div>",
+            "&#10003; Billing record exists — editing</div>",
             unsafe_allow_html=True,
         )
     else:
@@ -261,7 +259,7 @@ def render() -> None:
             "<div style='display:inline-flex;align-items:center;gap:6px;margin:6px 0 18px;"
             "background:#fef3c7;border:1px solid #fde68a;border-radius:20px;"
             "padding:4px 12px;font-size:11px;font-weight:600;color:#92400e;'>"
-            "&#9711; New deployment — not yet saved</div>",
+            "&#9711; No billing set — will create new record</div>",
             unsafe_allow_html=True,
         )
 
@@ -494,16 +492,14 @@ def render() -> None:
                 st.markdown(_info_card(lbl, val), unsafe_allow_html=True)
                 st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
 
-        # Billing date summary cards
-        billing_date_fields = [
-            ("Billing Start Date", _sel_bsd.strftime("%d %b %Y") if _sel_bsd else "Not set"),
-            ("Billing End Date",   _sel_bed.strftime("%d %b %Y") if _sel_bed else "Not set"),
-        ]
-        bc1, bc2 = st.columns(2)
-        for col, (lbl, val) in zip([bc1, bc2], billing_date_fields):
-            with col:
-                st.markdown(_info_card(lbl, val), unsafe_allow_html=True)
-                st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
+        # Billing start date summary card
+        bc1, _ = st.columns(2)
+        with bc1:
+            st.markdown(
+                _info_card("Billing Start Date", _sel_bsd.strftime("%d %b %Y") if _sel_bsd else "Not set"),
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div style='margin-bottom:10px'></div>", unsafe_allow_html=True)
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -539,7 +535,7 @@ def render() -> None:
                 _bed   = _parse_date(_sv.get("billing_end_date"))
                 _ops   = machine_status_map.get(_mr.get("machine_id", ""), "")
 
-                rc1, rc2, rc3, rc4 = st.columns([2, 1.5, 1.5, 1.5])
+                rc1, rc2, rc3 = st.columns([2, 1.5, 1.5])
                 with rc1:
                     st.markdown(
                         f"<div style='padding:6px 0;'>"
@@ -559,16 +555,10 @@ def render() -> None:
                         f"{_bsd.strftime('%d %b %Y') if _bsd else '—'}</div>",
                         unsafe_allow_html=True,
                     )
-                with rc4:
-                    st.markdown(
-                        f"<div style='padding:10px 0;font-size:13px;font-weight:600;color:#111827;'>"
-                        f"{_bed.strftime('%d %b %Y') if _bed else '—'}</div>",
-                        unsafe_allow_html=True,
-                    )
 
         return
 
-    # ── Billing dates sync — BSD + BED from saved deployment ──────────────────
+    # ── Billing start date sync from saved deployment ──────────────────────────
     _bsd_sync_key = f"_bsd_sync_{dep_key}"
     if st.session_state.get(_bsd_sync_key) != dep_key:
         st.session_state[_bsd_sync_key] = dep_key
@@ -585,24 +575,12 @@ def render() -> None:
                 except Exception:
                     pass
 
-            # BED: always initialize key (to None if not saved)
-            _bed_key = f"dep_{dep_key}_bed_{_mid}"
-            if _bed_key not in st.session_state:
-                _saved_bed = _sv.get("billing_end_date")
-                if _saved_bed:
-                    try:
-                        st.session_state[_bed_key] = date.fromisoformat(str(_saved_bed))
-                    except Exception:
-                        st.session_state[_bed_key] = None
-                else:
-                    st.session_state[_bed_key] = None
-
     # ── Section B — Machine Billing Dates ─────────────────────────────────────
     st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
     _section_header(
-        "B — Machine Billing Dates",
-        "Set billing start and stop dates independently for each machine. "
-        "Setting a Billing End Date will mark that machine as Available.",
+        "B — Machine Billing Start Dates",
+        "Set the billing start date for each machine. "
+        "To stop billing or release a machine, use the Close Billing module.",
     )
 
     if not filtered_mc_rows:
@@ -629,7 +607,7 @@ def render() -> None:
             _s_bsd = _parse_date(_sv.get("billing_start_date"))
             _s_bed = _parse_date(_sv.get("billing_end_date"))
 
-            _fc1, _fc2, _fc3, _fc4 = st.columns([2, 1.5, 1.5, 1.5])
+            _fc1, _fc2, _fc3 = st.columns([2, 1.5, 1.5])
             with _fc1:
                 st.markdown(
                     f"<div style='padding:8px 0 4px;'>"
@@ -649,13 +627,6 @@ def render() -> None:
                     key=f"dep_{dep_key}_bsd_{_mid}",
                     label_visibility="collapsed",
                 )
-            with _fc4:
-                st.date_input(
-                    "Billing End Date",
-                    key=f"dep_{dep_key}_bed_{_mid}",
-                    value=None,
-                    label_visibility="collapsed",
-                )
 
             if i < len(filtered_mc_rows) - 1:
                 st.markdown(
@@ -667,93 +638,60 @@ def render() -> None:
         st.markdown(
             "<div style='padding:10px 14px;background:#EFF6FF;border:1px solid #BFDBFE;"
             "border-radius:8px;font-size:12px;color:#1E40AF;margin-bottom:16px;'>"
-            "<strong>Note:</strong> Each machine's billing is managed independently. "
-            "Entering a Billing End Date stops billing for that machine only and "
-            "automatically sets its status to <strong>Available</strong>. "
-            "Leave Billing End Date empty to keep billing active.</div>",
+            "<strong>Note:</strong> Set the billing start date for each machine independently. "
+            "To stop billing or release machines, use the <strong>Close Billing</strong> module.</div>",
             unsafe_allow_html=True,
         )
 
         submitted = st.form_submit_button(
-            "✔  Update Billing Dates" if _dep_exists else "Save Deployment",
+            "✔  Save Billing Start Dates" if _dep_exists else "✔  Save Billing Start Dates",
             type="primary",
             use_container_width=False,
         )
 
         if submitted:
-            # Per-machine validation: BED must not be before BSD
-            validation_errors: list[str] = []
+            mc_dates_payload = []
             for mr in filtered_mc_rows:
                 mid  = mr.get("machine_id") or mr.get("machine_label", "")
                 mlbl = mr.get("machine_label", mid)
                 bsd  = st.session_state.get(f"dep_{dep_key}_bsd_{mid}")
-                bed  = st.session_state.get(f"dep_{dep_key}_bed_{mid}")
-                if (
-                    isinstance(bsd, date)
-                    and isinstance(bed, date)
-                    and bed < bsd
-                ):
-                    validation_errors.append(
-                        f"**{mlbl}**: Billing End Date ({bed.strftime('%d %b %Y')}) "
-                        f"cannot be earlier than Billing Start Date ({bsd.strftime('%d %b %Y')})."
-                    )
+                _saved_bed = (_saved_entry_for(mid, mlbl)).get("billing_end_date")
+                mc_dates_payload.append({
+                    "machine_id":         mr.get("machine_id"),
+                    "machine_label":      mlbl,
+                    "billing_start_date": bsd.isoformat() if isinstance(bsd, date) else None,
+                    "billing_end_date":   _saved_bed,
+                })
 
-            if validation_errors:
-                for err in validation_errors:
-                    st.error(err)
-            else:
-                mc_dates_payload = []
+            payload = dict(
+                work_order_id=selected_wo_id,
+                customer_id=selected_wo.get("customer_id"),
+                site_id=selected_wo.get("site_id"),
+                deployment_date=date.today().isoformat(),
+                client_work_ordernumber=selected_wo.get("client_work_ordernumber"),
+                machine_deployments=json.dumps(mc_dates_payload),
+            )
+
+            try:
+                if _dep_exists:
+                    sb.update_deployment(existing_dep["id"], payload)
+                else:
+                    sb.insert_deployment(payload)
+
+                # Update each machine's operational status based on billing start date
                 for mr in filtered_mc_rows:
-                    mid  = mr.get("machine_id") or mr.get("machine_label", "")
-                    mlbl = mr.get("machine_label", mid)
-                    bsd  = st.session_state.get(f"dep_{dep_key}_bsd_{mid}")
-                    bed  = st.session_state.get(f"dep_{dep_key}_bed_{mid}")
-                    mc_dates_payload.append({
-                        "machine_id":         mr.get("machine_id"),
-                        "machine_label":      mlbl,
-                        "billing_start_date": bsd.isoformat() if isinstance(bsd, date) else None,
-                        "billing_end_date":   bed.isoformat() if isinstance(bed, date) else None,
-                    })
+                    _mid_val = mr.get("machine_id")
+                    if _mid_val:
+                        _bsd_val = st.session_state.get(f"dep_{dep_key}_bsd_{_mid_val}")
+                        _new_status = "On Rent" if isinstance(_bsd_val, date) else "Reserved"
+                        try:
+                            sb.update_machine(_mid_val, {"operational_status": _new_status})
+                        except Exception:
+                            pass
 
-                payload = dict(
-                    work_order_id=selected_wo_id,
-                    customer_id=selected_wo.get("customer_id"),
-                    site_id=selected_wo.get("site_id"),
-                    deployment_date=date.today().isoformat(),
-                    client_work_ordernumber=selected_wo.get("client_work_ordernumber"),
-                    machine_deployments=json.dumps(mc_dates_payload),
-                )
+                st.success("✔ Billing start dates saved successfully.")
+                st.session_state.pop("_dep_editing_wo_id", None)
+                st.session_state.pop(_bsd_sync_key, None)
 
-                try:
-                    if _dep_exists:
-                        sb.update_deployment(existing_dep["id"], payload)
-                    else:
-                        sb.insert_deployment(payload)
-
-                    # Update each machine's operational status independently
-                    for mr in filtered_mc_rows:
-                        _mid_val = mr.get("machine_id")
-                        if _mid_val:
-                            _bsd_val = st.session_state.get(f"dep_{dep_key}_bsd_{_mid_val}")
-                            _bed_val = st.session_state.get(f"dep_{dep_key}_bed_{_mid_val}")
-                            if isinstance(_bed_val, date):
-                                _new_status = "Available"
-                            elif isinstance(_bsd_val, date):
-                                _new_status = "On Rent"
-                            else:
-                                _new_status = "Reserved"
-                            try:
-                                sb.update_machine(_mid_val, {"operational_status": _new_status})
-                            except Exception:
-                                pass
-
-                    st.success(
-                        "✔ Billing dates updated successfully."
-                        if _dep_exists else
-                        "✔ Deployment saved successfully."
-                    )
-                    st.session_state.pop("_dep_editing_wo_id", None)
-                    st.session_state.pop(_bsd_sync_key, None)
-
-                except Exception as exc:
-                    st.error(f"Could not save deployment: {exc}")
+            except Exception as exc:
+                st.error(f"Could not save: {exc}")

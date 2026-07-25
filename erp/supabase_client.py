@@ -120,7 +120,7 @@ class SupabaseClient:
             raise RuntimeError(str(error))
 
     def insert_site(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        resp = self.client.table("sites").insert(payload).execute()
+        resp = self.admin_client.table("sites").insert(payload).select().execute()
         data = None
         error = None
         if hasattr(resp, "data"):
@@ -188,7 +188,7 @@ class SupabaseClient:
             raise RuntimeError(str(error))
 
     def insert_operator(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        resp = self.client.table("operators").insert(payload).execute()
+        resp = self.admin_client.table("operators").insert(payload).select().execute()
         data = None
         error = None
         if hasattr(resp, "data"):
@@ -322,6 +322,33 @@ class SupabaseClient:
             error = resp.get("error")
         if error:
             raise RuntimeError(str(error))
+
+    # ── Machine compliance records ─────────────────────────────────────────
+
+    def list_compliance_records(self, machine_id: str | None = None) -> List[Dict[str, Any]]:
+        q = self.admin_client.table("machine_compliance_records").select("*").eq("is_active", True)
+        if machine_id:
+            q = q.eq("machine_id", machine_id)
+        resp = q.order("expiry_date", desc=True).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data if isinstance(data, list) else []
+
+    def insert_compliance_record(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.admin_client.table("machine_compliance_records").insert(payload).select().execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        err  = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if err:
+            raise RuntimeError(str(err))
+        return data[0] if isinstance(data, list) and data else {}
+
+    def update_compliance_record(self, record_id: str, payload: Dict[str, Any]) -> None:
+        resp = self.admin_client.table("machine_compliance_records").update(payload).eq("id", record_id).execute()
+        err = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if err:
+            raise RuntimeError(str(err))
+
+    def deactivate_compliance_record(self, record_id: str) -> None:
+        self.admin_client.table("machine_compliance_records").update({"is_active": False}).eq("id", record_id).execute()
 
     def insert_work_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         resp = self.client.table("work_orders").insert(payload).execute()

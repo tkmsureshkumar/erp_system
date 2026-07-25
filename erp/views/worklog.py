@@ -12,6 +12,7 @@ from datetime import date, datetime, time, timedelta
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as _stc
 
 from ..supabase_client import SupabaseClient
 
@@ -27,6 +28,40 @@ _SCHED_COLS = [
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _fmt_inr(v: float) -> str:
+    """Indian number system: ₹ X,XX,XXX"""
+    neg = v < 0
+    s_ = str(int(round(abs(v))))
+    if len(s_) > 3:
+        last3 = s_[-3:]
+        rest  = s_[:-3]
+        chunks: list[str] = []
+        while len(rest) > 2:
+            chunks.insert(0, rest[-2:])
+            rest = rest[:-2]
+        if rest:
+            chunks.insert(0, rest)
+        s_ = ",".join(chunks) + "," + last3
+    return ("− " if neg else "") + "₹ " + s_
+
+
+def _wl_machine_display_label(mc: dict, idx: int = 0) -> str:
+    """Build rich machine label: Make Model | AssetCode | SN: XXXXX"""
+    make  = mc.get("make", "")
+    model = mc.get("model", "")
+    asset = mc.get("machine_label", mc.get("asset_code", ""))
+    sn    = mc.get("serial_number", "")
+    make_model = " ".join(filter(None, [make, model]))
+    parts = []
+    if make_model:
+        parts.append(make_model)
+    if asset:
+        parts.append(asset)
+    if sn:
+        parts.append(f"SN: {sn}")
+    return " | ".join(parts) if parts else asset or f"Machine {idx + 1}"
+
 
 def _parse_date(value) -> date | None:
     if value is None:
@@ -726,6 +761,7 @@ def _render_shift_editor(
     shift_start_t: time,
     shift_end_t: time,
     operator_names: list[str],
+    locked: bool = False,
 ) -> pd.DataFrame | None:
     """Render a shift schedule data editor and auto-recalculate Net Time / OT."""
     recalc_count = st.session_state.get(f"sched_recalc_{base_key}", 0)
@@ -738,16 +774,14 @@ def _render_shift_editor(
         df_to_show = df_to_show.drop_duplicates(subset=["Date"], keep="first").reset_index(drop=True)
         st.session_state[f"sched_data_{base_key}"] = df_to_show
 
-    # Pre-render recalc: fix Net Time / OT / Net HMR that may be stale in
-    # session state (e.g. history-filled times without Net Time, or data loaded
-    # from DB before this formula was deployed).  Uses df_to_show which always
-    # carries proper datetime.time objects so type coercion is not needed here.
-    _pre_df, _pre_changed = _recalc_df(df_to_show, shift_start_t, shift_end_t)
-    if _pre_changed:
-        df_to_show = _pre_df
-        st.session_state[f"sched_data_{base_key}"]   = df_to_show
-        st.session_state[f"sched_recalc_{base_key}"] = recalc_count + 1
-        st.rerun()
+    # Pre-render recalc (skip when locked — data is final).
+    if not locked:
+        _pre_df, _pre_changed = _recalc_df(df_to_show, shift_start_t, shift_end_t)
+        if _pre_changed:
+            df_to_show = _pre_df
+            st.session_state[f"sched_data_{base_key}"]   = df_to_show
+            st.session_state[f"sched_recalc_{base_key}"] = recalc_count + 1
+            st.rerun()
 
     # ── Data editor ────────────────────────────────────────────────────────────
     editor_height = 38 + len(df_to_show) * 35 + 4
@@ -780,7 +814,11 @@ def _render_shift_editor(
         use_container_width=True,
         hide_index=True,
         key=editor_key,
+        disabled=locked,
     )
+
+    if locked:
+        return df_to_show
 
     # Post-render recalc: detect user edits to Start/End Time or HMR and
     # recompute derived columns.  _recalc_df uses _parse_time on every value
@@ -798,6 +836,213 @@ def _render_shift_editor(
             st.rerun()
 
     return edited
+
+
+# ── Print HTML builder ────────────────────────────────────────────────────────
+
+def _build_print_html(
+    wo: dict,
+    machine: dict,
+    month_label: str,
+    summary: dict,
+    customer_name: str,
+    site_name: str,
+    schedule_df: "pd.DataFrame | None" = None,
+) -> str:
+    """Return a self-contained HTML document ready for window.print()."""
+
+    def n2(v: float) -> str:
+        return f"{v:,.2f}"
+
+    s        = summary
+    rental   = s["rental_per_month"]
+    wd       = s["working_days"]
+    std_h    = s.get("std_hours", 0.0)
+    wh       = s["working_hours"]
+    actual   = s["actual"]
+    qty      = s["qty"]
+    billing  = s["billing"]
+    ot_hrs   = s["ot_hours"]
+    ot_rate  = s["ot_rate"]
+    ot_bill  = s["ot_billing"]
+    bd_hrs   = s.get("breakdown_hours", 0.0)
+    total    = s["total_billing"]
+    ded      = s["deduction"]
+    adj      = s["adjusted_billing"]
+    util_pct = qty * 100
+
+    wo_num   = wo.get("wo_number", "—")
+    mlabel   = _wl_machine_display_label(machine)
+    printed  = datetime.now().strftime("%d %b %Y, %H:%M")
+
+    def _tr(label: str, value: str, rule: str = "", bold: bool = False,
+            bg: str = "#ffffff", val_color: str = "#1a1a1a") -> str:
+        fw = "700" if bold else "500"
+        return (
+            f"<tr style='background:{bg};border-bottom:1px solid #e5e7eb;'>"
+            f"<td style='padding:7px 12px;font-size:12px;color:#374151;font-weight:{fw};'>{label}</td>"
+            f"<td style='padding:7px 12px;font-size:12px;font-weight:700;color:{val_color};"
+            f"text-align:right;white-space:nowrap;'>{value}</td>"
+            f"<td style='padding:7px 12px;font-size:11px;color:#6b7280;font-style:italic;'>{rule}</td>"
+            "</tr>"
+        )
+
+    trows = (
+        _tr("Rental per Month",      _fmt_inr(rental),        "Fixed Rental",                           bg="#f0f9ff")
+        + _tr("Working Days",        str(wd),                  "No of Days from Work Order")
+        + _tr("Working Hours",       n2(wh),                   f"Days × {std_h:.2f} hrs/day",           bg="#f9fafb")
+        + _tr("Actual Hours (Logged)", n2(actual),             "Sum of Net Time from schedule")
+        + _tr("Utilization (Qty)",   f"{qty:.4f}",             f"Actual ÷ Working hrs",                  bg="#f9fafb")
+        + _tr("Base Rental",         _fmt_inr(billing),        "Rental × Qty",                          val_color="#16a34a")
+        + _tr("OT Hours",            n2(ot_hrs),               "Sum of OT Hrs from schedule",            bg="#fffbeb")
+        + _tr("OT Rate",             _fmt_inr(ot_rate),        "Per hour",                              bg="#fffbeb")
+        + _tr("OT Billing",          _fmt_inr(ot_bill),        f"{n2(ot_hrs)} hrs × {_fmt_inr(ot_rate)}", val_color="#16a34a", bg="#fffbeb")
+        + _tr("Breakdown Hours",     n2(bd_hrs),               "Sum of B/D Hrs from schedule",          bg="#f9fafb")
+        + _tr("Total Billing",       _fmt_inr(total),          "Base Rental + OT Billing",              bold=True)
+        + _tr("Deduction",           f"− {_fmt_inr(ded)}",     "Manual adjustment",                     val_color="#dc2626", bg="#fef2f2")
+        + _tr("ADJUSTED BILLING",    _fmt_inr(adj),            "Total − Deduction",                     bold=True,
+              bg="#fff7ed", val_color="#E87722")
+    )
+
+    # ── Schedule table (detailed mode) ───────────────────────────────────────
+    sched_html = ""
+    if schedule_df is not None and not schedule_df.empty:
+        df = schedule_df.drop(columns=["Select", "Type"], errors="ignore")
+        thead_cells = "".join(
+            f"<th style='padding:6px 8px;background:#1e3a5f;color:#fff;font-size:10px;"
+            f"font-weight:700;letter-spacing:.06em;text-align:center;white-space:nowrap;'>{c}</th>"
+            for c in df.columns
+        )
+        tbody_rows = ""
+        for _, row in df.iterrows():
+            wd_  = str(row.get("Weekday", ""))
+            is_sun = wd_ == "Sunday"
+            row_bg = "#DBEAFE" if is_sun else ("#f9fafb" if _ % 2 == 1 else "#ffffff")
+            row_fg = "#1E40AF" if is_sun else "#111827"
+            cells = ""
+            for col in df.columns:
+                val = row.get(col)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    disp = "—"
+                elif isinstance(val, date):
+                    disp = val.strftime("%d-%m-%Y")
+                elif isinstance(val, time):
+                    disp = val.strftime("%H:%M")
+                else:
+                    try:
+                        fv = float(val)
+                        disp = f"{fv:.1f}" if col not in ("Date", "Weekday", "Operator", "Remarks") else str(val)
+                    except (TypeError, ValueError):
+                        disp = str(val) if val else "—"
+                align = "right" if col in ("Net Time", "Net HMR", "Breakdown Hours", "OT",
+                                            "Start HMR", "End HMR") else "center"
+                cells += (
+                    f"<td style='padding:5px 8px;font-size:11px;color:{row_fg};"
+                    f"text-align:{align};white-space:nowrap;border-bottom:1px solid #e5e7eb;'>{disp}</td>"
+                )
+            tbody_rows += f"<tr style='background:{row_bg};'>{cells}</tr>"
+
+        sched_html = f"""
+        <div style='margin-top:28px;'>
+          <div style='font-size:13px;font-weight:700;color:#1e3a5f;border-bottom:2px solid #1e3a5f;
+               padding-bottom:6px;margin-bottom:10px;letter-spacing:.04em;'>DAILY SHIFT SCHEDULE</div>
+          <table style='width:100%;border-collapse:collapse;border:1px solid #e2e8f0;'>
+            <thead><tr>{thead_cells}</tr></thead>
+            <tbody>{tbody_rows}</tbody>
+          </table>
+        </div>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Work Log — {month_label}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;
+          color: #111827; background: #fff; padding: 20px; }}
+  .no-print {{ margin-bottom: 16px; display: flex; gap: 10px; }}
+  .btn {{ padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer;
+          font-size: 13px; font-weight: 600; }}
+  .btn-print {{ background: #E87722; color: #fff; }}
+  .btn-close  {{ background: #f3f4f6; color: #374151; }}
+  .report-header {{ border-bottom: 3px solid #1e3a5f; padding-bottom: 12px; margin-bottom: 18px; }}
+  .report-title {{ font-size: 22px; font-weight: 800; color: #1e3a5f; letter-spacing: .02em; }}
+  .report-sub   {{ font-size: 12px; color: #6b7280; margin-top: 4px; }}
+  .meta-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }}
+  .meta-cell {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+                padding: 8px 12px; }}
+  .meta-label {{ font-size: 9px; font-weight: 700; letter-spacing: .1em;
+                 text-transform: uppercase; color: #9ca3af; margin-bottom: 3px; }}
+  .meta-value {{ font-size: 13px; font-weight: 700; color: #111827; }}
+  .section-title {{ font-size: 13px; font-weight: 700; color: #1e3a5f;
+                    border-bottom: 2px solid #1e3a5f; padding-bottom: 6px;
+                    margin-bottom: 10px; letter-spacing: .04em; }}
+  table.sum {{ width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; }}
+  table.sum th {{ padding: 8px 12px; background: #1e3a5f; color: #fff; font-size: 10px;
+                  font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }}
+  .adj-box {{ margin-top: 16px; padding: 14px 18px; background: #fff7ed;
+              border: 2px solid #E87722; border-radius: 8px;
+              display: flex; justify-content: space-between; align-items: center; }}
+  .adj-label {{ font-size: 11px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: .1em; color: #92400e; }}
+  .adj-value {{ font-size: 26px; font-weight: 900; color: #E87722; }}
+  .footer {{ margin-top: 28px; padding-top: 10px; border-top: 1px solid #e2e8f0;
+             font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; }}
+  @media print {{
+    .no-print {{ display: none !important; }}
+    body {{ padding: 10px; }}
+    * {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  }}
+</style>
+</head>
+<body>
+<div class="no-print">
+  <button class="btn btn-print" onclick="window.print()">🖨️ Print</button>
+  <button class="btn btn-close" onclick="window.close()">Close</button>
+</div>
+
+<div class="report-header">
+  <div class="report-title">WORK LOG REPORT</div>
+  <div class="report-sub">Generated: {printed} &nbsp;|&nbsp; Period: {month_label}</div>
+</div>
+
+<div class="meta-grid">
+  <div class="meta-cell"><div class="meta-label">Work Order</div><div class="meta-value">{wo_num}</div></div>
+  <div class="meta-cell"><div class="meta-label">Customer</div><div class="meta-value">{customer_name}</div></div>
+  <div class="meta-cell"><div class="meta-label">Site</div><div class="meta-value">{site_name}</div></div>
+  <div class="meta-cell"><div class="meta-label">Machine</div><div class="meta-value" style="font-size:12px;">{mlabel}</div></div>
+  <div class="meta-cell"><div class="meta-label">Utilization</div><div class="meta-value">{util_pct:.2f}%</div></div>
+  <div class="meta-cell"><div class="meta-label">Adjusted Billing</div><div class="meta-value" style="color:#E87722;">{_fmt_inr(adj)}</div></div>
+</div>
+
+<div class="section-title">BILLING SUMMARY</div>
+<table class="sum">
+  <thead><tr>
+    <th style="text-align:left;">Field</th>
+    <th style="text-align:right;">Value</th>
+    <th style="text-align:left;">Note</th>
+  </tr></thead>
+  <tbody>{trows}</tbody>
+</table>
+
+<div class="adj-box">
+  <div>
+    <div class="adj-label">Adjusted Billing (Excl. Taxes)</div>
+    <div style="font-size:11px;color:#92400e;margin-top:2px;">Currency: INR</div>
+  </div>
+  <div class="adj-value">{_fmt_inr(adj)}</div>
+</div>
+
+{sched_html}
+
+<div class="footer">
+  <span>Work Order: {wo_num} &nbsp;|&nbsp; {mlabel} &nbsp;|&nbsp; {month_label}</span>
+  <span>Printed: {printed}</span>
+</div>
+</body>
+</html>"""
+    return html
 
 
 # ── View ──────────────────────────────────────────────────────────────────────
@@ -946,7 +1191,7 @@ def render() -> None:
         return
 
     # ── Machine selector ───────────────────────────────────────────────────────
-    machine_labels = [m.get("machine_label", f"Machine {i+1}") for i, m in enumerate(machine_configs)]
+    machine_labels = [_wl_machine_display_label(m, i) for i, m in enumerate(machine_configs)]
     selected_machine_label = st.selectbox(
         "Select Machine",
         options=machine_labels,
@@ -1173,9 +1418,23 @@ def render() -> None:
     except Exception:
         _wl_rec = {}
     _is_db_draft = bool(_wl_rec.get("is_draft", False))
+    _is_locked   = bool(_wl_rec.get("id")) and not _is_db_draft
 
-    # ── Draft status banner ────────────────────────────────────────────────────
-    if _is_db_draft:
+    # ── Status banners ─────────────────────────────────────────────────────────
+    if _is_locked:
+        st.markdown(
+            "<div style='background:#f0fdf4;border:1px solid #86efac;border-radius:6px;"
+            "padding:10px 16px;margin:8px 0 12px;display:flex;align-items:center;gap:12px;'>"
+            "<span style='font-size:20px;flex-shrink:0;'>🔒</span>"
+            "<div>"
+            "<div style='font-size:13px;font-weight:700;color:#166534;'>"
+            "Work Log Locked — submitted and permanent</div>"
+            "<div style='font-size:12px;color:#15803d;margin-top:2px;'>"
+            "This record cannot be edited. Use the print buttons below to share with the client.</div>"
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
+    elif _is_db_draft:
         st.markdown(
             """
             <div style='background:#fff7ed;border:1px solid #f97316;border-radius:6px;
@@ -1277,6 +1536,7 @@ def render() -> None:
         f"{base_key}_s1",
         _get_initial("_s1", _db_df1),
         shift_start_time, shift_end_time, operator_names,
+        locked=_is_locked,
     )
     if edited_s1 is not None and not edited_s1.empty:
         _show_totals(edited_s1, "REGULAR SHIFT" if is_double else "TOTAL")
@@ -1318,6 +1578,7 @@ def render() -> None:
             base_key_s2,
             _initial_s2,
             shift_start_time_s2, shift_end_time_s2, operator_names,
+            locked=_is_locked,
         )
         if edited_s2 is not None and not edited_s2.empty:
             _show_totals(edited_s2, "NIGHT SHIFT")
@@ -1329,23 +1590,58 @@ def render() -> None:
         if is_double and edited_s2 is not None and not edited_s2.empty:
             _combined = pd.concat([edited_s1, edited_s2], ignore_index=True)
 
+    _summary: dict | None = None
     if _combined is not None:
-        summary = _compute_billing_summary(
+        _summary = _compute_billing_summary(
             _combined, rental_per_month, shift_start_time, shift_end_time,
             ot_rate_input=ot_rate_input,
             no_of_days=int(working_days_input),
             deduction=deduction_input,
         )
-        if summary:
+        if _summary:
             st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
             _render_billing_summary(
-                summary,
+                _summary,
                 wo_number=selected_wo.get("wo_number", ""),
                 machine_label=selected_machine.get("machine_label", ""),
                 month_label=selected_month_label,
             )
 
-    # ── Action buttons ─────────────────────────────────────────────────────────
+    # ── Print buttons ──────────────────────────────────────────────────────────
+    if _summary:
+        st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+        _pr1, _pr2, _ = st.columns([2, 3, 3])
+        with _pr1:
+            if st.button("🖨️ Print Summary", key="btn_print_summary", use_container_width=True):
+                st.session_state["_wl_print_mode"] = "summary"
+        with _pr2:
+            if st.button("🖨️ Print Summary + Detailed Work Log",
+                         key="btn_print_detail", use_container_width=True):
+                st.session_state["_wl_print_mode"] = "detailed"
+
+        _print_mode = st.session_state.get("_wl_print_mode")
+        if _print_mode in ("summary", "detailed"):
+            _print_df = _combined if _print_mode == "detailed" else None
+            _print_html = _build_print_html(
+                wo=selected_wo,
+                machine=selected_machine,
+                month_label=selected_month_label,
+                summary=_summary,
+                customer_name=customer_map.get(
+                    selected_wo.get("customer_id", ""), {}
+                ).get("customer_name", ""),
+                site_name=site_map.get(
+                    selected_wo.get("site_id", ""), {}
+                ).get("site_name", ""),
+                schedule_df=_print_df,
+            )
+            _stc.html(_print_html, height=820, scrolling=True)
+
+    # ── Action buttons (hidden when locked) ────────────────────────────────────
+    if _is_locked:
+        st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+        return
+
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
     _btn_save, _btn_draft, _btn_discard = st.columns([3, 3, 2])
 

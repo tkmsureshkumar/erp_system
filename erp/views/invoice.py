@@ -165,6 +165,115 @@ def _period_str(billing_month: str) -> str:
         return billing_month
 
 
+def _build_worklog_schedules_html(selected_items: list[dict]) -> str:
+    """Build print-ready HTML of work log schedules to append after the invoice."""
+    _WL_CSS = """
+    <style>
+    .wl-page-break { page-break-before: always; }
+    .wl-section { padding: 16px 0; }
+    .wl-machine-hdr {
+        font-size: 11pt; font-weight: 800; color: #1e3a5f;
+        border-bottom: 2px solid #1e3a5f; padding-bottom: 5px; margin-bottom: 10px;
+    }
+    .wl-period { font-size: 8pt; color: #555; margin-bottom: 8px; }
+    table.wl-tbl { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+    table.wl-tbl th {
+        border: 1px solid #aaa; padding: 4px 6px; background: #1e3a5f;
+        color: #fff; font-weight: 700; text-align: center; white-space: nowrap;
+    }
+    table.wl-tbl td { border: 1px solid #ccc; padding: 3px 6px; text-align: center; }
+    table.wl-tbl tr.sun td { background: #dbeafe; color: #1e40af; font-weight: 600; }
+    table.wl-tbl tr.ot td.ot-cell { background: #fef3c7; color: #92400e; font-weight: 700; }
+    .wl-totals { margin-top: 6px; font-size: 8pt; font-weight: 700;
+                 background: #1c1c2e; color: #fff; padding: 6px 10px;
+                 border-radius: 0 0 4px 4px; display: flex; gap: 24px; }
+    .wl-totals span b { color: #E87722; }
+    </style>"""
+
+    sections: list[str] = []
+    seen: set[str] = set()
+
+    for item in selected_items:
+        if item["type"] != "worklog":
+            continue
+        mc  = item["mc"]
+        wl  = item["wl"]
+        mid = mc.get("machine_id", str(item["sl"]))
+        if mid in seen:
+            continue
+        seen.add(mid)
+
+        mlbl   = mc.get("machine_label", "")
+        period = item["period"]
+        rows   = _parse_rows(wl.get("schedule_data", ""))
+        if not rows:
+            continue
+
+        # Totals
+        total_net = sum(float(r.get("net_time") or 0) for r in rows)
+        total_ot  = sum(float(r.get("ot") or 0) for r in rows)
+        total_bd  = sum(float(r.get("breakdown_hours") or 0) for r in rows)
+
+        thead = (
+            "<tr>"
+            "<th>Date</th><th>Day</th>"
+            "<th>Start</th><th>End</th>"
+            "<th>Net (h)</th><th>OT (h)</th><th>B/D (h)</th>"
+            "<th>Start HMR</th><th>End HMR</th><th>Net HMR</th>"
+            "<th>Operator</th><th>Remarks</th>"
+            "</tr>"
+        )
+
+        tbody = ""
+        for r in rows:
+            wd     = r.get("weekday", "")
+            is_sun = wd == "Sunday"
+            ot_val = float(r.get("ot") or 0)
+            tr_cls = "sun" if is_sun else ""
+
+            def _d(v, fmt=".1f") -> str:
+                try:
+                    fv = float(v)
+                    return f"{fv:{fmt}}" if fv else "—"
+                except (TypeError, ValueError):
+                    return str(v) if v else "—"
+
+            ot_cell = f"<td class='ot-cell'>{_d(r.get('ot'))}</td>" if ot_val > 0 else f"<td>{_d(r.get('ot'))}</td>"
+            tbody += (
+                f"<tr class='{tr_cls}'>"
+                f"<td>{r.get('date', '—')}</td>"
+                f"<td>{wd}</td>"
+                f"<td>{r.get('start_time') or '—'}</td>"
+                f"<td>{r.get('end_time') or '—'}</td>"
+                f"<td>{_d(r.get('net_time'))}</td>"
+                f"{ot_cell}"
+                f"<td>{_d(r.get('breakdown_hours'))}</td>"
+                f"<td>{_d(r.get('start_hmr'))}</td>"
+                f"<td>{_d(r.get('end_hmr'))}</td>"
+                f"<td>{_d(r.get('net_hmr'))}</td>"
+                f"<td style='text-align:left;'>{r.get('operator') or '—'}</td>"
+                f"<td style='text-align:left;'>{r.get('remarks') or ''}</td>"
+                "</tr>"
+            )
+
+        section = (
+            f"<div class='wl-page-break wl-section'>"
+            f"<div class='wl-machine-hdr'>Work Log — {mlbl}</div>"
+            f"<div class='wl-period'>Period: {period}</div>"
+            f"<table class='wl-tbl'><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
+            f"<div class='wl-totals'>"
+            f"<span>Net Time: <b>{total_net:.1f} hrs</b></span>"
+            f"<span>OT Hours: <b>{total_ot:.1f} hrs</b></span>"
+            f"<span>Breakdown: <b>{total_bd:.1f} hrs</b></span>"
+            f"</div></div>"
+        )
+        sections.append(section)
+
+    if not sections:
+        return ""
+    return _WL_CSS + "\n".join(sections)
+
+
 # ── HTML invoice template ──────────────────────────────────────────────────────
 
 _CSS = """
@@ -231,21 +340,31 @@ def _build_html(
 ) -> str:
 
     # ── address blocks ─────────────────────────────────────────────────────────
-    cname     = customer.get("customer_name", "")
-    bill_addr = customer.get("billing_address") or site.get("address") or ""
-    bill_city = ", ".join(filter(None, [
+    # Site-level fields (new) take priority; customer fields used as fallback
+    cname      = customer.get("customer_name", "")
+    bill_addr  = (
+        site.get("bill_to_address")
+        or customer.get("billing_address")
+        or site.get("address")
+        or ""
+    )
+    bill_city  = ", ".join(filter(None, [
         customer.get("city") or site.get("city"),
         customer.get("state") or site.get("state"),
         customer.get("pincode") or site.get("pincode"),
     ]))
-    bill_gst  = customer.get("gst_number") or "—"
+    bill_gst   = site.get("gst_number") or customer.get("gst_number") or "—"
     bill_state = customer.get("state") or site.get("state") or "—"
 
-    ship_addr = site.get("address") or ""
-    ship_city = ", ".join(filter(None, [
+    ship_addr  = (
+        site.get("ship_to_address")
+        or site.get("address")
+        or ""
+    )
+    ship_city  = ", ".join(filter(None, [
         site.get("city"), site.get("state"), site.get("pincode"),
     ]))
-    ship_gst  = site.get("gst_number") or customer.get("gst_number") or "—"
+    ship_gst   = site.get("gst_number") or customer.get("gst_number") or "—"
     ship_state = site.get("state") or "—"
 
     wo_num    = wo.get("wo_number", "—")
@@ -505,47 +624,82 @@ def render() -> None:
     site_map     = {s["id"]: s for s in sites     if s.get("id")}
     wo_map       = {w["id"]: w for w in work_orders if w.get("id")}
 
-    # ── Selectors ─────────────────────────────────────────────────────────────
+    # ── Selectors: Customer → Site → Work Order ───────────────────────────────
     cids = sorted(
         {wo.get("customer_id") for wo in work_orders if wo.get("customer_id")},
         key=lambda c: customer_map.get(c, {}).get("customer_name", ""),
     )
-    c1, c2 = st.columns(2)
-    with c1:
-        sel_cid = st.selectbox(
-            "Customer",
-            [""] + cids,
-            format_func=lambda x: "Select customer" if not x
-                else customer_map.get(x, {}).get("customer_name", x),
-            key="inv_cid",
-        )
+
+    sel_cid = st.selectbox(
+        "Customer",
+        [""] + cids,
+        format_func=lambda x: "Select customer" if not x
+            else customer_map.get(x, {}).get("customer_name", x),
+        key="inv_cid",
+    )
 
     if st.session_state.get("_inv_prev_cid") != sel_cid:
         st.session_state["_inv_prev_cid"] = sel_cid
+        st.session_state["inv_site"] = ""
+        st.session_state["inv_wo"]   = ""
+
+    if not sel_cid:
+        st.markdown(
+            "<div style='margin-top:32px;padding:40px;background:#f8fafc;"
+            "border:1px dashed #d1d5db;border-radius:10px;text-align:center;'>"
+            "<div style='font-size:32px;'>🧾</div>"
+            "<div style='font-size:14px;font-weight:600;color:#374151;margin-top:10px;'>"
+            "Select a Customer to begin.</div></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Site — filtered to sites that have WOs for this customer
+    _site_ids_for_cid = sorted(
+        {wo.get("site_id") for wo in work_orders
+         if wo.get("customer_id") == sel_cid and wo.get("site_id")},
+        key=lambda sid: site_map.get(sid, {}).get("site_name", ""),
+    )
+
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        sel_site_id = st.selectbox(
+            "Site",
+            [""] + _site_ids_for_cid,
+            format_func=lambda x: "Select site" if not x
+                else site_map.get(x, {}).get("site_name", x),
+            key="inv_site",
+            disabled=not sel_cid,
+        )
+
+    if st.session_state.get("_inv_prev_site") != sel_site_id:
+        st.session_state["_inv_prev_site"] = sel_site_id
         st.session_state["inv_wo"] = ""
 
+    # Work Order — filtered by customer + site
     wo_ids = sorted(
-        [wid for wid, wo in wo_map.items() if wo.get("customer_id") == sel_cid],
+        [wid for wid, wo in wo_map.items()
+         if wo.get("customer_id") == sel_cid and wo.get("site_id") == sel_site_id],
         key=lambda wid: wo_map[wid].get("wo_number", ""),
-    ) if sel_cid else []
+    ) if sel_site_id else []
 
-    with c2:
+    with sc2:
         sel_wo_id = st.selectbox(
             "Work Order",
             [""] + wo_ids,
             format_func=lambda x: "Select work order" if not x
                 else wo_map[x].get("wo_number", "Unknown"),
             key="inv_wo",
-            disabled=not sel_cid,
+            disabled=not sel_site_id,
         )
 
-    if not sel_cid or not sel_wo_id:
+    if not sel_site_id or not sel_wo_id:
         st.markdown(
             "<div style='margin-top:32px;padding:40px;background:#f8fafc;"
             "border:1px dashed #d1d5db;border-radius:10px;text-align:center;'>"
             "<div style='font-size:32px;'>🧾</div>"
             "<div style='font-size:14px;font-weight:600;color:#374151;margin-top:10px;'>"
-            "Select a Customer and Work Order to begin.</div></div>",
+            "Select a Site and Work Order above to continue.</div></div>",
             unsafe_allow_html=True,
         )
         return
@@ -630,6 +784,15 @@ def render() -> None:
                     key=f"inv_demob_{sel_wo_id}_{mid}",
                 ):
                     selected_items.append({"type": "demob", "mc": mc, "amount": demob, "sl": i + 1})
+
+                # Item code — shown only when the toggle is on (reads prior session state)
+                if st.session_state.get("inv_ic", False):
+                    st.text_input(
+                        "Item Code",
+                        key=f"inv_ic_val_{mid}",
+                        placeholder="e.g. SRV-001",
+                        help="Printed in the Item Code column of the invoice",
+                    )
 
         # ── Invoice config ─────────────────────────────────────────────────────
         st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
@@ -726,7 +889,7 @@ def render() -> None:
                         "model":  mc.get("model", ""),
                         "serial": mc.get("serial_number", ""),
                         "sl_no":  sl_seen[mid],
-                        "item_code": "",
+                        "item_code": st.session_state.get(f"inv_ic_val_{mid}", "") if ic_on else "",
                         "items": [],
                     }
 
@@ -795,7 +958,7 @@ def render() -> None:
             components.html(inv_html, height=960, scrolling=True)
 
             # ── Action row ─────────────────────────────────────────────────────
-            a1, a2 = st.columns(2)
+            a1, a2, a3 = st.columns(3)
             with a1:
                 st.download_button(
                     "⬇  Download Invoice (HTML)",
@@ -805,6 +968,13 @@ def render() -> None:
                     use_container_width=True,
                 )
             with a2:
+                if st.button(
+                    "🖨️  Print Invoice + Work Log",
+                    key="btn_print_with_wl",
+                    use_container_width=True,
+                ):
+                    st.session_state["_inv_print_mode"] = "with_wl"
+            with a3:
                 if gen_btn and can_gen:
                     subtotal = sum(sum(it["amount"] for it in g["items"]) for g in groups)
                     tax_tot  = round(subtotal * 0.18, 2) if tax_on else 0.0
@@ -829,3 +999,21 @@ def render() -> None:
                         st.success(f"✔ Invoice **{inv_no}** saved.")
                     except Exception as exc:
                         st.warning(f"Preview ready — could not save to DB: {exc}")
+
+            # ── Print Invoice + Work Log preview ───────────────────────────────
+            if st.session_state.get("_inv_print_mode") == "with_wl":
+                wl_section = _build_worklog_schedules_html(selected_items)
+                if wl_section:
+                    combined_html = inv_html.replace(
+                        "</body></html>",
+                        f"{wl_section}\n</body></html>",
+                    )
+                    st.markdown(
+                        "<div style='margin-top:12px;font-size:10px;font-weight:700;"
+                        "letter-spacing:.1em;color:#E87722;text-transform:uppercase;"
+                        "margin-bottom:6px;'>Invoice + Work Log (Print Preview)</div>",
+                        unsafe_allow_html=True,
+                    )
+                    components.html(combined_html, height=1200, scrolling=True)
+                else:
+                    st.info("No completed work log schedules found for the selected charges.")

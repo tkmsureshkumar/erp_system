@@ -384,15 +384,19 @@ def _avatar_color(name: str) -> str:
 
 def _open_new_form(state_names: list[str]) -> None:
     """Switch UI to new-site mode and reset form fields."""
-    st.session_state["_site_mode"]         = "new"
-    st.session_state["_site_sel_id"]       = ""
-    st.session_state["_site_sync_key"]     = "__new__"
-    st.session_state["site_name"]          = ""
-    st.session_state["site_address"]       = ""
-    st.session_state["site_city"]          = ""
-    st.session_state["site_state"]         = state_names[0] if state_names else ""
-    st.session_state["site_pincode"]       = ""
-    st.session_state["site_payment_terms"] = 0
+    st.session_state["_site_mode"]           = "new"
+    st.session_state["_site_sel_id"]         = ""
+    st.session_state["_site_sync_key"]       = "__new__"
+    st.session_state["site_name"]            = ""
+    st.session_state["site_customer_id"]     = ""
+    st.session_state["site_address"]         = ""
+    st.session_state["site_city"]            = ""
+    st.session_state["site_state"]           = state_names[0] if state_names else ""
+    st.session_state["site_pincode"]         = ""
+    st.session_state["site_payment_terms"]   = 0
+    st.session_state["site_gst_number"]      = ""
+    st.session_state["site_bill_to_address"] = ""
+    st.session_state["site_ship_to_address"] = ""
 
 
 # ── HTML builders ─────────────────────────────────────────────────────────────
@@ -588,7 +592,7 @@ def render() -> None:
     if st.session_state.get("_site_sync_key") != sync_key:
         st.session_state["_site_sync_key"] = sync_key
         c = selected_site or {}
-        st.session_state["site_name"]          = c.get("site_name", "")
+        st.session_state["site_name"]            = c.get("site_name", "")
         st.session_state["site_customer_id"]   = c.get("customer_id", "")
         st.session_state["site_address"]       = c.get("address", "")
         st.session_state["site_city"]          = c.get("city", "")
@@ -596,8 +600,11 @@ def render() -> None:
         st.session_state["site_state"]         = (
             raw_state if raw_state in state_names else (state_names[0] if state_names else "")
         )
-        st.session_state["site_pincode"]       = c.get("pincode", "")
-        st.session_state["site_payment_terms"] = int(c.get("payment_terms") or 0)
+        st.session_state["site_pincode"]         = c.get("pincode", "")
+        st.session_state["site_payment_terms"]   = int(c.get("payment_terms") or 0)
+        st.session_state["site_gst_number"]      = c.get("gst_number", "")
+        st.session_state["site_bill_to_address"] = c.get("bill_to_address", "")
+        st.session_state["site_ship_to_address"] = c.get("ship_to_address", "")
 
     # ── Two-panel layout ───────────────────────────────────────────────────────
     left_col, right_col = st.columns([4, 7], gap="large")
@@ -784,6 +791,18 @@ def render() -> None:
                         unsafe_allow_html=True,
                     )
 
+                    if ss.get("gst_number") or ss.get("bill_to_address") or ss.get("ship_to_address"):
+                        st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+                        _section_hdr("receipt_long", "Billing & GST")
+                        st.markdown(
+                            f"<div class='info-grid'>"
+                            + _info_field("GST Number",       ss.get("gst_number"))
+                            + _info_field("Bill To Address",  ss.get("bill_to_address"), wide=True)
+                            + _info_field("Ship To Address",  ss.get("ship_to_address"), wide=True)
+                            + "</div>",
+                            unsafe_allow_html=True,
+                        )
+
                     first_c = existing_contacts[0] if existing_contacts else {}
                     if first_c.get("email") or first_c.get("mobile"):
                         st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
@@ -809,14 +828,13 @@ def render() -> None:
                         "Site Name *", key="site_name",
                         placeholder="e.g. Mumbai North Hub",
                     )
-                    if mode == "edit":
-                        st.selectbox(
-                            "Customer",
-                            options=[""] + list(customer_options),
-                            format_func=lambda cid: "Select customer" if not cid
-                                else customer_options.get(cid, "Unknown"),
-                            key="site_customer_id",
-                        )
+                    st.selectbox(
+                        "Customer",
+                        options=[""] + list(customer_options),
+                        format_func=lambda cid: "Select customer" if not cid
+                            else customer_options.get(cid, "Unknown"),
+                        key="site_customer_id",
+                    )
                     st.number_input(
                         "Payment Terms (days)",
                         step=1,
@@ -841,6 +859,21 @@ def render() -> None:
                         )
                     st.text_input(
                         "Pincode", key="site_pincode", placeholder="e.g. 400001"
+                    )
+
+                with st.container(border=True):
+                    _section_hdr("receipt_long", "Billing & GST")
+                    st.text_input(
+                        "GST Number", key="site_gst_number",
+                        placeholder="e.g. 27AABCC1234D1Z5",
+                    )
+                    st.text_area(
+                        "Bill To Address", key="site_bill_to_address",
+                        placeholder="Legal billing address for invoices…", height=80,
+                    )
+                    st.text_area(
+                        "Ship To Address", key="site_ship_to_address",
+                        placeholder="Site / delivery address for invoices…", height=80,
                     )
 
             # ── Tab 3: Contacts ───────────────────────────────────────────────
@@ -911,10 +944,16 @@ def render() -> None:
                 if not site_name_val:
                     st.error("Site Name is required.")
                 else:
+                    gst_val       = (st.session_state.get("site_gst_number",      "") or "").strip()
+                    bill_to_val   = (st.session_state.get("site_bill_to_address", "") or "").strip()
+                    ship_to_val   = (st.session_state.get("site_ship_to_address", "") or "").strip()
+                    customer_id_v = st.session_state.get("site_customer_id") or None
+
                     contacts_list = _df_to_contacts(contacts_df)
                     first = contacts_list[0] if contacts_list else {}
                     payload = dict(
                         site_name=site_name_val,
+                        customer_id=customer_id_v,
                         address=address_val or None,
                         city=city_val or None,
                         state=state_v,
@@ -922,9 +961,10 @@ def render() -> None:
                         site_contact=json.dumps(contacts_list) if contacts_list else None,
                         site_contact_number=first.get("mobile") or None,
                         payment_terms=payment_terms_v or None,
+                        gst_number=gst_val or None,
+                        bill_to_address=bill_to_val or None,
+                        ship_to_address=ship_to_val or None,
                     )
-                    if mode == "edit":
-                        payload["customer_id"] = st.session_state.get("site_customer_id") or None
 
                     # Keep st.rerun() OUTSIDE try/except —
                     # RerunException(Exception) would otherwise be swallowed.
@@ -936,10 +976,17 @@ def render() -> None:
                             sb.update_site(selected_id, payload)
                             _toast_msg = f"'{site_name_val}' updated successfully."
                         else:
-                            created    = sb.insert_site(payload)
-                            _new_id    = created.get("id", "")
-                            new_code   = created.get("site_code") or _new_id
-                            _toast_msg = f"Site created — Code: {new_code}"
+                            created = sb.insert_site(payload)
+                            _new_id = created.get("id", "")
+                            if not _new_id:
+                                _err = (
+                                    "Site was not saved — the database returned no record. "
+                                    "Check Supabase RLS policies on the 'sites' table or review "
+                                    "the server logs for a constraint violation."
+                                )
+                            else:
+                                new_code   = created.get("site_code") or _new_id
+                                _toast_msg = f"Site created — Code: {new_code}"
                     except Exception as exc:
                         _err = str(exc)
 

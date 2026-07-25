@@ -312,6 +312,17 @@ def _avatar_color(name: str) -> str:
     return palette[sum(ord(c) for c in (name or "A")) % len(palette)]
 
 
+def _generate_emp_code(operators: list[dict]) -> str:
+    """Return next available EMP code e.g. EMP001, EMP002…"""
+    existing = {op.get("emp_code", "") for op in operators if op.get("emp_code")}
+    i = 1
+    while True:
+        code = f"EMP{i:03d}"
+        if code not in existing:
+            return code
+        i += 1
+
+
 def _open_new_form() -> None:
     """Switch UI to new-operator mode and reset form fields."""
     st.session_state["_op_mode"]     = "new"
@@ -357,9 +368,11 @@ def _operator_card(op: dict, is_sel: bool) -> str:
     mobile_v = op.get("mobile_number", "")
     status_v = op.get("status", "")
     lic_type = op.get("license_type", "")
+    emp_code = op.get("emp_code", "")
     color    = _avatar_color(name)
     sel_cls  = " cl-sel" if is_sel else ""
     lic_html = f"<span class='cl-code'>{lic_type}</span>" if lic_type else ""
+    code_html = f"<span class='cl-code' style='color:#E87722;border-color:#FED7AA;'>{emp_code}</span>" if emp_code else ""
 
     status_badge = ""
     if status_v:
@@ -378,7 +391,9 @@ def _operator_card(op: dict, is_sel: bool) -> str:
         f"<div class='cl-item{sel_cls}'>"
         f"<div class='cl-avatar' style='background:{color};'>{_initials(name)}</div>"
         f"<div class='cl-info'>"
-        f"<div class='cl-name'>{name}</div>"
+        f"<div class='cl-name'>{name}"
+        f"{(' &nbsp;' + code_html) if code_html else ''}"
+        f"</div>"
         f"<div class='cl-sub'>"
         f"<span class='msr' style='font-size:12px;opacity:.6;'>phone</span>"
         f"{mobile_v or '—'}"
@@ -506,6 +521,7 @@ def render() -> None:
     if st.session_state.get("_op_sync_key") != sync_key:
         st.session_state["_op_sync_key"] = sync_key
         op = selected_operator or {}
+        st.session_state["op_emp_code"] = op.get("emp_code", "")
         st.session_state["op_name"]          = op.get("operator_name", "")
         st.session_state["op_mobile"]        = op.get("mobile_number", "")
         st.session_state["op_aadhar"]        = op.get("aadhar_number", "")
@@ -549,6 +565,7 @@ def render() -> None:
             if not q
             or q in op.get("operator_name", "").lower()
             or q in op.get("mobile_number", "").lower()
+            or q in (op.get("emp_code") or "").lower()
         }
 
         count_txt = (
@@ -614,11 +631,15 @@ def render() -> None:
                 or (selected_operator.get("operator_name", "") if selected_operator else "")
                 or "New Operator"
             )
-            col_val   = _avatar_color(display_name)
-            badge_cls = "hero-badge-edit" if mode == "edit" else "hero-badge-new"
-            badge_lbl = "Editing" if mode == "edit" else "New Operator"
-            mob_disp  = selected_operator.get("mobile_number", "") if selected_operator else ""
-            meta_line = f"Mobile: {mob_disp}" if mob_disp else "Unsaved — fill in details below"
+            col_val    = _avatar_color(display_name)
+            badge_cls  = "hero-badge-edit" if mode == "edit" else "hero-badge-new"
+            badge_lbl  = "Editing" if mode == "edit" else "New Operator"
+            emp_code_disp = selected_operator.get("emp_code", "") if selected_operator else ""
+            mob_disp   = selected_operator.get("mobile_number", "") if selected_operator else ""
+            meta_line  = (
+                f"EMP Code: {emp_code_disp}" if emp_code_disp
+                else (f"Mobile: {mob_disp}" if mob_disp else "Unsaved — fill in details below")
+            )
 
             # Hero banner
             st.markdown(
@@ -656,6 +677,7 @@ def render() -> None:
                     _section_hdr("person", "Personal Details")
                     st.markdown(
                         f"<div class='info-grid'>"
+                        + _info_field("Employee Code",  so.get("emp_code"))
                         + _info_field("Operator Name",  so.get("operator_name"))
                         + _info_field("Mobile Number",  so.get("mobile_number"))
                         + _info_field("Aadhar Number",  so.get("aadhar_number"))
@@ -696,6 +718,24 @@ def render() -> None:
 
             # ── Tab 2: Edit Details ───────────────────────────────────────────
             with tab_edit:
+                # Emp code display — auto-generated on create, read-only on edit
+                _preview_code = (
+                    emp_code_disp
+                    if mode == "edit" and emp_code_disp
+                    else _generate_emp_code(operators)
+                )
+                st.markdown(
+                    f"<div style='display:inline-flex;align-items:center;gap:10px;"
+                    f"background:#FFF7ED;border:1px solid #FED7AA;"
+                    f"border-radius:6px;padding:8px 16px;margin-bottom:12px;'>"
+                    f"<span style='font-size:11px;font-weight:700;letter-spacing:.1em;"
+                    f"color:#9A3412;text-transform:uppercase;'>"
+                    f"{'Employee Code' if mode == 'edit' else 'Employee Code (auto)'}</span>"
+                    f"<span style='font-size:18px;font-weight:800;color:#E87722;"
+                    f"letter-spacing:.05em;'>{_preview_code}</span></div>",
+                    unsafe_allow_html=True,
+                )
+
                 # Section 1 — Personal Details
                 with st.container(border=True):
                     _section_hdr("person", "Personal Details")
@@ -833,9 +873,13 @@ def render() -> None:
                             sb.update_operator(selected_id, payload)
                             _toast_msg = f"'{name_val}' updated successfully."
                         else:
+                            payload["emp_code"] = _generate_emp_code(operators)
                             created    = sb.insert_operator(payload)
                             _new_id    = created.get("id", "")
-                            _toast_msg = f"Operator '{name_val}' created."
+                            _toast_msg = (
+                                f"Operator '{name_val}' created — "
+                                f"Code: {payload['emp_code']}"
+                            )
                     except Exception as exc:
                         _err = str(exc)
 

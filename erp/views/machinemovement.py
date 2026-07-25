@@ -289,6 +289,16 @@ def _mov_code(asset_code: str) -> str:
     return f"MOV-{asset_code}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
 
+def _machine_label(m: dict) -> str:
+    base  = m.get("asset_code", "")
+    mtype = m.get("machine_type", "")
+    sn    = m.get("serial_number", "")
+    label = f"{base} · {mtype}" if mtype else base
+    if sn:
+        label += f" | SN: {sn}"
+    return label
+
+
 def _site_label(s: dict) -> str:
     city = s.get("city") or ""
     city_part = f" ({city})" if city else ""
@@ -512,6 +522,36 @@ def _timeline_html(movements: list) -> str:
             f"{comment}</div>"
         ) if comment else ""
 
+        # Transport details shown inline for Load events
+        transport_html = ""
+        if mtype == "Load":
+            t_parts = []
+            if m.get("transporter_name"):
+                t_parts.append(f"<strong>Transporter:</strong> {m['transporter_name']}")
+            if m.get("vehicle_number"):
+                t_parts.append(f"<strong>Vehicle:</strong> {m['vehicle_number']}")
+            if m.get("driver_name"):
+                t_parts.append(f"<strong>Driver:</strong> {m['driver_name']}")
+            if m.get("driver_contact"):
+                t_parts.append(f"<strong>Contact:</strong> {m['driver_contact']}")
+            if m.get("lr_challan_number"):
+                t_parts.append(f"<strong>LR/Challan:</strong> {m['lr_challan_number']}")
+            if t_parts:
+                transport_html = (
+                    f"<div style='display:flex;flex-wrap:wrap;gap:14px;font-size:12px;"
+                    f"color:#374151;background:#F8FAFC;border:1px solid #E2EBF0;"
+                    f"border-radius:6px;padding:8px 12px;margin-top:6px;'>"
+                    + "  ".join(f"<span>{p}</span>" for p in t_parts)
+                    + "</div>"
+                )
+            if m.get("dispatch_remarks"):
+                transport_html += (
+                    f"<div class='tl-comment'>"
+                    f"<span class='msr' style='font-size:12px;vertical-align:middle;"
+                    f"margin-right:4px;'>local_shipping</span>"
+                    f"{m['dispatch_remarks']}</div>"
+                )
+
         code_html = (
             f"<div class='tl-code'>Ref: {code}</div>"
         ) if code else ""
@@ -540,6 +580,7 @@ def _timeline_html(movements: list) -> str:
             f"      {'<span style=\"margin-left:6px;font-size:11px;color:#9CA3AF;\">' + detail + '</span>' if detail else ''}"
             f"    </div>"
             f"    <div class='tl-locs'>{locs_html}</div>"
+            f"    {transport_html}"
             f"    {comment_html}"
             f"    {code_html}"
             f"    <div style='margin-top:6px;'>{rec_chip_html}</div>"
@@ -560,6 +601,12 @@ def _save_movement(
     to_location,
     movement_date: date,
     comments,
+    transporter_name: str | None = None,
+    vehicle_number: str | None = None,
+    driver_name: str | None = None,
+    driver_contact: str | None = None,
+    lr_challan_number: str | None = None,
+    dispatch_remarks: str | None = None,
 ) -> None:
     asset_code = machine.get("asset_code", "UNK")
     payload = {
@@ -572,6 +619,13 @@ def _save_movement(
         "movement_date": movement_date.isoformat(),
         "comments":      (comments or "").strip() or None,
     }
+    if movement_type == "Load":
+        payload["transporter_name"]   = (transporter_name  or "").strip() or None
+        payload["vehicle_number"]     = (vehicle_number    or "").strip() or None
+        payload["driver_name"]        = (driver_name       or "").strip() or None
+        payload["driver_contact"]     = (driver_contact    or "").strip() or None
+        payload["lr_challan_number"]  = (lr_challan_number or "").strip() or None
+        payload["dispatch_remarks"]   = (dispatch_remarks  or "").strip() or None
     sb.insert_machine_movement(payload)
 
 
@@ -638,16 +692,8 @@ def render() -> None:
             [m for m in all_machines if m.get("asset_code")],
             key=lambda m: m.get("asset_code", ""),
         )
-        machine_options = [""] + [
-            f"{m['asset_code']} · {' '.join(filter(None, [m.get('make'), m.get('model')]))}"
-            if (m.get("make") or m.get("model")) else m["asset_code"]
-            for m in active_machines
-        ]
-        machine_id_map = {
-            f"{m['asset_code']} · {' '.join(filter(None, [m.get('make'), m.get('model')]))}"
-            if (m.get("make") or m.get("model")) else m["asset_code"]: m
-            for m in active_machines
-        }
+        machine_options = [""] + [_machine_label(m) for m in active_machines]
+        machine_id_map  = {_machine_label(m): m for m in active_machines}
 
         saved_id    = st.session_state.get("_mm_sel_id", "")
         saved_label = ""
@@ -674,16 +720,18 @@ def render() -> None:
             badge_cls  = _op_badge_cls(op_status)
             badge_html = f"<span class='{badge_cls}' style='margin-top:2px;display:inline-block;'>{op_status}</span>"
 
-            c1, c2, c3, c4, c5 = st.columns(5)
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
             with c1:
                 st.markdown(_info_chip("Machine Type", selected_machine.get("machine_type", "")), unsafe_allow_html=True)
             with c2:
-                st.markdown(_info_chip("Make", selected_machine.get("make", "")), unsafe_allow_html=True)
+                st.markdown(_info_chip("Serial Number", selected_machine.get("serial_number", "") or "—"), unsafe_allow_html=True)
             with c3:
-                st.markdown(_info_chip("Model", selected_machine.get("model", "")), unsafe_allow_html=True)
+                st.markdown(_info_chip("Make", selected_machine.get("make", "")), unsafe_allow_html=True)
             with c4:
-                st.markdown(_info_chip("Current Location", selected_machine.get("current_location", "")), unsafe_allow_html=True)
+                st.markdown(_info_chip("Model", selected_machine.get("model", "")), unsafe_allow_html=True)
             with c5:
+                st.markdown(_info_chip("Current Location", selected_machine.get("current_location", "")), unsafe_allow_html=True)
+            with c6:
                 st.markdown(_info_chip("Operational Status", op_status, badge_html=badge_html), unsafe_allow_html=True)
         else:
             st.markdown(
@@ -736,23 +784,66 @@ def render() -> None:
     # ── Section A: Load Machine ───────────────────────────────────────────────
     with st.container(border=True):
         _section_hdr("upload", "Load Machine")
-        la1, la2 = st.columns([3, 2])
+
+        la1, la2, la3 = st.columns([3, 2, 2])
         with la1:
-            load_dest = st.selectbox("To Location (Site)", options=site_options, key="mm_load_to_site")
+            load_dest = st.selectbox("To Location (Site) *", options=site_options, key="mm_load_to_site")
         with la2:
+            load_transporter = st.text_input("Transporter Name *", key="mm_load_transporter")
+        with la3:
+            load_vehicle = st.text_input("Vehicle Number *", key="mm_load_vehicle_no")
+
+        lb1, lb2, lb3 = st.columns([2, 2, 2])
+        with lb1:
+            load_driver_name = st.text_input("Driver Name *", key="mm_load_driver_name")
+        with lb2:
+            load_driver_contact = st.text_input("Driver Contact *", key="mm_load_driver_contact")
+        with lb3:
+            load_lr_challan = st.text_input("LR / Challan Number (optional)", key="mm_load_lr_challan")
+
+        lc1, lc2 = st.columns([4, 2])
+        with lc1:
+            load_dispatch_remarks = st.text_area(
+                "Dispatch Remarks",
+                placeholder="Any special handling notes, route info, etc.",
+                height=80,
+                key="mm_load_dispatch_remarks",
+            )
+        with lc2:
             load_date = st.date_input("Movement Date", value=date.today(), key="mm_load_date")
-        if st.button("Machine Load", type="primary", key="mm_load_save"):
-            to_loc = load_dest
-            if not to_loc:
-                st.error("Please specify a destination location.")
+
+        if st.button("Record Load", type="primary", key="mm_load_save"):
+            missing = []
+            if not load_dest:
+                missing.append("Destination location")
+            if not (load_transporter or "").strip():
+                missing.append("Transporter Name")
+            if not (load_vehicle or "").strip():
+                missing.append("Vehicle Number")
+            if not (load_driver_name or "").strip():
+                missing.append("Driver Name")
+            if not (load_driver_contact or "").strip():
+                missing.append("Driver Contact")
+            if missing:
+                st.error(f"Required fields missing: {', '.join(missing)}.")
             else:
                 try:
-                    _save_movement(sb, selected_machine, "Load", from_loc or None, to_loc, load_date, None)
+                    _save_movement(
+                        sb, selected_machine, "Load",
+                        from_loc or None, load_dest, load_date,
+                        comments=None,
+                        transporter_name=load_transporter,
+                        vehicle_number=load_vehicle,
+                        driver_name=load_driver_name,
+                        driver_contact=load_driver_contact,
+                        lr_challan_number=load_lr_challan,
+                        dispatch_remarks=load_dispatch_remarks,
+                    )
                     try:
                         sb.update_machine(selected_machine["id"], {"operational_status": "Mobilizing"})
                     except Exception:
                         pass
-                    st.toast(f"Load movement recorded for {asset_code}. Status set to Mobilizing.", icon="✅")
+                    st.toast(f"Load recorded for {asset_code}. Status → Mobilizing.", icon="✅")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save movement: {exc}")
