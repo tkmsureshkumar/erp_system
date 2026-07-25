@@ -30,6 +30,7 @@ from erp.views import (
     fleetutil,
     invoice,
     login,
+    machinecompliance,
     machinemovement,
     machinehistory,
     wlreports,
@@ -734,49 +735,75 @@ _profile   = auth.current_profile()
 _user_name = _profile.get("full_name") or _profile.get("email") or "User"
 
 _SIDEBAR_ITEMS = [
-    # key, Material Symbol icon name, display label, section
-    ("dashboard",      "space_dashboard",        "Dashboard",    "OPERATIONS"),
-    ("customers",      "groups",                  "Customers",    "OPERATIONS"),
-    ("sites",          "location_on",             "Sites",        "OPERATIONS"),
-    ("operators",      "engineering",             "Operators",    "OPERATIONS"),
-    ("machines",       "precision_manufacturing", "Machines",     "OPERATIONS"),
-    ("assets",         "inventory_2",             "Assets",       "OPERATIONS"),
-    ("machinemovement", "move_up",                "Machine Move", "OPERATIONS"),
-    ("workorders",     "assignment",              "Work Orders",  "OPERATIONS"),
-    ("closeworkorder", "lock",                    "Close WO",     "OPERATIONS"),
-    ("deployments",    "local_shipping",          "Deployments",  "OPERATIONS"),
-    ("invoice",        "receipt_long",            "Invoice",      "OPERATIONS"),
-    ("worklog",        "edit_note",               "Worklog",      "OPERATIONS"),
-    ("currentdep",     "pin_drop",                "Active Dep",   "REPORTS"),
-    ("fleetstatus",    "fact_check",              "Fleet Status", "REPORTS"),
-    ("fleetutil",      "bar_chart",               "Fleet Util",   "REPORTS"),
-    ("machinehistory", "history",                 "Mach History", "REPORTS"),
-    ("wlreport",       "description",             "WL Report",    "REPORTS"),
-    ("woreport",       "receipt_long",            "WO Report",    "REPORTS"),
-    ("wlreports",      "pending_actions",         "WL Status",    "REPORTS"),
-    ("custreport",     "person_search",           "Cust Report",  "REPORTS"),
-    ("opreport",       "badge",                   "Op Report",    "REPORTS"),
-    ("system",         "settings",                "System",       "CONFIG"),
+    # (page_key, Material Symbol, display label, section, subsection)
+    # ── Dashboard ─────────────────────────────────────────────────────────────
+    ("dashboard",         "space_dashboard",        "Dashboard",          "OVERVIEW",     None),
+    # ── Masters ───────────────────────────────────────────────────────────────
+    ("assets",            "inventory_2",             "Category Master",   "MASTERS",      None),
+    ("machines",          "precision_manufacturing", "Machine Master",    "MASTERS",      None),
+    ("machinecompliance", "verified_user",           "Compliance",        "MASTERS",      None),
+    ("customers",         "groups",                  "Customer Master",   "MASTERS",      None),
+    ("sites",             "location_on",             "Site Master",       "MASTERS",      None),
+    ("operators",         "engineering",             "Operator Master",   "MASTERS",      None),
+    # ── Work Orders ───────────────────────────────────────────────────────────
+    ("workorders",        "assignment",              "Create Work Order", "WORK ORDERS",  None),
+    ("deployments",       "local_shipping",          "Start Billing",     "WORK ORDERS",  None),
+    ("closeworkorder",    "lock",                    "Close Billing",     "WORK ORDERS",  None),
+    # ── Operations ────────────────────────────────────────────────────────────
+    ("machinemovement",   "move_up",                 "Machine Move",      "OPERATIONS",   None),
+    ("worklog",           "edit_note",               "Work Log",          "OPERATIONS",   None),
+    # ── Billing ───────────────────────────────────────────────────────────────
+    ("invoice",           "receipt_long",            "Invoice",           "BILLING",      None),
+    # ── Reports ───────────────────────────────────────────────────────────────
+    ("currentdep",        "pin_drop",                "Active Deploy",     "REPORTS",      "FLEET"),
+    ("fleetstatus",       "fact_check",              "Fleet Status",      "REPORTS",      "FLEET"),
+    ("fleetutil",         "bar_chart",               "Fleet Util",        "REPORTS",      "FLEET"),
+    ("machinehistory",    "history",                 "Mach History",      "REPORTS",      "FLEET"),
+    ("woreport",          "receipt_long",            "WO Report",         "REPORTS",      "BILLING"),
+    ("custreport",        "person_search",           "Cust Report",       "REPORTS",      "BILLING"),
+    ("wlreport",          "description",             "WL Detail",         "REPORTS",      "WORK LOG"),
+    ("wlreports",         "pending_actions",         "WL Status",         "REPORTS",      "WORK LOG"),
+    ("opreport",          "badge",                   "Op Report",         "REPORTS",      "REVENUE"),
+    # ── Config ────────────────────────────────────────────────────────────────
+    ("system",            "settings",                "System",            "CONFIG",       None),
 ]
 
-_PAGE_LABELS = {key: label for key, _, label, _ in _SIDEBAR_ITEMS}
+_PAGE_LABELS  = {item[0]: item[2] for item in _SIDEBAR_ITEMS}
 _PAGE_LABELS["admin"] = "Admin"
 
-_PAGE_SECTION = {key: sec for key, _, _, sec in _SIDEBAR_ITEMS}
+_PAGE_SECTION = {item[0]: item[3] for item in _SIDEBAR_ITEMS}
 _PAGE_SECTION["admin"] = "ADMIN"
 
 
 def _build_sidebar() -> str:
-    last_section = None
+    last_section    = None
+    last_subsection = None
     items_html: list[str] = []
-    for key, icon, label, section in _SIDEBAR_ITEMS:
+
+    for key, icon, label, section, subsection in _SIDEBAR_ITEMS:
         if not auth.has_page_access(key):
             continue
-        # Add a subtle divider between sections (no text label — cleaner look)
+
+        # ── Section break ──────────────────────────────────────────────────
         if section != last_section:
             if last_section is not None:
                 items_html.append("<div class='il-sb-divider'></div>")
-            last_section = section
+            if section != "OVERVIEW":          # no label for the first dashboard item
+                items_html.append(
+                    f"<div class='il-sb-section'>{section}</div>"
+                )
+            last_section    = section
+            last_subsection = None
+
+        # ── Sub-section label (within Reports) ─────────────────────────────
+        if subsection and subsection != last_subsection:
+            items_html.append(
+                f"<div style='padding:8px 18px 2px;font-size:7.5px;font-weight:700;"
+                f"letter-spacing:.18em;text-transform:uppercase;"
+                f"color:rgba(255,255,255,.20);'>{subsection}</div>"
+            )
+            last_subsection = subsection
+
         active_cls = " active" if page == key else ""
         items_html.append(
             f"<a href='?page={key}' target='_self' class='il-sb-item{active_cls}'>"
@@ -784,6 +811,7 @@ def _build_sidebar() -> str:
             f"<span class='il-sb-label'>{label}</span>"
             f"</a>"
         )
+
     if auth.is_admin():
         items_html.append("<div class='il-sb-divider'></div>")
         active_cls = " active" if page == "admin" else ""
@@ -938,6 +966,12 @@ elif page == "closeworkorder":
 elif page == "deployments":
     if auth.has_page_access("deployments"):
         deployment.render()
+    else:
+        _access_denied()
+
+elif page == "machinecompliance":
+    if auth.has_page_access("machinecompliance"):
+        machinecompliance.render()
     else:
         _access_denied()
 
