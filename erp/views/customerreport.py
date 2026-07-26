@@ -1,4 +1,4 @@
-﻿"""
+"""
 erp/views/customerreport.py
 Customer Reports â€” Revenue Summary and Deployment History per customer.
 """
@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
+from ._report_utils import render_export_buttons, render_drilldown_table
 
 
 # â”€â”€ CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -282,10 +283,47 @@ def render() -> None:
         summary_rows.sort(key=lambda r: r["Active Work Orders"], reverse=True)
 
         if summary_rows:
-            st.dataframe(
-                pd.DataFrame(summary_rows),
-                use_container_width=True,
-                hide_index=True,
+            summary_df = pd.DataFrame(summary_rows)
+            sel_rev = render_drilldown_table(summary_df, "cr_rev_tbl")
+            if sel_rev is not None:
+                sel_cust_name = summary_rows[sel_rev]["Customer"]
+                sel_cid_drill = next(
+                    (cid for cid, a in cust_agg.items() if a["name"] == sel_cust_name), None
+                )
+                if sel_cid_drill:
+                    drill_wos = [wo for wo in work_orders if wo.get("customer_id") == sel_cid_drill]
+                    st.markdown(
+                        "<div style='background:#EFF6FF;border:1px solid #BFDBFE;"
+                        "border-radius:10px;padding:10px 14px;margin:8px 0;"
+                        "font-size:13px;color:#1E40AF;font-weight:600;'>"
+                        f"Work Orders — {sel_cust_name}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if drill_wos:
+                        drill_rows = []
+                        for wo in sorted(drill_wos,
+                                         key=lambda w: _parse_date(w.get("start_date")) or date.min,
+                                         reverse=True):
+                            mc   = _parse_mc(wo.get("machine_config"))
+                            rent = sum(float(r.get("rental_per_month") or 0) for r in mc)
+                            sd   = _parse_date(wo.get("start_date"))
+                            ed   = _parse_date(wo.get("end_date"))
+                            drill_rows.append({
+                                "Work Order":     wo.get("wo_number") or "—",
+                                "Site":           site_map.get(wo.get("site_id", ""), "—"),
+                                "Start":          _fmt_date(sd),
+                                "End":            _fmt_date(ed) if ed else "Open",
+                                "Machines":       len([r for r in mc if r.get("machine_id")]),
+                                "Monthly Rental": f"₹ {rent:,.0f}" if rent else "—",
+                                "Status":         _wo_status(sd, ed, today),
+                            })
+                        st.dataframe(
+                            pd.DataFrame(drill_rows).style.map(_status_style, subset=["Status"]),
+                            use_container_width=True, hide_index=True,
+                        )
+            render_export_buttons(
+                summary_df, "customer_revenue_summary",
+                "cr_rev_xl", "cr_rev_pdf", "Customer Revenue Summary",
             )
         else:
             st.markdown(
@@ -389,13 +427,7 @@ def render() -> None:
                 use_container_width=True,
                 hide_index=True,
             )
-            st.download_button(
-                "Export CSV",
-                data=wdf.to_csv(index=False).encode("utf-8"),
-                file_name=f"wo_{sel_label.replace(' ', '_')}_{today.isoformat()}.csv",
-                mime="text/csv",
-                key="cr_wo_csv",
-            )
+            render_export_buttons(wdf, f"wo_{sel_label.replace(' ', '_')}", "cr_wo_xl", "cr_wo_pdf", f"Work Orders — {sel_label}")
 
     # â”€â”€ Deployments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab_dep:
@@ -445,13 +477,7 @@ def render() -> None:
                 use_container_width=True,
                 hide_index=True,
             )
-            st.download_button(
-                "Export CSV",
-                data=ddf.to_csv(index=False).encode("utf-8"),
-                file_name=f"dep_{sel_label.replace(' ', '_')}_{today.isoformat()}.csv",
-                mime="text/csv",
-                key="cr_dep_csv",
-            )
+            render_export_buttons(ddf, f"dep_{sel_label.replace(' ', '_')}", "cr_dep_xl", "cr_dep_pdf", f"Deployments — {sel_label}")
 
     # â”€â”€ Machines Supplied â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab_mach:
@@ -500,13 +526,7 @@ def render() -> None:
                 f"{len(mach_rows)} distinct machine{'s' if len(mach_rows) != 1 else ''} "
                 f"supplied to this customer."
             )
-            st.download_button(
-                "Export CSV",
-                data=mdf.to_csv(index=False).encode("utf-8"),
-                file_name=f"machines_{sel_label.replace(' ', '_')}_{today.isoformat()}.csv",
-                mime="text/csv",
-                key="cr_mach_csv",
-            )
+            render_export_buttons(mdf, f"machines_{sel_label.replace(' ', '_')}", "cr_mach_xl", "cr_mach_pdf", f"Machines Supplied — {sel_label}")
 
     # â”€â”€ Site History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     with tab_site:
@@ -558,10 +578,4 @@ def render() -> None:
             site_rows.sort(key=lambda r: r["Work Orders"], reverse=True)
             sdf = pd.DataFrame(site_rows)
             st.dataframe(sdf, use_container_width=True, hide_index=True)
-            st.download_button(
-                "Export CSV",
-                data=sdf.to_csv(index=False).encode("utf-8"),
-                file_name=f"sites_{sel_label.replace(' ', '_')}_{today.isoformat()}.csv",
-                mime="text/csv",
-                key="cr_site_csv",
-            )
+            render_export_buttons(sdf, f"sites_{sel_label.replace(' ', '_')}", "cr_site_xl", "cr_site_pdf", f"Site History — {sel_label}")

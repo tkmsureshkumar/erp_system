@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
+from ._report_utils import render_export_buttons, render_drilldown_table, WL_STATUS
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -18,9 +19,9 @@ from ..supabase_client import SupabaseClient
 _PAGE_CSS = """
 <style>
 /* ── KPI strip ─────────────────────────────────────────────────────── */
-.kpi-grid-7 {
+.kpi-grid-6 {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 14px;
     margin: 0 0 28px;
 }
@@ -101,6 +102,16 @@ _PAGE_CSS = """
     display: flex; align-items: center; gap: 6px;
 }
 
+/* ── Billing section title ───────────────────────────────────────────── */
+.billing-title {
+    font-size: 22px; font-weight: 800;
+    color: #1E2938; margin: 0 0 2px;
+    letter-spacing: -.3px;
+}
+.billing-subtitle {
+    font-size: 12px; color: #6B7280; margin-bottom: 18px;
+}
+
 /* ── Billing totals bar ──────────────────────────────────────────────── */
 .billing-totals {
     display: flex; gap: 32px;
@@ -108,7 +119,7 @@ _PAGE_CSS = """
     background: #F8FAFC;
     border: 1px solid #E2EBF0;
     border-radius: 10px;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
     font-size: 12px;
     align-items: center;
     animation: cs-fadeup .3s ease;
@@ -159,9 +170,11 @@ def _flatten_worklogs(
     work_orders: list[dict],
     customer_map: dict,
     site_map: dict,
+    machine_map: dict | None = None,
 ) -> pd.DataFrame:
     wo_map = {wo["id"]: wo for wo in work_orders if wo.get("id")}
     rows: list[dict] = []
+    _mmap = machine_map or {}
 
     for wl in work_logs:
         wo = wo_map.get(wl.get("work_order_id"), {})
@@ -170,7 +183,6 @@ def _flatten_worklogs(
         cust  = customer_map.get(wo.get("customer_id", ""), {})
         site_ = site_map.get(wo.get("site_id", ""), {})
 
-        # Find matching machine config entry by machine_id or label
         machine_id = wl.get("machine_id", "")
         mc: dict = {}
         mc_raw = wo.get("machine_config")
@@ -190,8 +202,17 @@ def _flatten_worklogs(
             except Exception:
                 pass
 
-        rental   = float(mc.get("rental_per_month") or 0)
-        ot_rate  = float(wl.get("ot_rate") or 0)
+        # Enrich from machines table
+        mobj       = _mmap.get(machine_id, {})
+        asset_code = mobj.get("asset_code") or wl.get("machine_label") or mc.get("machine_label", "")
+        serial_no  = mobj.get("serial_number", "")
+        make       = mobj.get("make", "")
+        model      = mobj.get("model", "")
+        suffix     = " ".join(p for p in [make, model] if p)
+        machine_display = f"{asset_code} — {suffix}" if suffix else asset_code
+
+        rental  = float(mc.get("rental_per_month") or 0)
+        ot_rate = float(wl.get("ot_rate") or 0)
         shift_st = _parse_time_str(mc.get("shift_start_time"))
         shift_et = _parse_time_str(mc.get("shift_end_time"))
         std_hrs  = _net_hours(shift_st, shift_et)
@@ -209,11 +230,11 @@ def _flatten_worklogs(
         for entry in sched:
             rows.append({
                 "Billing Month": wl.get("year", ""),
-                "WO Number":     wo.get("wo_number", ""),
                 "Customer":      cust.get("customer_name", ""),
                 "Site":          site_.get("site_name", ""),
-                "Machine":       wl.get("machine_label") or mc.get("machine_label", ""),
-                "Billing Type":  mc.get("billing_type", ""),
+                "Asset Code":    asset_code,
+                "Machine":       machine_display,
+                "Serial Number": serial_no,
                 "Rental/Month":  rental,
                 "OT Rate":       ot_rate,
                 "Std Hrs/Day":   std_hrs,
@@ -243,23 +264,26 @@ def _billing_summary(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
 
-    working = df[df["Start Time"].notna() & (df["Start Time"] != "")]
+    working = df[df["Start Time"].notna() & (df["Start Time"] != "")].copy()
     if working.empty:
         return pd.DataFrame()
+
+    # Compute OT Billing per row before aggregating (avoids needing OT Rate in groupby)
+    working["_ot_bill_row"] = working["OT"] * working["OT Rate"]
 
     grp = (
         working
         .groupby(
-            ["Billing Month", "WO Number", "Customer", "Site", "Machine",
-             "Billing Type", "Rental/Month", "OT Rate", "Std Hrs/Day"],
+            ["Billing Month", "Customer", "Site", "Asset Code", "Machine",
+             "Serial Number", "Rental/Month", "Std Hrs/Day"],
             dropna=False,
         )
         .agg(
-            Working_Days  = ("Net Time", "count"),
-            Actual_Hours  = ("Net Time", "sum"),
-            OT_Hours      = ("OT",       "sum"),
+            Working_Days  = ("Net Time",      "count"),
+            Actual_Hours  = ("Net Time",      "sum"),
+            OT_Hours      = ("OT",            "sum"),
             Breakdown_Hrs = ("Breakdown Hrs", "sum"),
-            HSD_Ltr       = ("HSD in Ltr",    "sum"),
+            OT_Billing    = ("_ot_bill_row",  "sum"),
         )
         .reset_index()
     )
@@ -269,20 +293,19 @@ def _billing_summary(df: pd.DataFrame) -> pd.DataFrame:
         lambda r: round(r["Actual_Hours"] / r["Working Hrs"], 4) if r["Working Hrs"] else 0, axis=1
     )
     grp["Billing"]     = (grp["Rental/Month"] * grp["Qty"]).round(0)
-    grp["OT Billing"]  = (grp["OT_Hours"] * grp["OT Rate"]).round(0)
 
     return grp.rename(columns={
         "Working_Days":   "Working Days",
         "Actual_Hours":   "Actual Hrs",
         "OT_Hours":       "OT Hrs",
         "Breakdown_Hrs":  "Breakdown Hrs",
-        "HSD_Ltr":        "HSD in Ltr",
+        "OT_Billing":     "OT Billing",
     })[[
-        "Billing Month", "WO Number", "Customer", "Site", "Machine",
-        "Billing Type", "Rental/Month", "Working Days", "Working Hrs",
+        "Billing Month", "Customer", "Site", "Machine", "Serial Number",
+        "Rental/Month", "Working Days", "Working Hrs",
         "Actual Hrs", "Qty", "Billing",
-        "OT Hrs", "OT Rate", "OT Billing",
-        "Breakdown Hrs", "HSD in Ltr",
+        "OT Hrs", "OT Billing",
+        "Breakdown Hrs",
     ]]
 
 
@@ -306,6 +329,32 @@ def _section_hdr(icon: str, label: str) -> None:
         f"{label}</div>",
         unsafe_allow_html=True,
     )
+
+
+def _style_billing(col: pd.Series) -> list[str]:
+    if col.name == "Qty":
+        return ["background-color:#FEFCE8; color:#854D0E; font-weight:700"] * len(col)
+    if col.name == "Breakdown Hrs":
+        return [
+            "background-color:#FEE2E2; color:#991B1B; font-weight:600"
+            if float(v or 0) > 0
+            else "background-color:#F0FDF4; color:#166534"
+            for v in col
+        ]
+    return [""] * len(col)
+
+
+def _wl_status_styler(styler):
+    """Apply WL_STATUS palette to the Status column in the billing table."""
+    def _row_status(col):
+        if col.name != "Status":
+            return [""] * len(col)
+        out = []
+        for v in col:
+            bg, fg = WL_STATUS.get(str(v), ("#F1F5F9", "#374151"))
+            out.append(f"background-color:{bg};color:{fg};font-weight:700;")
+        return out
+    return styler.apply(_row_status, axis=0)
 
 
 # ── View ──────────────────────────────────────────────────────────────────────
@@ -345,14 +394,19 @@ def render() -> None:
             sites = sb.list_sites()
         except Exception:
             sites = []
-        return wls, wos, custs, sites
+        try:
+            machs = sb.list_machines()
+        except Exception:
+            machs = []
+        return wls, wos, custs, sites, machs
 
-    work_logs, work_orders, customers, sites = _load()
+    work_logs, work_orders, customers, sites, machines = _load()
 
     customer_map = {c.get("id"): c for c in customers if c.get("id")}
     site_map     = {s.get("id"): s for s in sites     if s.get("id")}
+    machine_map  = {m.get("id"): m for m in machines  if m.get("id")}
 
-    df_all = _flatten_worklogs(work_logs, work_orders, customer_map, site_map)
+    df_all = _flatten_worklogs(work_logs, work_orders, customer_map, site_map, machine_map)
 
     if df_all.empty:
         st.markdown(
@@ -382,11 +436,11 @@ def render() -> None:
             cust_opts  = ["All"] + sorted(df_all["Customer"].dropna().unique().tolist())
             sel_cust   = st.selectbox("Customer", cust_opts, key="rpt_cust")
         with fc3:
-            wo_opts    = ["All"] + sorted(df_all["WO Number"].dropna().unique().tolist())
-            sel_wo     = st.selectbox("Work Order", wo_opts, key="rpt_wo")
-        with fc4:
-            mach_opts  = ["All"] + sorted(df_all["Machine"].dropna().unique().tolist())
+            mach_opts  = ["All"] + sorted(df_all["Asset Code"].dropna().unique().tolist())
             sel_mach   = st.selectbox("Machine", mach_opts, key="rpt_mach")
+        with fc4:
+            sn_opts    = ["All"] + sorted(df_all["Serial Number"].dropna().unique().tolist())
+            sel_sn     = st.selectbox("Serial Number", sn_opts, key="rpt_sn")
         with fc5:
             valid_dates = df_all["Date"].dropna()
             min_d = valid_dates.min() if not valid_dates.empty else date.today()
@@ -397,7 +451,7 @@ def render() -> None:
         with fc7:
             st.markdown("<div style='margin-top:22px'></div>", unsafe_allow_html=True)
             if st.button("Clear", key="rpt_clear"):
-                for k in ["rpt_month", "rpt_cust", "rpt_wo", "rpt_mach", "rpt_from", "rpt_to"]:
+                for k in ["rpt_month", "rpt_cust", "rpt_mach", "rpt_sn", "rpt_from", "rpt_to"]:
                     st.session_state.pop(k, None)
                 st.rerun()
 
@@ -407,10 +461,10 @@ def render() -> None:
         df = df[df["Billing Month"] == sel_month]
     if sel_cust != "All":
         df = df[df["Customer"] == sel_cust]
-    if sel_wo != "All":
-        df = df[df["WO Number"] == sel_wo]
     if sel_mach != "All":
-        df = df[df["Machine"] == sel_mach]
+        df = df[df["Asset Code"] == sel_mach]
+    if sel_sn != "All":
+        df = df[df["Serial Number"] == sel_sn]
     if sel_from and sel_to:
         df = df[(df["Date"] >= sel_from) & (df["Date"] <= sel_to)]
 
@@ -419,28 +473,30 @@ def render() -> None:
     # ── KPI strip ──────────────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
     st.markdown(
-        f"<div class='kpi-grid-7'>"
-        + _kpi_card("receipt_long",          "Work Orders",   str(df["WO Number"].nunique()),
-                    "active orders",           "#E87722")
-        + _kpi_card("precision_manufacturing","Machines",      str(df["Machine"].nunique()),
-                    "deployed machines",        "#0EA5E9")
-        + _kpi_card("calendar_today",         "Working Days",  str(len(working_df)),
-                    "shift entries",            "#10B981")
-        + _kpi_card("schedule",               "Net Hours",     f"{working_df['Net Time'].sum():,.1f}",
-                    "total net hours",          "#8B5CF6")
-        + _kpi_card("more_time",              "OT Hours",      f"{working_df['OT'].sum():,.1f}",
-                    "overtime hours",           "#EF4444")
-        + _kpi_card("local_gas_station",      "HSD (Ltr)",     f"{working_df['HSD in Ltr'].sum():,.1f}",
-                    "diesel consumed",          "#F59E0B")
-        + _kpi_card("build",                  "Breakdown Hrs", f"{working_df['Breakdown Hrs'].sum():,.1f}",
-                    "downtime hours",           "#6B7280")
+        f"<div class='kpi-grid-6'>"
+        + _kpi_card("precision_manufacturing", "Machines",      str(df["Asset Code"].nunique()),
+                    "deployed machines",         "#0EA5E9")
+        + _kpi_card("groups",                  "Customers",     str(df["Customer"].nunique()),
+                    "active customers",          "#E87722")
+        + _kpi_card("calendar_today",          "Working Days",  str(len(working_df)),
+                    "shift entries",             "#10B981")
+        + _kpi_card("schedule",                "Net Hours",     f"{working_df['Net Time'].sum():,.1f}",
+                    "total net hours",           "#8B5CF6")
+        + _kpi_card("more_time",               "OT Hours",      f"{working_df['OT'].sum():,.1f}",
+                    "overtime hours",            "#EF4444")
+        + _kpi_card("build",                   "Breakdown Hrs", f"{working_df['Breakdown Hrs'].sum():,.1f}",
+                    "downtime hours",            "#6B7280")
         + "</div>",
         unsafe_allow_html=True,
     )
 
     # ── Billing Summary ────────────────────────────────────────────────────────
     with st.container(border=True):
-        _section_hdr("payments", "Billing Summary — per Machine per Month")
+        st.markdown(
+            "<div class='billing-title'>Billing Summary</div>"
+            "<div class='billing-subtitle'>per Machine · per Month — rental charges computed from shift log</div>",
+            unsafe_allow_html=True,
+        )
 
         billing_df = _billing_summary(df)
         if billing_df.empty:
@@ -469,51 +525,109 @@ def render() -> None:
                 f"</div>",
                 unsafe_allow_html=True,
             )
-            st.dataframe(
-                billing_df.style.format({
+            billing_col_cfg = {
+                "Billing Month":  st.column_config.TextColumn("Month",        width="small"),
+                "Machine":        st.column_config.TextColumn("Machine",       width="medium"),
+                "Serial Number":  st.column_config.TextColumn("Serial No.",    width="small"),
+                "Rental/Month":   st.column_config.NumberColumn("Rate/Month",  format="₹%,.0f"),
+                "Working Days":   st.column_config.NumberColumn("Work Days",   format="%d",   width="small"),
+                "Working Hrs":    st.column_config.NumberColumn("Std Hrs",     format="%.1f", width="small"),
+                "Actual Hrs":     st.column_config.NumberColumn("Act Hrs",     format="%.2f", width="small"),
+                "Qty":            st.column_config.NumberColumn("Qty",         format="%.4f", width="small"),
+                "Billing":        st.column_config.NumberColumn("Billing (₹)", format="₹%,.0f"),
+                "OT Hrs":         st.column_config.NumberColumn("OT Hrs",      format="%.2f", width="small"),
+                "OT Billing":     st.column_config.NumberColumn("OT Bill (₹)", format="₹%,.0f"),
+                "Breakdown Hrs":  st.column_config.NumberColumn("B/D Hrs",     format="%.2f", width="small"),
+            }
+            selected_idx = render_drilldown_table(
+                billing_df,
+                "wlr_billing_tbl",
+                column_config=billing_col_cfg,
+                style_fn=lambda s: s.apply(_style_billing, axis=0).format({
                     "Rental/Month":  "{:,.0f}",
                     "Working Hrs":   "{:.1f}",
                     "Actual Hrs":    "{:.2f}",
                     "Qty":           "{:.4f}",
                     "Billing":       "{:,.0f}",
                     "OT Hrs":        "{:.2f}",
-                    "OT Rate":       "{:.2f}",
                     "OT Billing":    "{:,.0f}",
                     "Breakdown Hrs": "{:.2f}",
-                    "HSD in Ltr":    "{:.1f}",
                 }),
-                use_container_width=True,
-                hide_index=True,
+            )
+            render_export_buttons(
+                billing_df,
+                base_name="billing_summary",
+                excel_key="wlr_xlsx",
+                pdf_key="wlr_pdf",
+                title="Billing Summary",
+                subtitle="per Machine · per Month",
+                sheet_name="Billing Summary",
             )
 
-    # ── Detailed Shift Log ─────────────────────────────────────────────────────
+            # ── Drill-down: click a billing row → show its shift entries ───────
+            if selected_idx is not None:
+                row = billing_df.iloc[selected_idx]
+                machine_val = row.get("Asset Code") if "Asset Code" in billing_df.columns else row.get("Machine", "")
+                month_val   = row.get("Billing Month", "")
+                st.markdown(
+                    f"<div style='margin-top:16px;padding:10px 14px;"
+                    f"background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;"
+                    f"font-size:13px;color:#1E40AF;font-weight:600;'>"
+                    f"Showing shift entries for "
+                    f"<strong>{row.get('Machine','')}</strong> · "
+                    f"<strong>{month_val}</strong></div>",
+                    unsafe_allow_html=True,
+                )
+                drill_mask = pd.Series([True] * len(df))
+                if machine_val and "Asset Code" in df.columns:
+                    drill_mask &= (df["Asset Code"] == machine_val)
+                if month_val and "Billing Month" in df.columns:
+                    drill_mask &= (df["Billing Month"] == month_val)
+                drill_df = df[drill_mask][[
+                    "Date", "Weekday", "Start Time", "End Time",
+                    "Net Time", "OT", "Breakdown Hrs", "Operator", "Remarks",
+                ]].sort_values("Date")
+                st.dataframe(
+                    drill_df.style.format(
+                        {"Net Time": "{:.2f}", "OT": "{:.1f}", "Breakdown Hrs": "{:.2f}"},
+                        na_rep="—",
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Date":          st.column_config.DateColumn("Date",    format="DD-MM-YYYY", width="small"),
+                        "Weekday":       st.column_config.TextColumn("Day",     width="small"),
+                        "Start Time":    st.column_config.TextColumn("Start",   width="small"),
+                        "End Time":      st.column_config.TextColumn("End",     width="small"),
+                        "Net Time":      st.column_config.NumberColumn("Net Hrs",  format="%.2f", width="small"),
+                        "OT":            st.column_config.NumberColumn("OT Hrs",   format="%.1f", width="small"),
+                        "Breakdown Hrs": st.column_config.NumberColumn("B/D Hrs",  format="%.2f", width="small"),
+                        "Operator":      st.column_config.TextColumn("Operator",  width="medium"),
+                        "Remarks":       st.column_config.TextColumn("Remarks",   width="medium"),
+                    },
+                )
+
+    # ── Detailed Shift Log (collapsed) ─────────────────────────────────────────
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-    with st.container(border=True):
-        hdr1, hdr2 = st.columns([5, 1])
-        with hdr1:
-            _section_hdr("table_rows", "Detailed Shift Log")
-        with hdr2:
-            export_cols = [
-                "Billing Month", "WO Number", "Customer", "Site", "Machine",
-                "Date", "Weekday", "Start Time", "End Time", "Net Time",
-                "Start HMR", "End HMR", "Breakdown Hrs", "OT", "HSD in Ltr",
-                "Operator", "Remarks", "Billing Type", "Rental/Month", "OT Rate",
-            ]
-            export_cols = [c for c in export_cols if c in df.columns]
-            st.download_button(
-                label="Export CSV",
-                data=df[export_cols].to_csv(index=False).encode("utf-8"),
-                file_name=f"worklog_report_{date.today()}.csv",
-                mime="text/csv",
-                key="export_csv",
-            )
+    with st.expander(f"View Detailed Shift Log  ({len(df):,} entries)", expanded=False):
+        export_cols = [
+            "Billing Month", "Customer", "Site", "Asset Code", "Machine",
+            "Serial Number", "Date", "Weekday", "Start Time", "End Time",
+            "Net Time", "Start HMR", "End HMR", "Breakdown Hrs",
+            "OT", "HSD in Ltr", "Operator", "Remarks",
+        ]
+        export_cols = [c for c in export_cols if c in df.columns]
+        render_export_buttons(
+            df[export_cols], "worklog_shift_log",
+            "wlr_sl_xl", "wlr_sl_pdf", "Work Log Shift Log",
+        )
 
         display_cols = [
-            "Billing Month", "WO Number", "Customer", "Site", "Machine",
-            "Date", "Weekday", "Start Time", "End Time", "Net Time",
-            "Start HMR", "End HMR", "Breakdown Hrs", "OT", "HSD in Ltr",
-            "Operator", "Remarks",
+            "Billing Month", "Customer", "Site", "Asset Code", "Machine",
+            "Serial Number", "Date", "Weekday", "Start Time", "End Time",
+            "Net Time", "Start HMR", "End HMR", "Breakdown Hrs",
+            "OT", "HSD in Ltr", "Operator", "Remarks",
         ]
         display_cols = [c for c in display_cols if c in df.columns]
         detail_df = df[display_cols].copy()
@@ -532,25 +646,28 @@ def render() -> None:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Billing Month": st.column_config.TextColumn("Billing Month", width="small"),
-                "Date":          st.column_config.DateColumn("Date",          width="small", format="DD-MM-YYYY"),
-                "Weekday":       st.column_config.TextColumn("Weekday",       width="small"),
-                "Start Time":    st.column_config.TextColumn("Start",         width="small"),
-                "End Time":      st.column_config.TextColumn("End",           width="small"),
-                "Net Time":      st.column_config.NumberColumn("Net Hrs",     format="%.2f", width="small"),
-                "Start HMR":     st.column_config.NumberColumn("HMR In",      format="%.1f", width="small"),
-                "End HMR":       st.column_config.NumberColumn("HMR Out",     format="%.1f", width="small"),
-                "Breakdown Hrs": st.column_config.NumberColumn("B/D Hrs",     format="%.1f", width="small"),
-                "OT":            st.column_config.NumberColumn("OT Hrs",      format="%.1f", width="small"),
-                "HSD in Ltr":    st.column_config.NumberColumn("HSD (Ltr)",   format="%.1f", width="small"),
-                "Operator":      st.column_config.TextColumn("Operator",      width="medium"),
-                "Remarks":       st.column_config.TextColumn("Remarks",       width="medium"),
+                "Billing Month":  st.column_config.TextColumn("Month",      width="small"),
+                "Asset Code":     st.column_config.TextColumn("Asset",      width="small"),
+                "Machine":        st.column_config.TextColumn("Machine",    width="medium"),
+                "Serial Number":  st.column_config.TextColumn("Serial No.", width="small"),
+                "Date":           st.column_config.DateColumn("Date",       width="small", format="DD-MM-YYYY"),
+                "Weekday":        st.column_config.TextColumn("Day",        width="small"),
+                "Start Time":     st.column_config.TextColumn("Start",      width="small"),
+                "End Time":       st.column_config.TextColumn("End",        width="small"),
+                "Net Time":       st.column_config.NumberColumn("Net Hrs",  format="%.2f", width="small"),
+                "Start HMR":      st.column_config.NumberColumn("HMR In",   format="%.1f", width="small"),
+                "End HMR":        st.column_config.NumberColumn("HMR Out",  format="%.1f", width="small"),
+                "Breakdown Hrs":  st.column_config.NumberColumn("B/D Hrs",  format="%.1f", width="small"),
+                "OT":             st.column_config.NumberColumn("OT Hrs",   format="%.1f", width="small"),
+                "HSD in Ltr":     st.column_config.NumberColumn("HSD (Ltr)",format="%.1f", width="small"),
+                "Operator":       st.column_config.TextColumn("Operator",   width="medium"),
+                "Remarks":        st.column_config.TextColumn("Remarks",    width="medium"),
             },
         )
 
         st.markdown(
             f"<div style='margin-top:8px;font-size:11px;color:#9CA3AF;'>"
-            f"Showing {len(detail_df):,} rows · {len(working_df)} working days</div>",
+            f"Showing {len(detail_df):,} rows · {len(working_df):,} working days</div>",
             unsafe_allow_html=True,
         )
 

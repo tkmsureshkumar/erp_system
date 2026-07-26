@@ -19,6 +19,7 @@ import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
+from ._report_utils import render_export_buttons, style_utilisation_col, style_op_status_col
 
 
 # ── Page CSS ──────────────────────────────────────────────────────────────────
@@ -666,7 +667,7 @@ def render() -> None:
         fleet_util   = round(total_rental / total_days * 100, 1) if total_days else 0.0
         period_label = f"{det_start.strftime('%d %b %Y')} – {det_end.strftime('%d %b %Y')}"
 
-        sm1, sm2, sm3, sm4, exp_col = st.columns([2, 2, 2, 2, 1])
+        sm1, sm2, sm3, sm4 = st.columns([2, 2, 2, 2])
         with sm1:
             st.metric("Machines", len(rows))
         with sm2:
@@ -676,19 +677,18 @@ def render() -> None:
         with sm4:
             st.metric("Period", period_label)
 
-        # Export button
+        # Export
         display_rows = [{k: v for k, v in r.items() if k != "_id"} for r in rows]
         export_df = pd.DataFrame(display_rows)
-        with exp_col:
-            st.markdown("<div style='padding-top:28px'></div>", unsafe_allow_html=True)
-            st.download_button(
-                "↓ Export",
-                data=export_df.to_csv(index=False).encode("utf-8"),
-                file_name=f"fleet_util_{det_start}_{det_end}.csv",
-                mime="text/csv",
-                key="fu_export_csv",
-                use_container_width=True,
-            )
+        render_export_buttons(
+            export_df,
+            base_name=f"fleet_util_{det_start}_{det_end}",
+            excel_key="fu_xlsx",
+            pdf_key="fu_pdf",
+            title="Fleet Utilization Report",
+            subtitle=f"{det_start} to {det_end}",
+            sheet_name="Fleet Utilization",
+        )
 
         st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 

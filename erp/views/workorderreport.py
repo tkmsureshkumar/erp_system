@@ -1,4 +1,4 @@
-﻿"""
+"""
 erp/views/workorderreport.py
 Work Order Reports â€” Active Work Orders and Expiring Work Orders.
 """
@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
+from ._report_utils import render_export_buttons, render_drilldown_table
 
 
 # â”€â”€ CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -183,6 +184,7 @@ def _build_wo_row(wo: dict, cust_map: dict, site_map: dict, today: date) -> dict
         # raw values for filtering / sorting
         "_start": sd or date.min,
         "_end":   ed,
+        "_id":    wo.get("id", ""),
     }
 
 
@@ -294,42 +296,58 @@ def render() -> None:
     # SECTION 1 â€” ACTIVE WORK ORDERS
     # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     with st.container(border=True):
-        hdr_l, hdr_r = st.columns([5, 1])
-        with hdr_l:
-            _section_hdr("assignment_turned_in", f"Active Work Orders â€” {len(active_rows)}")
-        with hdr_r:
-            if active_rows:
-                adf_exp = pd.DataFrame(
-                    [{k: r[k] for k in _DISPLAY_COLS} for r in active_rows],
-                    columns=_DISPLAY_COLS,
-                )
-                st.download_button(
-                    "Export CSV",
-                    data=adf_exp.to_csv(index=False).encode("utf-8"),
-                    file_name=f"active_work_orders_{today.isoformat()}.csv",
-                    mime="text/csv",
-                    key="wor_active_csv",
-                )
+        _section_hdr("assignment_turned_in", f"Active Work Orders — {len(active_rows)}")
 
         if active_rows:
             adf = pd.DataFrame(
                 [{k: r[k] for k in _DISPLAY_COLS} for r in active_rows],
                 columns=_DISPLAY_COLS,
             )
-            st.dataframe(
-                adf.style.map(_status_style, subset=["Status"]),
-                use_container_width=True,
-                hide_index=True,
+            sel_wo = render_drilldown_table(
+                adf, "wor_active_tbl",
+                style_fn=lambda s: s.map(_status_style, subset=["Status"]),
             )
+            if sel_wo is not None:
+                wo_id   = active_rows[sel_wo].get("_id", "")
+                wo_data = wo_map.get(wo_id, {})
+                mc_raw  = wo_data.get("machine_config")
+                mc_list = []
+                if mc_raw:
+                    try:
+                        mc_list = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+                    except Exception:
+                        pass
+                st.markdown(
+                    "<div style='background:#EFF6FF;border:1px solid #BFDBFE;"
+                    "border-radius:10px;padding:10px 14px;margin:8px 0;"
+                    "font-size:13px;color:#1E40AF;font-weight:600;'>"
+                    f"Machines in: {active_rows[sel_wo]['Work Order']}</div>",
+                    unsafe_allow_html=True,
+                )
+                if mc_list:
+                    mc_rows = []
+                    for mc in mc_list:
+                        mid  = mc.get("machine_id", "")
+                        mach = mach_map.get(mid, {})
+                        mc_rows.append({
+                            "Asset Code":     mach.get("asset_code") or mc.get("machine_label") or "—",
+                            "Make / Model":   " ".join(p for p in [mach.get("make", ""), mach.get("model", "")] if p) or "—",
+                            "Serial Number":  mach.get("serial_number") or "—",
+                            "Monthly Rental": f"₹ {float(mc.get('rental_per_month') or 0):,.0f}",
+                        })
+                    st.dataframe(pd.DataFrame(mc_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No machine details found for this work order.")
 
             open_ended = sum(1 for r in active_rows if r["_end"] is None)
             st.markdown(
                 f"<div style='margin-top:8px;font-size:11px;color:#9ca3af;'>"
-                f"{len(active_rows)} active WOs Â· "
-                f"{total_machines_active} machines deployed Â· "
+                f"{len(active_rows)} active WOs · "
+                f"{total_machines_active} machines deployed · "
                 f"{open_ended} open-ended (no end date)</div>",
                 unsafe_allow_html=True,
             )
+            render_export_buttons(adf, "active_work_orders", "wor_active_xl", "wor_active_pdf", "Active Work Orders")
         else:
             st.markdown(
                 "<div class='empty-state-v2' style='padding:40px 24px;'>"
@@ -414,20 +432,12 @@ def render() -> None:
                     pass
                 return "color:#16a34a;font-weight:600;"
 
-            st.dataframe(
-                edf.style
-                   .map(_status_style,    subset=["Status"])
-                   .map(_days_left_style, subset=["Days Left"]),
-                use_container_width=True,
-                hide_index=True,
+            render_drilldown_table(
+                edf, "wor_exp_tbl",
+                style_fn=lambda s: s.map(_status_style,    subset=["Status"])
+                                    .map(_days_left_style, subset=["Days Left"]),
             )
-            st.download_button(
-                "Export CSV",
-                data=edf.to_csv(index=False).encode("utf-8"),
-                file_name=f"expiring_wo_{days_window}days_{today.isoformat()}.csv",
-                mime="text/csv",
-                key="wor_exp_csv",
-            )
+            render_export_buttons(edf, "expiring_work_orders", "wor_exp_xl", "wor_exp_pdf", "Expiring Work Orders")
         else:
             st.markdown(
                 "<div class='empty-state-v2' style='padding:40px 24px;'>"

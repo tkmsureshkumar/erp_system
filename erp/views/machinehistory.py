@@ -4,14 +4,14 @@ Machine History Report — deployment timeline with idle-period detection.
 """
 from __future__ import annotations
 
-import csv
-import io
 import json
 from datetime import date, datetime, timedelta
 
+import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
+from ._report_utils import render_export_buttons
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -466,36 +466,34 @@ def render() -> None:
     idle_label   = f", {n_idle} idle period{'s' if n_idle != 1 else ''}" if n_idle else ""
     tl_title     = f"Timeline — {dep_label}{idle_label}"
 
-    hdr_l, hdr_r = st.columns([5, 1])
-    with hdr_l:
-        st.markdown(
-            f"<div class='mh-sec-hdr'>"
-            f"<span class='msr' style='font-size:14px;color:#E87722;'>timeline</span>"
-            f"{tl_title}</div>",
-            unsafe_allow_html=True,
-        )
-    with hdr_r:
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["Type", "Customer", "Site", "Work Order",
-                         "Start Date", "End Date", "Duration", "Monthly Rental"])
-        for e in timeline:
-            writer.writerow([
-                "On Rent" if e["type"] == "deployment" else "Idle",
-                e["customer"], e["site"], e["wo"],
-                _fmt(e["start"]),
-                _fmt(e.get("end")) if e.get("end") else ("Active" if e.get("is_active") else "—"),
-                _duration_label(e["start"], e.get("end"), today),
-                f"₹ {e['rental']:,.0f}" if e.get("rental") is not None else "—",
-            ])
-        st.download_button(
-            "↓ Export",
-            data=buf.getvalue().encode("utf-8"),
-            file_name=f"machine_history_{m.get('asset_code', sel_id)}.csv",
-            mime="text/csv",
-            key="mh_export",
-            use_container_width=True,
-        )
+    st.markdown(
+        f"<div class='mh-sec-hdr'>"
+        f"<span class='msr' style='font-size:14px;color:#E87722;'>timeline</span>"
+        f"{tl_title}</div>",
+        unsafe_allow_html=True,
+    )
+
+    tl_export_rows = [
+        {
+            "Type":           "On Rent" if e["type"] == "deployment" else "Idle",
+            "Customer":       e["customer"],
+            "Site":           e["site"],
+            "Work Order":     e["wo"],
+            "Start Date":     _fmt(e["start"]),
+            "End Date":       (_fmt(e.get("end")) if e.get("end")
+                               else ("Active" if e.get("is_active") else "—")),
+            "Duration":       _duration_label(e["start"], e.get("end"), today),
+            "Monthly Rental": f"₹ {e['rental']:,.0f}" if e.get("rental") is not None else "—",
+        }
+        for e in timeline
+    ]
+    tl_df = pd.DataFrame(tl_export_rows)
+    render_export_buttons(
+        tl_df,
+        f"machine_history_{m.get('asset_code', sel_id)}",
+        "mh_xl", "mh_pdf",
+        "Machine History", make_model,
+    )
 
     # Table header
     st.markdown(

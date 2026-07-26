@@ -1,8 +1,10 @@
 """erp/views/machinecompliance.py — Machine Compliance tracker & CRUD module."""
 from __future__ import annotations
 
+import io
 from datetime import date, timedelta
 
+import pandas as pd
 import streamlit as st
 
 from erp import auth
@@ -79,6 +81,131 @@ def _machine_expiry(machine: dict, latest: dict[str, dict], ctype: str) -> str |
     if legacy_col:
         return machine.get(legacy_col)
     return None
+
+
+# ── Export helpers ────────────────────────────────────────────────────────────
+
+_TYPES_EXPORT = ["TPI", "PUC", "Form 11", "Insurance"]
+_STATUS_COLORS = {
+    "Overdue":       ("#FEE2E2", "#991B1B"),
+    "Expiring Soon": ("#FEF3C7", "#92400E"),
+    "Valid":         ("#DCFCE7", "#166534"),
+    "Not Set":       ("#F1F5F9", "#9CA3AF"),
+    "Invalid":       ("#F1F5F9", "#9CA3AF"),
+}
+
+
+def _build_export_df(machines: list[dict], records_by_machine: dict) -> pd.DataFrame:
+    rows = []
+    for m in machines:
+        mid    = str(m.get("id", ""))
+        latest = _latest_by_type(records_by_machine.get(mid, []))
+
+        def _exp(ct: str) -> str:
+            v = _machine_expiry(m, latest, ct)
+            return str(v) if v else ""
+
+        def _st(ct: str) -> str:
+            return _status(_machine_expiry(m, latest, ct))[0]
+
+        exps = [_machine_expiry(m, ct) for ct in _TYPES_EXPORT]
+        rows.append({
+            "Asset Code":       m.get("asset_code", ""),
+            "Machine Type":     m.get("machine_type", ""),
+            "Make":             m.get("make", ""),
+            "Model":            m.get("model", ""),
+            "Serial Number":    m.get("serial_number", ""),
+            "TPI Expiry":       _exp("TPI"),
+            "TPI Status":       _st("TPI"),
+            "PUC Expiry":       _exp("PUC"),
+            "PUC Status":       _st("PUC"),
+            "Form 11 Expiry":   _exp("Form 11"),
+            "Form 11 Status":   _st("Form 11"),
+            "Insurance Expiry": _exp("Insurance"),
+            "Insurance Status": _st("Insurance"),
+            "Overall Status":   _worst_status(exps)[0],
+        })
+    return pd.DataFrame(rows)
+
+
+def _build_pdf_html(machines: list[dict], records_by_machine: dict, today: date) -> str:
+    def _get_exp(m: dict, ct: str):
+        mid    = str(m.get("id", ""))
+        latest = _latest_by_type(records_by_machine.get(mid, []))
+        return _machine_expiry(m, latest, ct)
+
+    def _fmt(val) -> str:
+        if not val:
+            return "—"
+        try:
+            return date.fromisoformat(str(val)[:10]).strftime("%d %b %Y")
+        except Exception:
+            return str(val)
+
+    rows_html = ""
+    for m in machines:
+        exps       = [_get_exp(m, ct) for ct in _TYPES_EXPORT]
+        wlbl       = _worst_status(exps)[0]
+        wbg, wfg   = _STATUS_COLORS.get(wlbl, ("#F1F5F9", "#9CA3AF"))
+        serial     = m.get("serial_number") or "—"
+        make_model = f"{m.get('make','') or ''} {m.get('model','') or ''}".strip() or "—"
+
+        cells = ""
+        for ct in _TYPES_EXPORT:
+            v          = _get_exp(m, ct)
+            lbl        = _status(v)[0]
+            sbg, sfg   = _STATUS_COLORS.get(lbl, ("#F1F5F9", "#9CA3AF"))
+            cells += (
+                f"<td style='background:{sbg};color:{sfg};text-align:center;"
+                f"font-size:11px;font-weight:600;'>{_fmt(v)}</td>"
+            )
+
+        rows_html += (
+            f"<tr>"
+            f"<td><strong>{m.get('asset_code','—')}</strong>"
+            f"<br><span style='color:#666;font-size:11px;'>{m.get('machine_type','')}</span></td>"
+            f"<td>{make_model}"
+            f"<br><span style='color:#666;font-size:11px;'>S/N: {serial}</span></td>"
+            f"<td style='background:{wbg};color:{wfg};text-align:center;"
+            f"font-size:11px;font-weight:700;'>{wlbl}</td>"
+            f"{cells}</tr>"
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Machine Compliance Report — {today.strftime('%d %b %Y')}</title>
+<style>
+  body {{ font-family: Arial, sans-serif; font-size: 12px; margin: 24px; color: #111; }}
+  h1   {{ font-size: 20px; font-weight: 800; margin: 0 0 4px; color: #1E3A5F; }}
+  .sub {{ font-size: 12px; color: #6B7280; margin-bottom: 24px; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  th {{ background: #1E3A5F; color: #fff; padding: 9px 11px; text-align: left;
+        font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }}
+  td {{ padding: 8px 11px; border-bottom: 1px solid #E2EBF0; vertical-align: middle; }}
+  tr:nth-child(even) td {{ background: #FAFBFC; }}
+  @media print {{
+    body {{ margin: 0; }}
+    h1   {{ color: #000; }}
+  }}
+</style>
+</head>
+<body>
+<h1>Machine Compliance Report</h1>
+<div class="sub">Generated: {today.strftime('%d %b %Y')} &nbsp;&middot;&nbsp; {len(machines)} machines</div>
+<table>
+<thead><tr>
+  <th>Asset / Type</th>
+  <th>Make / Model / S/N</th>
+  <th>Overall</th>
+  {"".join(f"<th>{ct}</th>" for ct in _TYPES_EXPORT)}
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>
+<script>window.onload = function() {{ window.print(); }};</script>
+</body>
+</html>"""
 
 
 # ── Section header ─────────────────────────────────────────────────────────────
@@ -166,8 +293,37 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
     _order = {"Overdue": 0, "Expiring Soon": 1, "Valid": 2, "Not Set": 3}
     filtered.sort(key=lambda m: _order.get(_row_worst(m)[0], 4))
 
+    # ── Export buttons ─────────────────────────────────────────────────────────
+    ex1, ex2, _ = st.columns([1, 1, 6])
+
+    with ex1:
+        export_df = _build_export_df(filtered, records_by_machine)
+        buf = io.BytesIO()
+        export_df.to_excel(buf, index=False, engine="openpyxl")
+        buf.seek(0)
+        st.download_button(
+            label="Export Excel",
+            data=buf,
+            file_name=f"compliance_{today}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="comp_export_xlsx",
+            use_container_width=True,
+        )
+
+    with ex2:
+        pdf_html = _build_pdf_html(filtered, records_by_machine, today)
+        st.download_button(
+            label="Export PDF",
+            data=pdf_html.encode("utf-8"),
+            file_name=f"compliance_{today}.html",
+            mime="text/html",
+            key="comp_export_pdf",
+            use_container_width=True,
+            help="Downloads an HTML file — open it in a browser and Print → Save as PDF",
+        )
+
     st.markdown(
-        f"<div style='font-size:12px;color:#6B7280;margin-bottom:10px;'>"
+        f"<div style='font-size:12px;color:#6B7280;margin:8px 0 10px;'>"
         f"Showing <b>{len(filtered)}</b> of {n_total} machines</div>",
         unsafe_allow_html=True,
     )
@@ -198,13 +354,16 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
     for i, m in enumerate(filtered):
         bg_row  = "#FFFFFF" if i % 2 == 0 else "#FAFBFC"
         wlbl, wbg, wfg = _row_worst(m)
+        serial_no  = m.get("serial_number") or "—"
+        make_model = f"{m.get('make','') or ''} {m.get('model','') or ''}".strip() or "—"
         rows_html += (
             f"<tr style='background:{bg_row};border-bottom:1px solid #F1F5F9;'>"
             f"<td style='padding:8px 12px;'>"
             f"<div style='font-weight:600;color:#111827;font-size:12px;'>{m.get('asset_code','—')}</div>"
             f"<div style='font-size:11px;color:#6B7280;'>{m.get('machine_type','—')}</div></td>"
-            f"<td style='padding:8px 12px;font-size:12px;color:#374151;'>"
-            f"{m.get('make','') or ''} {m.get('model','') or ''}</td>"
+            f"<td style='padding:8px 12px;'>"
+            f"<div style='font-size:12px;color:#374151;'>{make_model}</div>"
+            f"<div style='font-size:11px;color:#9CA3AF;margin-top:1px;'>S/N: {serial_no}</div></td>"
             f"<td style='padding:8px 12px;'>{_status_chip(wlbl,wbg,wfg)}</td>"
             + "".join(_exp_cell(_get_exp(m, ct)) for ct in _TYPES_OVERVIEW)
             + "</tr>"
@@ -216,7 +375,7 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
         "<table style='width:100%;border-collapse:collapse;font-family:inherit;'>"
         "<thead><tr>"
         f"<th style='{hs}border-radius:10px 0 0 0;'>Asset / Type</th>"
-        f"<th style='{hs}'>Make / Model</th>"
+        f"<th style='{hs}'>Make / Model / S/N</th>"
         f"<th style='{hs}'>Overall</th>"
         + "".join(f"<th style='{hs}'>{ct}</th>" for ct in _TYPES_OVERVIEW)
         + "</tr></thead>"

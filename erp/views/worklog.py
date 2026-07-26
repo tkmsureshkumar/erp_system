@@ -1100,8 +1100,14 @@ def render() -> None:
     customer_map   = {c.get("id"): c for c in customers if c.get("id")}
     site_map       = {s.get("id"): s for s in sites     if s.get("id")}
     wo_map         = {w.get("id"): w for w in work_orders if w.get("id")}
+    def _op_label(op: dict) -> str:
+        code = op.get("emp_code") or ""
+        name = op.get("operator_name") or ""
+        return f"{code} — {name}" if code else name
+
     operator_names = [""] + sorted(
-        op.get("operator_name", "") for op in operators if op.get("operator_name")
+        _op_label(op) for op in operators
+        if op.get("operator_name") and op.get("status") == "Active"
     )
 
     # ── Customer selector ──────────────────────────────────────────────────────

@@ -760,7 +760,7 @@ _SIDEBAR_ITEMS = [
     ("woreport",          "receipt_long",            "WO Report",         "REPORTS",      "BILLING"),
     ("custreport",        "person_search",           "Cust Report",       "REPORTS",      "BILLING"),
     ("wlreport",          "description",             "WL Detail",         "REPORTS",      "WORK LOG"),
-    ("wlreports",         "pending_actions",         "WL Status",         "REPORTS",      "WORK LOG"),
+    ("wlreports",         "pending_actions",         "Pending Worklogs",  "REPORTS",      "WORK LOG"),
     ("opreport",          "badge",                   "Op Report",         "REPORTS",      "REVENUE"),
     # ── Config ────────────────────────────────────────────────────────────────
     ("system",            "settings",                "System",            "CONFIG",       None),
