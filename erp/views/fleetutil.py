@@ -1,9 +1,13 @@
 """
 erp/views/fleetutil.py
-Fleet Utilization Report — on-rent vs idle vs breakdown days.
+Fleet Utilization Report — day-level breakdown by operational status.
 
-Utilization (%) = On Rent Days ÷ Total Available Days × 100
-Idle + Breakdown + On Rent = Total Available Days
+Utilization (%) = Rental Days ÷ Total Days × 100
+Total Days      = Rental + Transit + Available (Available absorbs Idle and Reserved
+                  since those cannot be tracked historically without a status-change log)
+
+Breakdowns are NOT part of this report — they are recorded through Worklogs
+and should be analysed in the Worklog / Breakdown report.
 """
 from __future__ import annotations
 
@@ -21,26 +25,19 @@ from ..supabase_client import SupabaseClient
 
 _PAGE_CSS = """
 <style>
-/* ── KPI strip ──────────────────────────────────────────────────────── */
 .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin: 0 0 24px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin: 0 0 22px;
 }
 .kpi-card {
     background: var(--card, #fff);
     border: 1px solid var(--border, #E2EBF0);
     border-radius: 12px;
-    padding: 18px 22px 14px;
+    padding: 16px 18px 12px;
     position: relative;
     overflow: hidden;
-    transition: box-shadow .18s, transform .18s;
-    animation: cs-fadeup .35s ease;
-}
-.kpi-card:hover {
-    box-shadow: 0 6px 20px rgba(0,0,0,.08);
-    transform: translateY(-2px);
 }
 .kpi-accent-bar {
     position: absolute; top: 0; left: 0; right: 0;
@@ -48,48 +45,35 @@ _PAGE_CSS = """
 }
 .kpi-label {
     font-size: 10px; font-weight: 700; letter-spacing: .13em;
-    text-transform: uppercase; color: #9CA3AF;
-    margin-bottom: 10px;
-    display: flex; align-items: center; gap: 6px;
+    text-transform: uppercase; color: #9CA3AF; margin-bottom: 8px;
 }
 .kpi-value {
-    font-size: 34px; font-weight: 800;
-    color: #111827; line-height: 1;
-    margin-bottom: 6px;
+    font-size: 30px; font-weight: 800;
+    color: #111827; line-height: 1; margin-bottom: 4px;
     font-variant-numeric: tabular-nums;
 }
 .kpi-sub { font-size: 11px; color: #6B7280; }
 .kpi-icon {
-    position: absolute; top: 16px; right: 18px;
-    font-size: 22px; opacity: .12;
+    position: absolute; top: 14px; right: 16px;
+    font-size: 22px; opacity: .10;
 }
-
-/* ── Period comparison cards ─────────────────────────────────────────── */
 .period-card {
     background: var(--card, #fff);
     border: 1px solid var(--border, #E2EBF0);
     border-radius: 12px;
-    padding: 20px 22px 16px;
-    position: relative;
-    overflow: hidden;
-    min-height: 110px;
-    transition: box-shadow .18s, transform .18s;
-}
-.period-card:hover {
-    box-shadow: 0 4px 16px rgba(0,0,0,.07);
-    transform: translateY(-2px);
+    padding: 18px 20px 14px;
+    position: relative; overflow: hidden;
+    min-height: 105px;
 }
 .period-card-label {
     font-size: 10px; font-weight: 700; letter-spacing: .13em;
-    text-transform: uppercase; color: #9CA3AF; margin-bottom: 10px;
+    text-transform: uppercase; color: #9CA3AF; margin-bottom: 8px;
 }
 .period-card-value {
-    font-size: 32px; font-weight: 800; line-height: 1;
-    font-variant-numeric: tabular-nums; margin-bottom: 6px;
+    font-size: 30px; font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums; margin-bottom: 5px;
 }
 .period-card-sub { font-size: 11px; color: #6B7280; }
-
-/* ── Section header ──────────────────────────────────────────────────── */
 .form-sec-hdr {
     font-size: 10px; font-weight: 700;
     letter-spacing: .13em; text-transform: uppercase;
@@ -98,8 +82,6 @@ _PAGE_CSS = """
     border-bottom: 1px solid #F1F5F9;
     display: flex; align-items: center; gap: 6px;
 }
-
-/* ── Empty state ─────────────────────────────────────────────────────── */
 .empty-state-v2 {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
@@ -108,26 +90,15 @@ _PAGE_CSS = """
     border: 2px dashed #E2EBF0;
     border-radius: 16px;
     text-align: center;
-    animation: cs-fadeup .35s ease;
-    margin: 8px 0;
 }
 .empty-icon-ring {
     width: 64px; height: 64px; border-radius: 50%;
     background: linear-gradient(145deg, #EFF6FF, #DBEAFE);
     display: flex; align-items: center; justify-content: center;
     font-size: 30px; margin-bottom: 16px;
-    box-shadow: 0 6px 20px rgba(37,99,235,.14);
 }
-.empty-state-v2 h3 {
-    font-size: 15px; font-weight: 700; color: #111827;
-    margin: 0 0 6px;
-}
-.empty-state-v2 p {
-    font-size: 12px; color: #9CA3AF;
-    max-width: 260px; line-height: 1.6; margin: 0;
-}
-
-/* ── Info note ───────────────────────────────────────────────────────── */
+.empty-state-v2 h3 { font-size: 15px; font-weight: 700; color: #111827; margin: 0 0 6px; }
+.empty-state-v2 p  { font-size: 12px; color: #9CA3AF; max-width: 260px; line-height: 1.6; margin: 0; }
 .info-note {
     background: #EFF6FF; border: 1px solid #BFDBFE;
     border-radius: 10px; padding: 14px 18px;
@@ -136,42 +107,29 @@ _PAGE_CSS = """
     margin-top: 20px;
 }
 .info-note-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
-
-/* ── Tab polish ──────────────────────────────────────────────────────── */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0 !important;
-    background: transparent !important;
-    border-bottom: 2px solid #E2EBF0 !important;
-    padding: 0 !important;
-}
-.stTabs [data-baseweb="tab"] {
-    font-size: 12px !important; font-weight: 600 !important;
-    color: #6B7280 !important; padding: 8px 18px !important;
-    border-radius: 0 !important;
-    background: transparent !important; border: none !important;
-    margin: 0 !important;
-    border-bottom: 2px solid transparent !important;
-    transition: color .14s !important;
-}
-.stTabs [data-baseweb="tab"]:hover { color: #374151 !important; }
-.stTabs [data-baseweb="tab"][aria-selected="true"] {
-    color: #2563EB !important;
-    border-bottom: 2px solid #2563EB !important;
-    background: transparent !important;
-}
-.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
-.stTabs [data-baseweb="tab-panel"]     { padding: 18px 0 0 !important; }
-
-/* ── Animations ──────────────────────────────────────────────────────── */
+/* status badges */
+.st-available { background:#DCFCE7; color:#166534; padding:2px 10px; border-radius:99px;
+                font-size:11px; font-weight:600; white-space:nowrap; }
+.st-on-rent   { background:#DBEAFE; color:#1E40AF; padding:2px 10px; border-radius:99px;
+                font-size:11px; font-weight:600; white-space:nowrap; }
+.st-reserved  { background:#FEF3C7; color:#92400E; padding:2px 10px; border-radius:99px;
+                font-size:11px; font-weight:600; white-space:nowrap; }
+.st-transit   { background:#EDE9FE; color:#5B21B6; padding:2px 10px; border-radius:99px;
+                font-size:11px; font-weight:600; white-space:nowrap; }
+.st-sold      { background:#F3F4F6; color:#374151; padding:2px 10px; border-radius:99px;
+                font-size:11px; font-weight:600; white-space:nowrap; }
 @keyframes cs-fadeup {
-    from { opacity: 0; transform: translateY(10px); }
+    from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
 }
 </style>
 """
 
+# ── Operational status options (no Breakdown — that is a condition, not operational status) ──
+_OP_STATUS_OPTIONS = ["Available", "On Rent", "Reserved", "In Transit", "Sold"]
 
-# ── Core calculation helpers ──────────────────────────────────────────────────
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_date(value) -> date | None:
     if value is None:
@@ -189,7 +147,6 @@ def _parse_date(value) -> date | None:
 
 
 def _merge_intervals(intervals: list[tuple[date, date]]) -> list[tuple[date, date]]:
-    """Merge overlapping date intervals so days are never double-counted."""
     if not intervals:
         return []
     sorted_iv = sorted(intervals, key=lambda x: x[0])
@@ -202,76 +159,102 @@ def _merge_intervals(intervals: list[tuple[date, date]]) -> list[tuple[date, dat
     return merged
 
 
-def _on_rent_days_in_period(
+def _rental_days_in_period(
     wo_list: list[dict],
     period_start: date,
     period_end: date,
 ) -> int:
-    """Count distinct on-rent days within [period_start, period_end] across all WOs."""
     intervals: list[tuple[date, date]] = []
     for wo in wo_list:
         sd = _parse_date(wo.get("start_date"))
         ed = _parse_date(wo.get("end_date")) or period_end
         if sd is None:
             continue
-        ov_start = max(sd, period_start)
-        ov_end   = min(ed, period_end)
-        if ov_start <= ov_end:
-            intervals.append((ov_start, ov_end))
+        ov_s = max(sd, period_start)
+        ov_e = min(ed, period_end)
+        if ov_s <= ov_e:
+            intervals.append((ov_s, ov_e))
     total = 0
     for s, e in _merge_intervals(intervals):
         total += (e - s).days + 1
     return total
 
 
+def _transit_days_in_period(
+    movement_dates: list[date],
+    period_start: date,
+    period_end: date,
+) -> int:
+    return sum(
+        1 for d in set(movement_dates)
+        if period_start <= d <= period_end
+    )
+
+
 def _machine_stats(
     machine_id: str,
     wo_by_machine: dict[str, list[dict]],
+    moves_by_machine: dict[str, list[date]],
     period_start: date,
     period_end: date,
 ) -> dict:
-    """Per-machine utilization stats for a period."""
-    total_days = (period_end - period_start).days + 1
-    on_rent    = _on_rent_days_in_period(
-        wo_by_machine.get(machine_id, []), period_start, period_end
+    total_days   = (period_end - period_start).days + 1
+    rental_days  = min(
+        _rental_days_in_period(wo_by_machine.get(machine_id, []), period_start, period_end),
+        total_days,
     )
-    on_rent    = min(on_rent, total_days)
-    idle       = total_days - on_rent
-    util_pct   = round(on_rent / total_days * 100, 1) if total_days else 0.0
+    transit_days = min(
+        _transit_days_in_period(moves_by_machine.get(machine_id, []), period_start, period_end),
+        total_days - rental_days,
+    )
+    avail_days   = max(0, total_days - rental_days - transit_days)
+    util_pct     = round(rental_days / total_days * 100, 1) if total_days else 0.0
     return {
-        "on_rent_days":   on_rent,
-        "idle_days":      idle,
-        "breakdown_days": 0,    # not tracked historically
-        "total_days":     total_days,
-        "util_pct":       util_pct,
+        "total_days":   total_days,
+        "rental_days":  rental_days,
+        "transit_days": transit_days,
+        "avail_days":   avail_days,
+        "util_pct":     util_pct,
     }
 
 
-def _fleet_stats(
+def _fleet_rental_util(
     machines: list[dict],
     wo_by_machine: dict[str, list[dict]],
+    moves_by_machine: dict[str, list[date]],
     period_start: date,
     period_end: date,
 ) -> dict:
-    """Aggregate fleet-level utilization stats for a period."""
-    fleet_on_rent = 0
-    fleet_total   = 0
+    fleet_rental = 0
+    fleet_total  = 0
     for m in machines:
-        s = _machine_stats(m.get("id", ""), wo_by_machine, period_start, period_end)
-        fleet_on_rent += s["on_rent_days"]
-        fleet_total   += s["total_days"]
-    idle_days = fleet_total - fleet_on_rent
-    util_pct  = round(fleet_on_rent / fleet_total * 100, 1) if fleet_total else 0.0
+        s = _machine_stats(m.get("id", ""), wo_by_machine, moves_by_machine, period_start, period_end)
+        fleet_rental += s["rental_days"]
+        fleet_total  += s["total_days"]
+    util_pct = round(fleet_rental / fleet_total * 100, 1) if fleet_total else 0.0
     return {
         "num_machines": len(machines),
-        "on_rent_days": fleet_on_rent,
-        "idle_days":    idle_days,
+        "rental_days":  fleet_rental,
+        "avail_days":   fleet_total - fleet_rental,
         "total_days":   fleet_total,
         "util_pct":     util_pct,
     }
 
 
-# ── UI helpers ────────────────────────────────────────────────────────────────
+def _status_badge(status: str) -> str:
+    cls_map = {
+        "Available": "st-available",
+        "On Rent":   "st-on-rent",
+        "Reserved":  "st-reserved",
+        "In Transit":     "st-transit",
+        "Mobilizing":     "st-transit",
+        "Demobilizing":   "st-transit",
+        "Sold":      "st-sold",
+    }
+    cls = cls_map.get(status, "st-available")
+    label = "In Transit" if status in ("Mobilizing", "Demobilizing") else status
+    return f"<span class='{cls}'>{label}</span>"
+
 
 def _section_hdr(icon: str, label: str) -> None:
     st.markdown(
@@ -298,18 +281,13 @@ def _kpi_card(icon: str, label: str, value: int | str,
 def _period_card(
     label: str,
     util_pct: float,
-    on_rent: int,
+    rental: int,
     total: int,
     accent: str = "#6B7280",
     featured: bool = False,
 ) -> str:
-    if util_pct >= 75:
-        clr = "#2563EB"
-    elif util_pct >= 50:
-        clr = "#E87722"
-    else:
-        clr = "#EF4444"
-    val_size = "38px" if featured else "30px"
+    clr = "#2563EB" if util_pct >= 75 else "#E87722" if util_pct >= 50 else "#EF4444"
+    val_size = "36px" if featured else "28px"
     return (
         f"<div class='period-card'>"
         f"<div style='position:absolute;top:0;left:0;right:0;height:3px;"
@@ -318,16 +296,9 @@ def _period_card(
         f"<div class='period-card-value' style='color:{clr};font-size:{val_size};'>"
         f"{util_pct:.1f}%</div>"
         f"<div class='period-card-sub'>"
-        f"{on_rent:,} on-rent days &nbsp;/&nbsp; {total:,} available days</div>"
+        f"{rental:,} rental days &nbsp;/&nbsp; {total:,} fleet-days</div>"
         f"</div>"
     )
-
-
-def _fmt_pct(v) -> str:
-    try:
-        return f"{float(v):.1f}%"
-    except (TypeError, ValueError):
-        return "—"
 
 
 # ── Main render ───────────────────────────────────────────────────────────────
@@ -335,12 +306,12 @@ def _fmt_pct(v) -> str:
 def render() -> None:
     st.markdown(_PAGE_CSS, unsafe_allow_html=True)
 
-    # ── Page header ───────────────────────────────────────────────────────────
     st.markdown(
         "<div class='page-eyebrow'>// Reports</div>"
         "<div class='page-title'>Fleet Utilization</div>"
         "<div style='font-size:13px;color:#6B7280;margin-top:4px;margin-bottom:28px;'>"
-        "On-rent vs idle day analysis across your entire fleet.</div>",
+        "Rental, transit and availability days per machine. "
+        "Breakdowns are excluded — see Worklog Report for breakdown analysis.</div>",
         unsafe_allow_html=True,
     )
 
@@ -355,11 +326,15 @@ def render() -> None:
         st.error(f"Could not load data: {exc}")
         return
 
-    # ── Lookup maps ───────────────────────────────────────────────────────────
+    try:
+        all_movements = sb.list_machine_movements()
+    except Exception:
+        all_movements = []
+
     cust_map = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
     site_map = {s["id"]: s.get("site_name",     "—") for s in sites_list     if s.get("id")}
 
-    # machine_id → ALL work orders (historical + current) for on-rent day calculation
+    # ── Build machine → WOs map ───────────────────────────────────────────────
     wo_by_machine: dict[str, list[dict]] = {}
     for wo in work_orders:
         mc_raw = wo.get("machine_config")
@@ -376,6 +351,14 @@ def render() -> None:
             if mid:
                 wo_by_machine.setdefault(mid, []).append(wo)
 
+    # ── Build machine → movement dates map ───────────────────────────────────
+    moves_by_machine: dict[str, list[date]] = {}
+    for mv in all_movements:
+        mid = mv.get("machine_id")
+        md  = _parse_date(mv.get("movement_date"))
+        if mid and md:
+            moves_by_machine.setdefault(mid, []).append(md)
+
     # ── Period constants ──────────────────────────────────────────────────────
     today      = date.today()
     cur_first  = today.replace(day=1)
@@ -384,68 +367,42 @@ def render() -> None:
     prev_first = prev_last.replace(day=1)
     ytd_first  = today.replace(month=1, day=1)
 
-    # ── Live fleet status (as of today) ──────────────────────────────────────
-    machines_on_rent_today: set[str] = set()
-    active_wo_count = 0
-    for wo in work_orders:
-        sd = _parse_date(wo.get("start_date"))
-        ed = _parse_date(wo.get("end_date"))
-        if sd is None:
-            continue
-        if sd <= today and (ed is None or ed >= today):
-            active_wo_count += 1
-            mc_raw = wo.get("machine_config")
-            if not mc_raw:
-                continue
-            try:
-                mc_list = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
-            except Exception:
-                continue
-            for mc_row in (mc_list if isinstance(mc_list, list) else []):
-                mid = mc_row.get("machine_id")
-                if mid:
-                    machines_on_rent_today.add(mid)
-
-    fleet_size    = len(machines)
-    on_rent_now   = len(machines_on_rent_today)
-    available_now = max(0, fleet_size - on_rent_now)
+    # ── Live fleet status counts ──────────────────────────────────────────────
+    n_total     = len(machines)
+    n_on_rent   = sum(1 for m in machines if m.get("operational_status") == "On Rent")
+    n_available = sum(1 for m in machines if m.get("operational_status") == "Available")
+    n_reserved  = sum(1 for m in machines if m.get("operational_status") == "Reserved")
+    n_transit   = sum(1 for m in machines
+                      if m.get("operational_status") in ("In Transit", "Mobilizing", "Demobilizing"))
+    n_sold      = sum(1 for m in machines if m.get("operational_status") == "Sold")
 
     # ── Period stats ──────────────────────────────────────────────────────────
-    s_cur  = _fleet_stats(machines, wo_by_machine, cur_first,  cur_last)
-    s_prev = _fleet_stats(machines, wo_by_machine, prev_first, prev_last)
-    s_ytd  = _fleet_stats(machines, wo_by_machine, ytd_first,  today)
+    s_cur  = _fleet_rental_util(machines, wo_by_machine, moves_by_machine, cur_first,  cur_last)
+    s_prev = _fleet_rental_util(machines, wo_by_machine, moves_by_machine, prev_first, prev_last)
+    s_ytd  = _fleet_rental_util(machines, wo_by_machine, moves_by_machine, ytd_first,  today)
 
     # ════════════════════════════════════════════════════════════════════
-    # KPI STRIP
+    # KPI STRIP  — current fleet snapshot
     # ════════════════════════════════════════════════════════════════════
     st.markdown(
         "<div class='kpi-grid'>"
-        + _kpi_card(
-            "donut_large", "Fleet Utilization",
-            f"{s_cur['util_pct']:.1f}%",
-            f"current month — {today.strftime('%b %Y')}", "#2563EB",
-        )
-        + _kpi_card(
-            "construction", "Machines On Rent",
-            on_rent_now,
-            "deployed as of today", "#10B981",
-        )
-        + _kpi_card(
-            "garage_home", "Available Now",
-            available_now,
-            f"of {fleet_size} total machines", "#F59E0B",
-        )
-        + _kpi_card(
-            "assignment_turned_in", "Active Work Orders",
-            active_wo_count,
-            "in-progress deployments", "#8B5CF6",
-        )
+        + _kpi_card("speed", "Fleet Utilization",
+                    f"{s_cur['util_pct']:.1f}%",
+                    f"current month · {today.strftime('%b %Y')}", "#2563EB")
+        + _kpi_card("handshake", "On Rent",
+                    n_on_rent, f"of {n_total} machines", "#10B981")
+        + _kpi_card("inventory_2", "Available",
+                    n_available, "ready to deploy", "#6B7280")
+        + _kpi_card("local_shipping", "In Transit",
+                    n_transit, "mobilizing / demobilizing", "#8B5CF6")
+        + _kpi_card("bookmark", "Reserved",
+                    n_reserved, "confirmed bookings", "#F59E0B")
         + "</div>",
         unsafe_allow_html=True,
     )
 
     # ════════════════════════════════════════════════════════════════════
-    # A. PERIOD COMPARISON
+    # PERIOD COMPARISON
     # ════════════════════════════════════════════════════════════════════
     with st.container(border=True):
         _section_hdr("date_range", "Period Comparison")
@@ -454,7 +411,7 @@ def render() -> None:
             st.markdown(
                 _period_card(
                     f"Current Month — {today.strftime('%b %Y')}",
-                    s_cur["util_pct"], s_cur["on_rent_days"], s_cur["total_days"],
+                    s_cur["util_pct"], s_cur["rental_days"], s_cur["total_days"],
                     accent="#2563EB", featured=True,
                 ),
                 unsafe_allow_html=True,
@@ -463,7 +420,7 @@ def render() -> None:
             st.markdown(
                 _period_card(
                     f"Previous Month — {prev_last.strftime('%b %Y')}",
-                    s_prev["util_pct"], s_prev["on_rent_days"], s_prev["total_days"],
+                    s_prev["util_pct"], s_prev["rental_days"], s_prev["total_days"],
                     accent="#6B7280",
                 ),
                 unsafe_allow_html=True,
@@ -472,23 +429,22 @@ def render() -> None:
             st.markdown(
                 _period_card(
                     f"Year-to-Date — {today.strftime('%Y')}",
-                    s_ytd["util_pct"], s_ytd["on_rent_days"], s_ytd["total_days"],
+                    s_ytd["util_pct"], s_ytd["rental_days"], s_ytd["total_days"],
                     accent="#E87722",
                 ),
                 unsafe_allow_html=True,
             )
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
     # ════════════════════════════════════════════════════════════════════
-    # B. MONTHLY UTILIZATION TREND
+    # MONTHLY TREND CHART
     # ════════════════════════════════════════════════════════════════════
     with st.container(border=True):
         tr_l, tr_r = st.columns([6, 1])
         with tr_l:
             _section_hdr("show_chart", "Monthly Utilization Trend")
         with tr_r:
-            st.markdown('<p class="filter-label">Year</p>', unsafe_allow_html=True)
             year_opts = list(range(today.year, today.year - 5, -1))
             sel_year  = st.selectbox(
                 "Year", year_opts, label_visibility="collapsed", key="fu_year"
@@ -500,11 +456,11 @@ def render() -> None:
             m_end   = date(sel_year, mo, _cal.monthrange(sel_year, mo)[1])
             if m_start > today:
                 break
-            s = _fleet_stats(machines, wo_by_machine, m_start, m_end)
+            s = _fleet_rental_util(machines, wo_by_machine, moves_by_machine, m_start, m_end)
             trend_rows.append({
                 "Month":         m_start.strftime("%b"),
-                "On Rent":       s["on_rent_days"],
-                "Idle":          s["idle_days"],
+                "Rental":        s["rental_days"],
+                "Available":     s["avail_days"],
                 "Utilization %": s["util_pct"],
             })
 
@@ -513,16 +469,16 @@ def render() -> None:
             tab_bar, tab_pct = st.tabs(["Days Breakdown", "Utilization %"])
             with tab_bar:
                 st.bar_chart(
-                    trend_df[["On Rent", "Idle"]],
+                    trend_df[["Rental", "Available"]],
                     use_container_width=True,
-                    height=260,
+                    height=240,
                     color=["#2563eb", "#e5e7eb"],
                 )
             with tab_pct:
                 st.line_chart(
                     trend_df[["Utilization %"]],
                     use_container_width=True,
-                    height=260,
+                    height=240,
                     color=["#E87722"],
                 )
         else:
@@ -530,346 +486,276 @@ def render() -> None:
                 "<div class='empty-state-v2'>"
                 "<div class='empty-icon-ring'>"
                 "<span class='msr' style='color:#2563EB;'>bar_chart</span>"
-                "</div>"
-                "<h3>No trend data</h3>"
-                "<p>No work order data found for the selected year.</p>"
-                "</div>",
+                "</div><h3>No trend data</h3>"
+                "<p>No work order data for the selected year.</p></div>",
                 unsafe_allow_html=True,
             )
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
     # ════════════════════════════════════════════════════════════════════
-    # C. UTILIZATION DETAILS
+    # MACHINE-WISE DETAIL TABLE
     # ════════════════════════════════════════════════════════════════════
     with st.container(border=True):
-        _section_hdr("table_chart", "Utilization Details")
+        _section_hdr("table_chart", "Machine-wise Utilization Details")
 
-        dp1, dp2, _ = st.columns([2, 2, 4])
-        with dp1:
-            st.markdown('<p class="filter-label">From</p>', unsafe_allow_html=True)
-            det_start = st.date_input(
-                "From", value=cur_first, key="fu_det_start", label_visibility="collapsed"
-            )
-        with dp2:
-            st.markdown('<p class="filter-label">To</p>', unsafe_allow_html=True)
-            det_end = st.date_input(
-                "To", value=cur_last, key="fu_det_end", label_visibility="collapsed"
+        # ── Filters ──────────────────────────────────────────────────────────
+        f1, f2, f3, f4, f5, f6, f7 = st.columns([2, 2, 2, 2, 2, 2, 2])
+
+        with f1:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">From</p>', unsafe_allow_html=True)
+            det_start = st.date_input("From", value=cur_first, key="fu_det_start", label_visibility="collapsed")
+
+        with f2:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">To</p>', unsafe_allow_html=True)
+            det_end = st.date_input("To", value=cur_last, key="fu_det_end", label_visibility="collapsed")
+
+        # Category options
+        all_categories = sorted({m.get("machine_type") or "" for m in machines if m.get("machine_type")})
+        with f3:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Category</p>', unsafe_allow_html=True)
+            sel_category = st.selectbox(
+                "Category", ["— All —"] + all_categories,
+                label_visibility="collapsed", key="fu_category",
             )
 
+        # Machine options (filtered by category if set)
+        _mach_pool = machines if sel_category == "— All —" else [
+            m for m in machines if m.get("machine_type") == sel_category
+        ]
+        mach_opts = sorted(
+            {m.get("asset_code") or m.get("id", "") for m in _mach_pool if m.get("asset_code") or m.get("id")}
+        )
+        with f4:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Machine</p>', unsafe_allow_html=True)
+            sel_machine = st.selectbox(
+                "Machine", ["— All —"] + mach_opts,
+                label_visibility="collapsed", key="fu_machine",
+            )
+
+        # Customer options
+        cust_opts = [("— All —", "")] + sorted(
+            [(c.get("customer_name", "—"), c["id"]) for c in customers_list if c.get("id")],
+            key=lambda x: x[0],
+        )
+        with f5:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Customer</p>', unsafe_allow_html=True)
+            sel_cust_label = st.selectbox(
+                "Customer",
+                [x[0] for x in cust_opts],
+                label_visibility="collapsed", key="fu_customer",
+            )
+        sel_cust_id = next((x[1] for x in cust_opts if x[0] == sel_cust_label), "")
+
+        # Site options
+        site_opts = [("— All —", "")] + sorted(
+            [(s.get("site_name", "—"), s["id"]) for s in sites_list if s.get("id")],
+            key=lambda x: x[0],
+        )
+        with f6:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Site</p>', unsafe_allow_html=True)
+            sel_site_label = st.selectbox(
+                "Site",
+                [x[0] for x in site_opts],
+                label_visibility="collapsed", key="fu_site",
+            )
+        sel_site_id = next((x[1] for x in site_opts if x[0] == sel_site_label), "")
+
+        # Operational Status filter
+        with f7:
+            st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Op. Status</p>', unsafe_allow_html=True)
+            sel_op_status = st.selectbox(
+                "Op. Status", ["— All —"] + _OP_STATUS_OPTIONS,
+                label_visibility="collapsed", key="fu_op_status",
+            )
+
+        st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+
+        # ── Validate date range ───────────────────────────────────────────────
         if not (isinstance(det_start, date) and isinstance(det_end, date)):
-            st.markdown(
-                "<div class='empty-state-v2'>"
-                "<div class='empty-icon-ring'>"
-                "<span class='msr' style='color:#2563EB;'>date_range</span>"
-                "</div>"
-                "<h3>Select a date range</h3>"
-                "<p>Choose From and To dates above to view utilization details.</p>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
+            st.info("Select a date range above to view details.")
             return
-
         if det_start > det_end:
             st.warning("'From' date must be on or before 'To' date.")
             return
 
-        period_days = (det_end - det_start).days + 1
+        # ── Build customer/site → machines map for period ─────────────────────
+        machine_customers: dict[str, set[str]] = {}
+        machine_sites:     dict[str, set[str]] = {}
+        for wo in work_orders:
+            sd = _parse_date(wo.get("start_date"))
+            ed = _parse_date(wo.get("end_date")) or det_end
+            if sd is None or not (sd <= det_end and ed >= det_start):
+                continue
+            mc_raw = wo.get("machine_config")
+            if not mc_raw:
+                continue
+            try:
+                mc_list = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+            except Exception:
+                continue
+            for mc_row in (mc_list if isinstance(mc_list, list) else []):
+                mid = mc_row.get("machine_id")
+                if not mid:
+                    continue
+                if wo.get("customer_id"):
+                    machine_customers.setdefault(mid, set()).add(wo["customer_id"])
+                if wo.get("site_id"):
+                    machine_sites.setdefault(mid, set()).add(wo["site_id"])
 
-        tab_mach, tab_cust, tab_site, tab_cat = st.tabs(
-            ["Machine-wise", "Customer-wise", "Site-wise", "Category-wise"]
+        # ── Filter machines ───────────────────────────────────────────────────
+        filtered = list(machines)
+        if sel_category != "— All —":
+            filtered = [m for m in filtered if m.get("machine_type") == sel_category]
+        if sel_machine != "— All —":
+            filtered = [m for m in filtered
+                        if m.get("asset_code") == sel_machine or m.get("id") == sel_machine]
+        if sel_cust_id:
+            filtered = [m for m in filtered
+                        if sel_cust_id in machine_customers.get(m.get("id", ""), set())]
+        if sel_site_id:
+            filtered = [m for m in filtered
+                        if sel_site_id in machine_sites.get(m.get("id", ""), set())]
+        if sel_op_status != "— All —":
+            if sel_op_status == "In Transit":
+                filtered = [m for m in filtered
+                            if m.get("operational_status") in ("In Transit", "Mobilizing", "Demobilizing")]
+            else:
+                filtered = [m for m in filtered
+                            if m.get("operational_status") == sel_op_status]
+
+        # ── Build report rows ─────────────────────────────────────────────────
+        rows: list[dict] = []
+        for m in filtered:
+            mid   = m.get("id", "")
+            stats = _machine_stats(mid, wo_by_machine, moves_by_machine, det_start, det_end)
+            op_st = m.get("operational_status") or "Available"
+            if op_st in ("Mobilizing", "Demobilizing"):
+                op_st = "In Transit"
+            rows.append({
+                "Machine":             m.get("asset_code") or "—",
+                "Serial Number":       m.get("serial_number") or "—",
+                "Category":            m.get("machine_type") or "—",
+                "Op. Status":          op_st,
+                "Rental Days":         stats["rental_days"],
+                "Transit Days":        stats["transit_days"],
+                "Available Days":      stats["avail_days"],
+                "Idle Days":           stats["avail_days"],   # same source, no separate log
+                "Reserved Days":       0,
+                "Total Days":          stats["total_days"],
+                "Utilization %":       stats["util_pct"],
+                "_id":                 mid,
+            })
+
+        rows.sort(key=lambda r: r["Utilization %"], reverse=True)
+
+        if not rows:
+            st.markdown(
+                "<div class='empty-state-v2'>"
+                "<div class='empty-icon-ring'>"
+                "<span class='msr' style='color:#2563EB;'>precision_manufacturing</span>"
+                "</div><h3>No machines match the filters</h3>"
+                "<p>Adjust the filters above or widen the date range.</p></div>",
+                unsafe_allow_html=True,
+            )
+            return
+
+        # ── Summary row above table ───────────────────────────────────────────
+        total_rental = sum(r["Rental Days"] for r in rows)
+        total_days   = sum(r["Total Days"]  for r in rows)
+        fleet_util   = round(total_rental / total_days * 100, 1) if total_days else 0.0
+        period_label = f"{det_start.strftime('%d %b %Y')} – {det_end.strftime('%d %b %Y')}"
+
+        sm1, sm2, sm3, sm4, exp_col = st.columns([2, 2, 2, 2, 1])
+        with sm1:
+            st.metric("Machines", len(rows))
+        with sm2:
+            st.metric("Rental Days", f"{total_rental:,}")
+        with sm3:
+            st.metric("Fleet Utilization", f"{fleet_util:.1f}%")
+        with sm4:
+            st.metric("Period", period_label)
+
+        # Export button
+        display_rows = [{k: v for k, v in r.items() if k != "_id"} for r in rows]
+        export_df = pd.DataFrame(display_rows)
+        with exp_col:
+            st.markdown("<div style='padding-top:28px'></div>", unsafe_allow_html=True)
+            st.download_button(
+                "↓ Export",
+                data=export_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"fleet_util_{det_start}_{det_end}.csv",
+                mime="text/csv",
+                key="fu_export_csv",
+                use_container_width=True,
+            )
+
+        st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+
+        # ── Main table using HTML for status badge ────────────────────────────
+        hdr = (
+            "<div style='display:grid;"
+            "grid-template-columns:1.2fr 1.2fr 1.2fr 1fr 80px 80px 80px 80px 80px 70px;"
+            "gap:6px;padding:6px 8px 8px;border-bottom:2px solid #E2EBF0;"
+            "font-size:9px;font-weight:700;letter-spacing:.10em;"
+            "text-transform:uppercase;color:#9CA3AF;'>"
+            "<div>Machine</div>"
+            "<div>Serial No.</div>"
+            "<div>Category</div>"
+            "<div>Op. Status</div>"
+            "<div style='text-align:right;'>Rental</div>"
+            "<div style='text-align:right;'>Transit</div>"
+            "<div style='text-align:right;'>Available</div>"
+            "<div style='text-align:right;'>Idle</div>"
+            "<div style='text-align:right;'>Reserved</div>"
+            "<div style='text-align:right;'>Util %</div>"
+            "</div>"
         )
 
-        # ── Machine-wise ──────────────────────────────────────────────────────
-        with tab_mach:
-            mach_rows: list[dict] = []
-            for m in machines:
-                mid   = m.get("id", "")
-                stats = _machine_stats(mid, wo_by_machine, det_start, det_end)
-                mach_rows.append({
-                    "Serial Number":  m.get("serial_number") or "—",
-                    "Machine":        m.get("asset_code")    or m.get("machine_type", "—"),
-                    "Make":           m.get("make", "—")     or "—",
-                    "Model":          m.get("model", "—")    or "—",
-                    "On Rent Days":   stats["on_rent_days"],
-                    "Idle Days":      stats["idle_days"],
-                    "Breakdown Days": stats["breakdown_days"],
-                    "Utilization %":  stats["util_pct"],
-                })
-            mach_rows.sort(key=lambda r: r["Utilization %"], reverse=True)
-            if mach_rows:
-                mdf = pd.DataFrame(mach_rows)
-                st.dataframe(
-                    mdf,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Serial Number":  st.column_config.TextColumn("Serial No."),
-                        "Machine":        st.column_config.TextColumn("Machine"),
-                        "Make":           st.column_config.TextColumn("Make"),
-                        "Model":          st.column_config.TextColumn("Model"),
-                        "On Rent Days":   st.column_config.NumberColumn("On Rent (d)"),
-                        "Idle Days":      st.column_config.NumberColumn("Idle (d)"),
-                        "Breakdown Days": st.column_config.NumberColumn("Breakdown (d)"),
-                        "Utilization %":  st.column_config.NumberColumn(
-                            "Util %", format="%.1f%%"
-                        ),
-                    },
-                )
-                st.download_button(
-                    "↓ Export CSV",
-                    data=mdf.to_csv(index=False).encode("utf-8"),
-                    file_name=f"util_machine_{det_start}_{det_end}.csv",
-                    mime="text/csv",
-                    key="fu_mach_csv",
-                )
-            else:
-                st.markdown(
-                    "<div class='empty-state-v2'>"
-                    "<div class='empty-icon-ring'>"
-                    "<span class='msr' style='color:#2563EB;'>precision_manufacturing</span>"
-                    "</div>"
-                    "<h3>No machine data</h3>"
-                    "<p>No machines found in the fleet.</p>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
+        table_rows = ""
+        for r in rows:
+            util = r["Utilization %"]
+            util_clr = "#2563EB" if util >= 75 else "#E87722" if util >= 50 else "#DC2626"
+            table_rows += (
+                f"<div style='display:grid;"
+                f"grid-template-columns:1.2fr 1.2fr 1.2fr 1fr 80px 80px 80px 80px 80px 70px;"
+                f"gap:6px;padding:8px 8px;border-bottom:1px solid #F8FAFC;"
+                f"align-items:center;font-size:12px;'>"
+                f"<div style='font-weight:700;color:#1E40AF;font-family:monospace;"
+                f"font-size:12px;'>{r['Machine']}</div>"
+                f"<div style='color:#374151;'>{r['Serial Number']}</div>"
+                f"<div style='color:#374151;'>{r['Category']}</div>"
+                f"<div>{_status_badge(r['Op. Status'])}</div>"
+                f"<div style='text-align:right;font-variant-numeric:tabular-nums;"
+                f"font-weight:600;color:#374151;'>{r['Rental Days']}</div>"
+                f"<div style='text-align:right;font-variant-numeric:tabular-nums;"
+                f"color:#8B5CF6;'>{r['Transit Days']}</div>"
+                f"<div style='text-align:right;font-variant-numeric:tabular-nums;"
+                f"color:#374151;'>{r['Available Days']}</div>"
+                f"<div style='text-align:right;font-variant-numeric:tabular-nums;"
+                f"color:#374151;'>{r['Idle Days']}</div>"
+                f"<div style='text-align:right;font-variant-numeric:tabular-nums;"
+                f"color:#F59E0B;'>{r['Reserved Days']}</div>"
+                f"<div style='text-align:right;font-weight:800;color:{util_clr};"
+                f"font-variant-numeric:tabular-nums;'>{util:.1f}%</div>"
+                f"</div>"
+            )
 
-        # ── Customer-wise ─────────────────────────────────────────────────────
-        with tab_cust:
-            cust_agg: dict[str, dict] = {}
-            for wo in work_orders:
-                cid = wo.get("customer_id", "")
-                if not cid:
-                    continue
-                sd = _parse_date(wo.get("start_date"))
-                ed = _parse_date(wo.get("end_date")) or det_end
-                if sd is None or not (sd <= det_end and ed >= det_start):
-                    continue
-                mc_raw = wo.get("machine_config")
-                if not mc_raw:
-                    continue
-                try:
-                    mc_list = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
-                except Exception:
-                    continue
-                for mc_row in (mc_list if isinstance(mc_list, list) else []):
-                    mid = mc_row.get("machine_id")
-                    if not mid:
-                        continue
-                    ov_start = max(sd, det_start)
-                    ov_end   = min(ed, det_end)
-                    if ov_start > ov_end:
-                        continue
-                    days = (ov_end - ov_start).days + 1
-                    agg  = cust_agg.setdefault(cid, {"machines": set(), "on_rent_days": 0})
-                    agg["machines"].add(mid)
-                    agg["on_rent_days"] += days
+        st.markdown(hdr + table_rows, unsafe_allow_html=True)
 
-            cust_rows: list[dict] = []
-            for cid, agg in cust_agg.items():
-                num_m    = len(agg["machines"])
-                on_rent  = agg["on_rent_days"]
-                total    = period_days * num_m
-                idle     = max(0, total - on_rent)
-                util_pct = round(on_rent / total * 100, 1) if total else 0.0
-                cust_rows.append({
-                    "Customer":        cust_map.get(cid, "—"),
-                    "No. of Machines": num_m,
-                    "On Rent Days":    on_rent,
-                    "Idle Days":       idle,
-                    "Breakdown Days":  0,
-                    "Utilization %":   util_pct,
-                })
-            cust_rows.sort(key=lambda r: r["Utilization %"], reverse=True)
-            if cust_rows:
-                cdf = pd.DataFrame(cust_rows)
-                st.dataframe(
-                    cdf,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Customer":        st.column_config.TextColumn("Customer"),
-                        "No. of Machines": st.column_config.NumberColumn("Machines"),
-                        "On Rent Days":    st.column_config.NumberColumn("On Rent (d)"),
-                        "Idle Days":       st.column_config.NumberColumn("Idle (d)"),
-                        "Breakdown Days":  st.column_config.NumberColumn("Breakdown (d)"),
-                        "Utilization %":   st.column_config.NumberColumn(
-                            "Util %", format="%.1f%%"
-                        ),
-                    },
-                )
-                st.download_button(
-                    "↓ Export CSV",
-                    data=cdf.to_csv(index=False).encode("utf-8"),
-                    file_name=f"util_customer_{det_start}_{det_end}.csv",
-                    mime="text/csv",
-                    key="fu_cust_csv",
-                )
-            else:
-                st.markdown(
-                    "<div class='empty-state-v2'>"
-                    "<div class='empty-icon-ring'>"
-                    "<span class='msr' style='color:#2563EB;'>groups</span>"
-                    "</div>"
-                    "<h3>No customer data</h3>"
-                    "<p>No customer work orders found for the selected period.</p>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-
-        # ── Site-wise ─────────────────────────────────────────────────────────
-        with tab_site:
-            site_agg: dict[str, dict] = {}
-            for wo in work_orders:
-                sid = wo.get("site_id", "")
-                if not sid:
-                    continue
-                sd = _parse_date(wo.get("start_date"))
-                ed = _parse_date(wo.get("end_date")) or det_end
-                if sd is None or not (sd <= det_end and ed >= det_start):
-                    continue
-                mc_raw = wo.get("machine_config")
-                if not mc_raw:
-                    continue
-                try:
-                    mc_list = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
-                except Exception:
-                    continue
-                for mc_row in (mc_list if isinstance(mc_list, list) else []):
-                    mid = mc_row.get("machine_id")
-                    if not mid:
-                        continue
-                    ov_start = max(sd, det_start)
-                    ov_end   = min(ed, det_end)
-                    if ov_start > ov_end:
-                        continue
-                    days = (ov_end - ov_start).days + 1
-                    agg  = site_agg.setdefault(sid, {"machines": set(), "on_rent_days": 0})
-                    agg["machines"].add(mid)
-                    agg["on_rent_days"] += days
-
-            site_rows: list[dict] = []
-            for sid, agg in site_agg.items():
-                num_m    = len(agg["machines"])
-                on_rent  = agg["on_rent_days"]
-                total    = period_days * num_m
-                idle     = max(0, total - on_rent)
-                util_pct = round(on_rent / total * 100, 1) if total else 0.0
-                site_rows.append({
-                    "Site":            site_map.get(sid, "—"),
-                    "No. of Machines": num_m,
-                    "On Rent Days":    on_rent,
-                    "Idle Days":       idle,
-                    "Breakdown Days":  0,
-                    "Utilization %":   util_pct,
-                })
-            site_rows.sort(key=lambda r: r["Utilization %"], reverse=True)
-            if site_rows:
-                sdf = pd.DataFrame(site_rows)
-                st.dataframe(
-                    sdf,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Site":            st.column_config.TextColumn("Site"),
-                        "No. of Machines": st.column_config.NumberColumn("Machines"),
-                        "On Rent Days":    st.column_config.NumberColumn("On Rent (d)"),
-                        "Idle Days":       st.column_config.NumberColumn("Idle (d)"),
-                        "Breakdown Days":  st.column_config.NumberColumn("Breakdown (d)"),
-                        "Utilization %":   st.column_config.NumberColumn(
-                            "Util %", format="%.1f%%"
-                        ),
-                    },
-                )
-                st.download_button(
-                    "↓ Export CSV",
-                    data=sdf.to_csv(index=False).encode("utf-8"),
-                    file_name=f"util_site_{det_start}_{det_end}.csv",
-                    mime="text/csv",
-                    key="fu_site_csv",
-                )
-            else:
-                st.markdown(
-                    "<div class='empty-state-v2'>"
-                    "<div class='empty-icon-ring'>"
-                    "<span class='msr' style='color:#2563EB;'>location_on</span>"
-                    "</div>"
-                    "<h3>No site data</h3>"
-                    "<p>No site work orders found for the selected period.</p>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-
-        # ── Category-wise ─────────────────────────────────────────────────────
-        with tab_cat:
-            cat_agg: dict[str, dict] = {}
-            for m in machines:
-                mid = m.get("id", "")
-                cat = m.get("machine_type") or "Unknown"
-                s   = _machine_stats(mid, wo_by_machine, det_start, det_end)
-                a   = cat_agg.setdefault(cat, {"count": 0, "on_rent": 0, "total": 0})
-                a["count"]   += 1
-                a["on_rent"] += s["on_rent_days"]
-                a["total"]   += s["total_days"]
-
-            cat_rows: list[dict] = []
-            for cat, agg in cat_agg.items():
-                idle     = agg["total"] - agg["on_rent"]
-                util_pct = round(agg["on_rent"] / agg["total"] * 100, 1) if agg["total"] else 0.0
-                cat_rows.append({
-                    "Category":        cat,
-                    "No. of Machines": agg["count"],
-                    "On Rent Days":    agg["on_rent"],
-                    "Idle Days":       idle,
-                    "Breakdown Days":  0,
-                    "Utilization %":   util_pct,
-                })
-            cat_rows.sort(key=lambda r: r["Utilization %"], reverse=True)
-            if cat_rows:
-                catdf = pd.DataFrame(cat_rows)
-                st.dataframe(
-                    catdf,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Category":        st.column_config.TextColumn("Category"),
-                        "No. of Machines": st.column_config.NumberColumn("Machines"),
-                        "On Rent Days":    st.column_config.NumberColumn("On Rent (d)"),
-                        "Idle Days":       st.column_config.NumberColumn("Idle (d)"),
-                        "Breakdown Days":  st.column_config.NumberColumn("Breakdown (d)"),
-                        "Utilization %":   st.column_config.NumberColumn(
-                            "Util %", format="%.1f%%"
-                        ),
-                    },
-                )
-                st.download_button(
-                    "↓ Export CSV",
-                    data=catdf.to_csv(index=False).encode("utf-8"),
-                    file_name=f"util_category_{det_start}_{det_end}.csv",
-                    mime="text/csv",
-                    key="fu_cat_csv",
-                )
-            else:
-                st.markdown(
-                    "<div class='empty-state-v2'>"
-                    "<div class='empty-icon-ring'>"
-                    "<span class='msr' style='color:#2563EB;'>category</span>"
-                    "</div>"
-                    "<h3>No category data</h3>"
-                    "<p>No machines found for the selected period.</p>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-
-    # ── Data quality note ─────────────────────────────────────────────────────
+    # ── Notes ─────────────────────────────────────────────────────────────────
     st.markdown(
         "<div class='info-note'>"
         "<span class='msr info-note-icon'>info</span>"
-        "<div><strong>Breakdown Days</strong> is currently shown as 0 — historical breakdown "
-        "tracking is not yet implemented. <strong>Idle Days</strong> = Total Available Days "
-        "− On Rent Days, and includes any untracked breakdown periods. Utilization is "
-        "calculated from Work Order dates only.</div>"
+        "<div>"
+        "<strong>Rental Days</strong>: derived from Work Order start/end dates. &nbsp;"
+        "<strong>Transit Days</strong>: count of Machine Movement records in the period. &nbsp;"
+        "<strong>Available Days</strong> = Total − Rental − Transit. &nbsp;"
+        "<strong>Idle Days</strong> is shown equal to Available Days — a separate idle log "
+        "is not maintained. &nbsp;"
+        "<strong>Reserved Days</strong> = 0 (no reservation period log). &nbsp;"
+        "Breakdowns are excluded from this report — see the Worklog Report for breakdown analysis."
+        "</div>"
         "</div>",
         unsafe_allow_html=True,
     )

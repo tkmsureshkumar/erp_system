@@ -473,7 +473,6 @@ def render() -> None:
         if s.get("site_name") and s.get("is_active", True)
     )
 
-    operational_status_values = [e.value for e in OperationalStatus]
     condition_status_values   = [e.value for e in ConditionStatus]
 
     asset_type_options: list[str] = [""] + [
@@ -919,23 +918,18 @@ def render() -> None:
 
                 # Status
                 with st.container(border=True):
-                    _section_hdr("sensors", "Status")
-                    st1_col, st2_col = st.columns(2)
-                    with st1_col:
-                        _status_opts = operational_status_values
-                        if not auth.is_admin():
-                            _status_opts = [o for o in _status_opts if o not in ("Sold", "Scrapped")]
-                        st.selectbox(
-                            "Operational Status *",
-                            options=_status_opts,
-                            key="m_operational_status",
-                        )
-                    with st2_col:
+                    _section_hdr("sensors", "Condition Status")
+                    sc1, _ = st.columns([1, 1])
+                    with sc1:
                         st.selectbox(
                             "Condition Status *",
                             options=condition_status_values,
                             key="m_condition_status",
                         )
+                    st.caption(
+                        "Operational Status (Available / On Rent / In Transit / Reserved) "
+                        "is set automatically by Work Orders and Machine Movements."
+                    )
 
             # ── Tab 3: Deployments (placeholder) ─────────────────────────────
             with tab_hist:
@@ -1003,8 +997,6 @@ def render() -> None:
                     st.error("Machine Type is required.")
                 elif not current_location_val:
                     st.error("Current Location is required — select a site.")
-                elif not operational_status_val:
-                    st.error("Operational Status is required.")
                 elif not condition_status_val:
                     st.error("Condition Status is required.")
                 else:
