@@ -14,6 +14,7 @@ import streamlit as st
 
 from ..models import OperatorStatus
 from ..supabase_client import SupabaseClient
+from erp.views._documents import render_document_panel
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -312,12 +313,22 @@ def _avatar_color(name: str) -> str:
     return palette[sum(ord(c) for c in (name or "A")) % len(palette)]
 
 
-def _generate_emp_code(operators: list[dict]) -> str:
-    """Return next available EMP code e.g. EMP001, EMP002…"""
+_DESIGNATION_OPTIONS = ["Operator", "Supervisor", "Mechanic"]
+
+_DESIG_PREFIX: dict[str, str] = {
+    "Operator":   "OP",
+    "Supervisor": "S",
+    "Mechanic":   "M",
+}
+
+
+def _generate_emp_code(operators: list[dict], designation: str = "Operator") -> str:
+    """Return next available code for the given designation, e.g. OP001, S002, M003."""
+    prefix   = _DESIG_PREFIX.get(designation, "OP")
     existing = {op.get("emp_code", "") for op in operators if op.get("emp_code")}
     i = 1
     while True:
-        code = f"EMP{i:03d}"
+        code = f"{prefix}{i:03d}"
         if code not in existing:
             return code
         i += 1
@@ -330,6 +341,8 @@ def _open_new_form() -> None:
     st.session_state["_op_sync_key"] = "__new__"
     # Personal
     st.session_state["op_name"]          = ""
+    st.session_state["op_father_name"]   = ""
+    st.session_state["op_designation"]   = _DESIGNATION_OPTIONS[0]
     st.session_state["op_mobile"]        = ""
     st.session_state["op_aadhar"]        = ""
     st.session_state["op_joining_date"]  = None
@@ -425,22 +438,6 @@ def _section_hdr(icon: str, label: str) -> None:
     )
 
 
-def _placeholder_tab(icon: str, title: str, description: str) -> None:
-    st.markdown(
-        f"<div style='display:flex;flex-direction:column;align-items:center;"
-        f"padding:52px 24px;text-align:center;'>"
-        f"<div style='width:58px;height:58px;border-radius:14px;"
-        f"background:#F8FAFC;border:1px solid #E2EBF0;"
-        f"display:flex;align-items:center;justify-content:center;"
-        f"font-size:26px;margin-bottom:14px;'>"
-        f"<span class='msr' style='color:#9CA3AF;'>{icon}</span></div>"
-        f"<div style='font-size:15px;font-weight:700;color:#374151;margin-bottom:6px;'>{title}</div>"
-        f"<div style='font-size:12px;color:#9CA3AF;max-width:240px;line-height:1.6;'>{description}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-
 # ── Main view ─────────────────────────────────────────────────────────────────
 
 def render() -> None:
@@ -521,8 +518,13 @@ def render() -> None:
     if st.session_state.get("_op_sync_key") != sync_key:
         st.session_state["_op_sync_key"] = sync_key
         op = selected_operator or {}
-        st.session_state["op_emp_code"] = op.get("emp_code", "")
+        st.session_state["op_emp_code"]      = op.get("emp_code", "")
         st.session_state["op_name"]          = op.get("operator_name", "")
+        st.session_state["op_father_name"]   = op.get("father_name", "")
+        raw_desig = op.get("designation", _DESIGNATION_OPTIONS[0])
+        st.session_state["op_designation"]   = (
+            raw_desig if raw_desig in _DESIGNATION_OPTIONS else _DESIGNATION_OPTIONS[0]
+        )
         st.session_state["op_mobile"]        = op.get("mobile_number", "")
         st.session_state["op_aadhar"]        = op.get("aadhar_number", "")
         st.session_state["op_joining_date"]  = _parse_date(op.get("joining_date"))
@@ -678,7 +680,9 @@ def render() -> None:
                     st.markdown(
                         f"<div class='info-grid'>"
                         + _info_field("Employee Code",  so.get("emp_code"))
+                        + _info_field("Designation",    so.get("designation"))
                         + _info_field("Operator Name",  so.get("operator_name"))
+                        + _info_field("Father Name",    so.get("father_name"))
                         + _info_field("Mobile Number",  so.get("mobile_number"))
                         + _info_field("Aadhar Number",  so.get("aadhar_number"))
                         + _info_field("Joining Date",   str(so.get("joining_date") or "") or None)
@@ -719,10 +723,11 @@ def render() -> None:
             # ── Tab 2: Edit Details ───────────────────────────────────────────
             with tab_edit:
                 # Emp code display — auto-generated on create, read-only on edit
+                _desig_for_code = st.session_state.get("op_designation", _DESIGNATION_OPTIONS[0])
                 _preview_code = (
                     emp_code_disp
                     if mode == "edit" and emp_code_disp
-                    else _generate_emp_code(operators)
+                    else _generate_emp_code(operators, _desig_for_code)
                 )
                 st.markdown(
                     f"<div style='display:inline-flex;align-items:center;gap:10px;"
@@ -745,11 +750,20 @@ def render() -> None:
                             "Operator Name *", key="op_name",
                             placeholder="e.g. Vikram Singh",
                         )
+                        father_name = st.text_input(
+                            "Father Name", key="op_father_name",
+                            placeholder="e.g. Rajesh Singh",
+                        )
                         aadhar_number = st.text_input(
                             "Aadhar Number", key="op_aadhar",
                             placeholder="12-digit Aadhar",
                         )
                     with p2:
+                        designation = st.selectbox(
+                            "Designation *",
+                            options=_DESIGNATION_OPTIONS,
+                            key="op_designation",
+                        )
                         mobile_number = st.text_input(
                             "Mobile Number", key="op_mobile",
                             placeholder="e.g. +91 98111 22233",
@@ -813,11 +827,11 @@ def render() -> None:
 
             # ── Tab 3: Skills / Documents (placeholder) ───────────────────────
             with tab_skills:
-                _placeholder_tab(
-                    "school",
-                    "Skills & Documents coming soon",
-                    "Operator certifications, training records, and uploaded documents "
-                    "will appear here.",
+                render_document_panel(
+                    sb,
+                    record_type = "operator",
+                    record_id   = selected_id if mode == "edit" else None,
+                    key_prefix  = "op",
                 )
 
             # ── Action buttons (outside tabs) ─────────────────────────────────
@@ -849,6 +863,8 @@ def render() -> None:
                 else:
                     payload = dict(
                         operator_name=name_val,
+                        father_name=father_name.strip() or None,
+                        designation=designation,
                         mobile_number=mobile_number.strip() or None,
                         aadhar_number=aadhar_number.strip() or None,
                         joining_date=joining_date.isoformat() if joining_date else None,
@@ -873,7 +889,7 @@ def render() -> None:
                             sb.update_operator(selected_id, payload)
                             _toast_msg = f"'{name_val}' updated successfully."
                         else:
-                            payload["emp_code"] = _generate_emp_code(operators)
+                            payload["emp_code"] = _generate_emp_code(operators, designation)
                             created    = sb.insert_operator(payload)
                             _new_id    = created.get("id", "")
                             _toast_msg = (

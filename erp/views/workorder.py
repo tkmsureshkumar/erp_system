@@ -14,6 +14,7 @@ import streamlit as st
 
 from ..supabase_client import SupabaseClient
 from erp.views._lock import status_chip, lifecycle_controls
+from erp.views._documents import render_document_panel
 from erp import auth
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -1249,10 +1250,11 @@ def render() -> None:
 
             # ── Tab 4: Documents ──────────────────────────────────────────────
             with tab_docs:
-                _placeholder_tab(
-                    "folder_open",
-                    "Documents coming soon",
-                    "WO attachments, PO copies, and site reports will be managed here.",
+                render_document_panel(
+                    sb,
+                    record_type = "work_order",
+                    record_id   = selected_wo_id if mode == "edit" else None,
+                    key_prefix  = "wo",
                 )
 
             # ── Action buttons ─────────────────────────────────────────────────

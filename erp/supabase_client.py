@@ -120,7 +120,7 @@ class SupabaseClient:
             raise RuntimeError(str(error))
 
     def insert_site(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        resp = self.admin_client.table("sites").insert(payload).select().execute()
+        resp = self.admin_client.table("sites").insert(payload).execute()
         data = None
         error = None
         if hasattr(resp, "data"):
@@ -188,7 +188,7 @@ class SupabaseClient:
             raise RuntimeError(str(error))
 
     def insert_operator(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        resp = self.admin_client.table("operators").insert(payload).select().execute()
+        resp = self.admin_client.table("operators").insert(payload).execute()
         data = None
         error = None
         if hasattr(resp, "data"):
@@ -334,7 +334,7 @@ class SupabaseClient:
         return data if isinstance(data, list) else []
 
     def insert_compliance_record(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        resp = self.admin_client.table("machine_compliance_records").insert(payload).select().execute()
+        resp = self.admin_client.table("machine_compliance_records").insert(payload).execute()
         data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
         err  = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
         if err:
@@ -1059,11 +1059,106 @@ class SupabaseClient:
         except Exception:
             return 0
 
+    # ── Document attachments ───────────────────────────────────────────────────
+
+    _DOCUMENTS_BUCKET = "erp-documents"
+
+    _MIME_MAP: Dict[str, str] = {
+        "pdf":  "application/pdf",
+        "jpg":  "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png":  "image/png",
+        "webp": "image/webp",
+        "gif":  "image/gif",
+        "doc":  "application/msword",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+
+    @staticmethod
+    def _mime_for_ext(ext: str) -> str:
+        return SupabaseClient._MIME_MAP.get(ext.lower(), "application/octet-stream")
+
+    def upload_document(
+        self,
+        record_type: str,
+        record_id: str,
+        file_bytes: bytes,
+        file_name: str,
+        file_size_kb: int = 0,
+        remarks: str = "",
+        uploaded_by: str = "",
+    ) -> Dict[str, Any]:
+        import uuid as _uuid
+        ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+        file_type = (
+            "pdf"   if ext == "pdf" else
+            "image" if ext in {"jpg", "jpeg", "png", "webp", "gif"} else
+            "word"  if ext in {"doc", "docx"} else
+            ext
+        )
+        unique_name  = f"{_uuid.uuid4().hex}_{file_name}"
+        storage_path = f"{record_type}/{record_id}/{unique_name}"
+        self.admin_client.storage.from_(self._DOCUMENTS_BUCKET).upload(
+            storage_path, file_bytes,
+            {"content-type": self._mime_for_ext(ext), "upsert": "false"},
+        )
+        payload: Dict[str, Any] = {
+            "record_type":  record_type,
+            "record_id":    record_id,
+            "file_name":    file_name,
+            "storage_path": storage_path,
+            "file_type":    file_type,
+            "file_size_kb": file_size_kb or None,
+            "remarks":      remarks or None,
+            "uploaded_by":  uploaded_by or None,
+        }
+        resp = self.admin_client.table("documents").insert(payload).execute()
+        data = resp.data if hasattr(resp, "data") else []
+        return data[0] if isinstance(data, list) and data else {}
+
+    def list_documents(self, record_type: str, record_id: str) -> List[Dict[str, Any]]:
+        resp = (
+            self.admin_client.table("documents")
+            .select("*")
+            .eq("record_type", record_type)
+            .eq("record_id",   record_id)
+            .order("uploaded_at", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else []
+        return data if isinstance(data, list) else []
+
+    def delete_document(self, doc_id: str, storage_path: str) -> None:
+        self.admin_client.storage.from_(self._DOCUMENTS_BUCKET).remove([storage_path])
+        self.admin_client.table("documents").delete().eq("id", doc_id).execute()
+
+    def get_signed_url(self, storage_path: str, expires_in: int = 3600) -> str:
+        resp = self.admin_client.storage.from_(self._DOCUMENTS_BUCKET).create_signed_url(
+            storage_path, expires_in
+        )
+        if isinstance(resp, dict):
+            return resp.get("signedURL") or resp.get("signedUrl") or ""
+        if hasattr(resp, "signed_url"):
+            return str(resp.signed_url or "")
+        return ""
+
     def list_invoices_for_wo(self, work_order_id: str) -> List[Dict[str, Any]]:
         resp = (
             self.client.table("invoices")
             .select("*")
             .eq("work_order_id", work_order_id)
+            .order("invoice_date", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return data if isinstance(data, list) else []
+
+    def list_all_invoices(self) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("invoices")
+            .select("id,work_order_id,invoice_date,grand_total,status")
             .order("invoice_date", desc=True)
             .execute()
         )

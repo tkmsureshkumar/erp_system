@@ -7,6 +7,7 @@ import streamlit as st
 
 from erp import auth
 from erp.supabase_client import SupabaseClient
+from erp.views._documents import render_document_panel
 
 _WARN_DAYS = 30
 _COMPLIANCE_TYPES = ["TPI", "PUC", "Form 11", "Insurance", "Other"]
@@ -539,10 +540,26 @@ def render() -> None:
     except Exception:
         all_records = []
 
-    tab_overview, tab_records = st.tabs(["📊 Compliance Overview", "📋 Manage Records"])
+    tab_overview, tab_records, tab_docs = st.tabs([
+        "📊 Compliance Overview",
+        "📋 Manage Records",
+        "📎 Documents",
+    ])
 
     with tab_overview:
         _render_overview(machines, all_records)
 
     with tab_records:
         _render_records(sb, machines)
+
+    with tab_docs:
+        sel_machine_id = st.session_state.get("_comp_sel_machine_id", "")
+        if sel_machine_id:
+            render_document_panel(
+                sb,
+                record_type = "compliance",
+                record_id   = sel_machine_id,
+                key_prefix  = "comp",
+            )
+        else:
+            st.info("Select a machine from the Manage Records tab to view or attach documents.", icon="ℹ️")

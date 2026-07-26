@@ -88,6 +88,60 @@ ALTER TABLE machine_movements ADD COLUMN IF NOT EXISTS driver_contact    TEXT;
 ALTER TABLE machine_movements ADD COLUMN IF NOT EXISTS lr_challan_number TEXT;
 ALTER TABLE machine_movements ADD COLUMN IF NOT EXISTS dispatch_remarks  TEXT;
 
+-- ── Phase 8 : Document attachments (centralized, all modules) ────────────────
+CREATE TABLE IF NOT EXISTS documents (
+    id           UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+    record_type  TEXT        NOT NULL,   -- 'machine' | 'compliance' | 'customer' | 'site'
+                                         -- | 'work_order' | 'movement' | 'work_log' | 'invoice'
+    record_id    TEXT        NOT NULL,
+    file_name    TEXT        NOT NULL,
+    storage_path TEXT        NOT NULL,   -- path inside the 'erp-documents' bucket
+    file_type    TEXT,                   -- 'pdf' | 'image' | 'word'
+    file_size_kb INTEGER,
+    remarks      TEXT,
+    uploaded_by  TEXT,
+    uploaded_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_record
+    ON documents(record_type, record_id);
+
+-- ── Phase 9 : Operator — designation & father name ───────────────────────────
+ALTER TABLE operators ADD COLUMN IF NOT EXISTS designation  TEXT;
+ALTER TABLE operators ADD COLUMN IF NOT EXISTS father_name  TEXT;
+
+-- ── Phase 10 : Invoices table — ensure all required columns exist ─────────────
+-- Creates the table if it does not exist, then safely adds any missing columns.
+CREATE TABLE IF NOT EXISTS invoices (
+    id             UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+    invoice_number TEXT        UNIQUE NOT NULL,
+    work_order_id  UUID,
+    invoice_date   DATE        NOT NULL,
+    customer_id    UUID,
+    site_id        UUID,
+    tax_type       TEXT        DEFAULT 'CGST/SGST',
+    line_items     JSONB,
+    subtotal       NUMERIC(14,2) DEFAULT 0,
+    tax_amount     NUMERIC(14,2) DEFAULT 0,
+    round_off      NUMERIC(6,2)  DEFAULT 0,
+    grand_total    NUMERIC(14,2) DEFAULT 0,
+    status         TEXT        DEFAULT 'Draft',
+    notes          TEXT,
+    created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Patch columns that may be absent if the table was created at an earlier version:
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id  UUID;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS site_id      UUID;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax_type     TEXT          DEFAULT 'CGST/SGST';
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS line_items   JSONB;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS subtotal     NUMERIC(14,2) DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax_amount   NUMERIC(14,2) DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS round_off    NUMERIC(6,2)  DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS grand_total  NUMERIC(14,2) DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS status       TEXT          DEFAULT 'Draft';
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS notes        TEXT;
+
 -- ── Verification queries (run after migration) ────────────────────────────────
 -- SELECT column_name, data_type, column_default
 --   FROM information_schema.columns

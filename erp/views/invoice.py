@@ -31,6 +31,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ..supabase_client import SupabaseClient
+from erp.views._documents import render_document_panel
 
 # ── Fixed company / bank constants ────────────────────────────────────────────
 _CO = {
@@ -1017,3 +1018,12 @@ def render() -> None:
                     components.html(combined_html, height=1200, scrolling=True)
                 else:
                     st.info("No completed work log schedules found for the selected charges.")
+
+    # ── Documents (attached to the work order's invoice record) ───────────────
+    with st.expander("📎 Documents", expanded=False):
+        render_document_panel(
+            sb,
+            record_type = "invoice",
+            record_id   = sel_wo_id,
+            key_prefix  = "inv",
+        )

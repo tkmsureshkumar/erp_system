@@ -29,6 +29,7 @@ import streamlit as st
 from erp.supabase_client import SupabaseClient
 from erp import auth as _auth  # noqa: F401
 from erp.views._lock import status_chip
+from erp.views._documents import render_document_panel
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -895,6 +896,15 @@ def render() -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save movement: {exc}")
+
+    # ── Documents ─────────────────────────────────────────────────────────────
+    with st.expander("📎 Documents", expanded=False):
+        render_document_panel(
+            sb,
+            record_type = "movement",
+            record_id   = selected_machine.get("id"),
+            key_prefix  = "mm",
+        )
 
     # ── Movement Timeline ─────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)

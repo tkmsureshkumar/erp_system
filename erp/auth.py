@@ -28,7 +28,6 @@ ALL_PAGES: dict[str, str] = {
     "invoice":         "Invoice",
     "worklog":         "Worklog",
     # ── Reports ───────────────────────────────────────────────────────────────
-    "currentdep":      "Active Deployments",
     "fleetstatus":     "Fleet Status",
     "fleetutil":       "Fleet Utilization",
     "machinehistory":  "Machine History",

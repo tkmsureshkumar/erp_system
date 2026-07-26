@@ -16,6 +16,7 @@ import streamlit as st
 from ..state_config import load_state_names
 from ..supabase_client import SupabaseClient
 from erp.views._lock import status_chip, deactivate_controls
+from erp.views._documents import render_document_panel
 from erp import auth
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -724,11 +725,12 @@ def render() -> None:
             )
 
             # ── TABS ──────────────────────────────────────────────────────────
-            tab_overview, tab_edit, tab_contacts_tab, tab_fleet = st.tabs([
+            tab_overview, tab_edit, tab_contacts_tab, tab_fleet, tab_docs = st.tabs([
                 "🏢 Overview",
                 "✏️ Edit Details",
                 f"👤 Contacts ({len(existing_contacts)})",
                 "🚜 Fleet",
+                "📎 Documents",
             ])
 
             # ── Tab 1: Overview ───────────────────────────────────────────────
@@ -823,6 +825,15 @@ def render() -> None:
                     "precision_manufacturing",
                     "Fleet linkage coming soon",
                     "Machines deployed under this customer's work orders will appear here.",
+                )
+
+            # ── Tab 5: Documents ──────────────────────────────────────────────
+            with tab_docs:
+                render_document_panel(
+                    sb,
+                    record_type = "customer",
+                    record_id   = selected_id if mode == "edit" else None,
+                    key_prefix  = "cust",
                 )
 
             # ── Action buttons (outside tabs) ─────────────────────────────────

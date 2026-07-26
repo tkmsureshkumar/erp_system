@@ -15,6 +15,7 @@ import streamlit as st
 from ..models import ConditionStatus, OperationalStatus
 from ..supabase_client import SupabaseClient
 from erp.views._lock import status_chip, deactivate_controls
+from erp.views._documents import render_document_panel
 from erp import auth
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -719,10 +720,11 @@ def render() -> None:
                 )
 
             # ── TABS ──────────────────────────────────────────────────────────
-            tab_overview, tab_edit, tab_hist = st.tabs([
+            tab_overview, tab_edit, tab_hist, tab_docs = st.tabs([
                 "📋 Overview",
                 "✏️ Edit Details",
                 "📦 Deployments",
+                "📎 Documents",
             ])
 
             # ── Tab 1: Overview ───────────────────────────────────────────────
@@ -941,6 +943,15 @@ def render() -> None:
                     "local_shipping",
                     "Deployment history coming soon",
                     "Past and active deployments for this machine will appear here.",
+                )
+
+            # ── Tab 4: Documents ──────────────────────────────────────────────
+            with tab_docs:
+                render_document_panel(
+                    sb,
+                    record_type = "machine",
+                    record_id   = selected_machine_id if mode == "edit" else None,
+                    key_prefix  = "mach",
                 )
 
             # ── Action buttons (outside tabs) ─────────────────────────────────

@@ -15,6 +15,7 @@ import streamlit as st
 import streamlit.components.v1 as _stc
 
 from ..supabase_client import SupabaseClient
+from erp.views._documents import render_document_panel
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1636,6 +1637,17 @@ def render() -> None:
                 schedule_df=_print_df,
             )
             _stc.html(_print_html, height=820, scrolling=True)
+
+    # ── Documents ──────────────────────────────────────────────────────────────
+    _wl_doc_id = _wl_rec.get("id")
+    if _wl_doc_id:
+        with st.expander("📎 Documents", expanded=False):
+            render_document_panel(
+                sb,
+                record_type = "work_log",
+                record_id   = _wl_doc_id,
+                key_prefix  = f"wl_{selected_wo_id}_{machine_idx}",
+            )
 
     # ── Action buttons (hidden when locked) ────────────────────────────────────
     if _is_locked:

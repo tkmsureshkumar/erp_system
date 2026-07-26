@@ -21,7 +21,6 @@ from erp.views import (
     admin,
     asset,
     closeworkorder,
-    currentdeployment,
     customerreport,
     customers,
     dashboard,
@@ -755,7 +754,6 @@ _SIDEBAR_ITEMS = [
     # ── Billing ───────────────────────────────────────────────────────────────
     ("invoice",           "receipt_long",            "Invoice",           "BILLING",      None),
     # ── Reports ───────────────────────────────────────────────────────────────
-    ("currentdep",        "pin_drop",                "Active Deploy",     "REPORTS",      "FLEET"),
     ("fleetstatus",       "fact_check",              "Fleet Status",      "REPORTS",      "FLEET"),
     ("fleetutil",         "bar_chart",               "Fleet Util",        "REPORTS",      "FLEET"),
     ("machinehistory",    "history",                 "Mach History",      "REPORTS",      "FLEET"),
@@ -996,12 +994,6 @@ elif page == "worklog":
 elif page == "wlreport":
     if auth.has_page_access("wlreport"):
         worklogreport.render()
-    else:
-        _access_denied()
-
-elif page == "currentdep":
-    if auth.has_page_access("currentdep"):
-        currentdeployment.render()
     else:
         _access_denied()
 
