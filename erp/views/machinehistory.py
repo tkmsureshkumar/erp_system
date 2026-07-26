@@ -1,13 +1,14 @@
 """
 erp/views/machinehistory.py
-Machine History Report — complete deployment history for a selected machine.
+Machine History Report — deployment timeline with idle-period detection.
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
@@ -15,145 +16,159 @@ from ..supabase_client import SupabaseClient
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
-_PAGE_CSS = """
+_CSS = """
 <style>
-/* ── KPI strip ─────────────────────────────────────────────────────── */
-.kpi-grid {
+/* ── KPI strip ─────────────────────────────────────────────── */
+.mh-kpi-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin: 0 0 28px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin: 0 0 24px;
 }
-.kpi-card {
+.mh-kpi {
     background: var(--card, #fff);
     border: 1px solid var(--border, #E2EBF0);
     border-radius: 12px;
-    padding: 18px 22px 14px;
+    padding: 16px 18px 12px;
     position: relative;
     overflow: hidden;
-    transition: box-shadow .18s, transform .18s;
 }
-.kpi-card:hover {
-    box-shadow: 0 6px 20px rgba(0,0,0,.08);
-    transform: translateY(-2px);
+.mh-kpi-bar {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 3px; border-radius: 12px 12px 0 0;
 }
-.kpi-accent-bar {
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    border-radius: 12px 12px 0 0;
+.mh-kpi-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: #9CA3AF; margin-bottom: 8px;
 }
-.kpi-label {
-    font-size: 10px; font-weight: 700; letter-spacing: .13em;
-    text-transform: uppercase; color: #9CA3AF;
-    margin-bottom: 10px;
-    display: flex; align-items: center; gap: 6px;
-}
-.kpi-value {
-    font-size: 34px; font-weight: 800;
-    color: #111827; line-height: 1;
-    margin-bottom: 6px;
+.mh-kpi-value {
+    font-size: 28px; font-weight: 800;
+    color: #111827; line-height: 1; margin-bottom: 4px;
     font-variant-numeric: tabular-nums;
 }
-.kpi-sub {
-    font-size: 11px; color: #6B7280;
+.mh-kpi-sub { font-size: 11px; color: #6B7280; }
+.mh-kpi-icon {
+    position: absolute; top: 14px; right: 14px;
+    font-size: 22px; opacity: .09;
 }
-.kpi-icon {
-    position: absolute; top: 16px; right: 18px;
-    font-size: 22px; opacity: .12;
-}
-/* ── Section header ─────────────────────────────────────────────────── */
-.form-sec-hdr {
-    font-size: 10px; font-weight: 700;
-    letter-spacing: .13em; text-transform: uppercase;
-    color: #E87722;
-    margin-bottom: 12px; padding-bottom: 8px;
-    border-bottom: 1px solid #F1F5F9;
-    display: flex; align-items: center; gap: 6px;
-}
-/* ── Machine hero card ──────────────────────────────────────────────── */
-.mach-hero {
+/* ── Machine hero ───────────────────────────────────────────── */
+.mh-hero {
     background: linear-gradient(135deg, #1E2938 0%, #1c3461 100%);
-    border-radius: 14px;
-    padding: 22px 24px;
-    margin-bottom: 24px;
-    display: flex; align-items: flex-start; gap: 20px;
+    border-radius: 14px 14px 0 0;
+    padding: 20px 24px;
+    display: flex; align-items: center; gap: 18px;
     position: relative; overflow: hidden;
 }
-.mach-hero::before {
+.mh-hero::after {
     content: '';
-    position: absolute; top: -40px; right: -40px;
-    width: 160px; height: 160px; border-radius: 50%;
+    position: absolute; top: -50px; right: -50px;
+    width: 180px; height: 180px; border-radius: 50%;
     background: rgba(255,255,255,.04);
 }
-.mach-hero-icon {
-    width: 52px; height: 52px; border-radius: 14px;
-    background: rgba(255,255,255,.10);
+.mh-hero-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: rgba(255,255,255,.12);
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
 }
-.mach-hero-name {
-    font-size: 20px; font-weight: 800; color: #fff; line-height: 1.2;
+.mh-hero-name {
+    font-size: 18px; font-weight: 700; color: #fff; line-height: 1.2;
 }
-.mach-hero-sub {
+.mh-hero-sub {
     font-size: 11px; color: rgba(255,255,255,.45);
-    letter-spacing: .07em; margin-top: 4px;
+    letter-spacing: .06em; margin-top: 3px;
 }
-.mach-info-grid {
+/* ── Info grid ──────────────────────────────────────────────── */
+.mh-info-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-top: 16px;
-}
-.mach-info-field {
-    background: #F8FAFC;
+    gap: 0;
     border: 1px solid #E2EBF0;
-    border-radius: 8px;
-    padding: 10px 13px;
+    border-top: none;
+    border-radius: 0 0 14px 14px;
+    overflow: hidden;
+    margin-bottom: 24px;
 }
-.mach-info-label {
+.mh-info-cell {
+    padding: 11px 16px;
+    border-right: 1px solid #E2EBF0;
+    border-bottom: 1px solid #E2EBF0;
+    background: #fff;
+}
+.mh-info-cell:nth-child(4n) { border-right: none; }
+.mh-info-cell:nth-last-child(-n+4) { border-bottom: none; }
+.mh-info-cell-label {
     font-size: 9px; font-weight: 700; letter-spacing: .12em;
     text-transform: uppercase; color: #9CA3AF; margin-bottom: 3px;
 }
-.mach-info-value {
+.mh-info-cell-value {
     font-size: 13px; font-weight: 600; color: #111827;
     word-break: break-word;
 }
-.mach-info-value.muted {
-    font-weight: 400; color: #9CA3AF;
+.mh-info-cell-value.muted { color: #9CA3AF; font-weight: 400; }
+/* ── Section header ─────────────────────────────────────────── */
+.mh-sec-hdr {
+    font-size: 10px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: #E87722;
+    padding-bottom: 8px; margin-bottom: 14px;
+    border-bottom: 1px solid #F1F5F9;
+    display: flex; align-items: center; gap: 6px;
 }
-/* ── Status badge ────────────────────────────────────────────────────── */
-.status-pill {
-    display: inline-block;
-    font-size: 10px; font-weight: 700;
-    padding: 2px 10px; border-radius: 20px;
-    letter-spacing: .05em;
+/* ── Timeline table ─────────────────────────────────────────── */
+.mh-tl-hdr {
+    display: grid;
+    grid-template-columns: 5px 100px 1fr 1fr 130px 130px 70px 120px;
+    gap: 8px;
+    padding: 6px 10px 8px;
+    border-bottom: 2px solid #E2EBF0;
+    font-size: 9px; font-weight: 700; letter-spacing: .10em;
+    text-transform: uppercase; color: #9CA3AF;
 }
-/* ── Empty state ─────────────────────────────────────────────────────── */
-.empty-state-v2 {
+.mh-tl-row {
+    display: grid;
+    grid-template-columns: 5px 100px 1fr 1fr 130px 130px 70px 120px;
+    gap: 8px;
+    padding: 10px 10px;
+    border-bottom: 1px solid #F8FAFC;
+    align-items: center;
+    font-size: 12px;
+}
+.mh-tl-row:hover { background: #F9FAFB; }
+.mh-tl-bar   { border-radius: 4px; align-self: stretch; min-height: 36px; }
+.mh-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.mh-badge-rent  { background: #DBEAFE; color: #1E40AF; }
+.mh-badge-idle  { background: #F3F4F6; color: #6B7280; }
+.mh-badge-trans { background: #EDE9FE; color: #5B21B6; }
+.mh-badge-active {
+    background: #DCFCE7; color: #166534;
+    animation: mh-pulse 2s infinite;
+}
+@keyframes mh-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: .65; }
+}
+/* ── Empty state ────────────────────────────────────────────── */
+.mh-empty {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    padding: 64px 40px;
+    padding: 56px 40px;
     background: #FAFBFC;
     border: 2px dashed #E2EBF0;
-    border-radius: 16px;
+    border-radius: 14px;
     text-align: center;
 }
-.empty-icon-ring {
-    width: 72px; height: 72px; border-radius: 50%;
+.mh-empty-ring {
+    width: 64px; height: 64px; border-radius: 50%;
     background: linear-gradient(145deg, #FFF7ED, #FFEDD5);
     display: flex; align-items: center; justify-content: center;
-    margin-bottom: 18px;
-    box-shadow: 0 6px 20px rgba(249,115,22,.14);
+    margin-bottom: 16px;
 }
-.empty-state-v2 h3 {
-    font-size: 16px; font-weight: 700; color: #111827;
-    margin: 0 0 8px;
-}
-.empty-state-v2 p {
-    font-size: 13px; color: #9CA3AF;
-    max-width: 260px; line-height: 1.6; margin: 0;
-}
+.mh-empty h3 { font-size: 15px; font-weight: 700; color: #111827; margin: 0 0 6px; }
+.mh-empty p  { font-size: 12px; color: #9CA3AF; max-width: 240px; line-height: 1.6; margin: 0; }
 </style>
 """
 
@@ -175,90 +190,58 @@ def _parse_date(value) -> date | None:
     return None
 
 
-def _fmt_date(value) -> str:
-    d = _parse_date(value)
-    return d.strftime("%d %b %Y") if d else "—"
+def _fmt(d) -> str:
+    parsed = _parse_date(d)
+    return parsed.strftime("%d %b %Y") if parsed else "—"
 
 
-def _mc_rental_for_machine(mc_raw, machine_id: str) -> float | None:
+def _duration_label(start: date, end: date | None, today: date) -> str:
+    effective_end = end or today
+    days = (effective_end - start).days + 1
+    if days < 0:
+        return "—"
+    if days >= 365:
+        y = days // 365
+        m = (days % 365) // 30
+        return f"{y}y {m}m" if m else f"{y}y"
+    if days >= 30:
+        m = days // 30
+        d = days % 30
+        return f"{m}m {d}d" if d else f"{m}m"
+    return f"{days}d"
+
+
+def _machine_in_config(mc_raw, machine_id: str) -> dict | None:
     if not mc_raw or not machine_id:
         return None
     try:
         records = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
         if isinstance(records, list):
-            for r in records:
-                if r.get("machine_id") == machine_id:
-                    v = r.get("rental_per_month")
-                    return float(v) if v is not None else None
+            return next((r for r in records if r.get("machine_id") == machine_id), None)
     except Exception:
         pass
     return None
 
 
-def _dep_date_for_machine(dep: dict, machine_id: str, wo_start: str | None) -> str:
-    """
-    Return the deployment date for a specific machine within a deployment record.
-    Priority: billing_start_date → transaction_start_date → WO start_date.
-    """
-    md_raw = dep.get("machine_deployments") if dep else None
-    if md_raw:
-        try:
-            mds = json.loads(md_raw) if isinstance(md_raw, str) else md_raw
-            if isinstance(mds, list):
-                for md in mds:
-                    if md.get("machine_id") == machine_id:
-                        d = (
-                            md.get("billing_start_date")
-                            or md.get("transaction_start_date")
-                            or md.get("site_reached_date")
-                        )
-                        if d:
-                            return _fmt_date(d)
-        except Exception:
-            pass
-    if dep and dep.get("deployment_date"):
-        return _fmt_date(dep["deployment_date"])
-    return _fmt_date(wo_start)
-
-
-def _status_color(status: str) -> str:
-    s = (status or "").lower()
-    if s == "active":
-        return "#16a34a"
-    if s in ("closed", "completed"):
-        return "#6b7280"
-    return "#E87722"
-
-
-def _section_hdr(icon: str, label: str) -> None:
-    st.markdown(
-        f"<div class='form-sec-hdr'>"
-        f"<span class='msr' style='font-size:14px;color:#E87722;'>{icon}</span>"
-        f"{label}</div>",
-        unsafe_allow_html=True,
-    )
-
-
-def _kpi_card(icon: str, label: str, value: int | str,
-              sub: str = "", accent: str = "#2563EB") -> str:
+def _info_cell(label: str, value: str) -> str:
+    muted = not value or value == "—"
+    val_cls = "mh-info-cell-value muted" if muted else "mh-info-cell-value"
     return (
-        f"<div class='kpi-card'>"
-        f"<div class='kpi-accent-bar' style='background:{accent};'></div>"
-        f"<span class='kpi-icon msr'>{icon}</span>"
-        f"<div class='kpi-label'>{label}</div>"
-        f"<div class='kpi-value'>{value}</div>"
-        f"<div class='kpi-sub'>{sub}</div>"
+        f"<div class='mh-info-cell'>"
+        f"<div class='mh-info-cell-label'>{label}</div>"
+        f"<div class='{val_cls}'>{value or '—'}</div>"
         f"</div>"
     )
 
 
-def _info_field(label: str, value: str, muted: bool = False) -> str:
-    val_cls = "mach-info-value muted" if (muted or not value or value == "—") else "mach-info-value"
-    disp    = value if value else "—"
+def _kpi(icon: str, label: str, value: str, sub: str = "", accent: str = "#2563EB") -> str:
     return (
-        f"<div class='mach-info-field'>"
-        f"<div class='mach-info-label'>{label}</div>"
-        f"<div class='{val_cls}'>{disp}</div>"
+        f"<div class='mh-kpi'>"
+        f"<div class='mh-kpi-bar' style='background:{accent};'></div>"
+        f"<span class='mh-kpi-icon msr'>{icon}</span>"
+        f"<div class='mh-kpi-label'>{label}</div>"
+        f"<div class='mh-kpi-value'>{value}</div>"
+        f"<div class='mh-kpi-sub'>{sub}</div>"
         f"</div>"
     )
 
@@ -266,15 +249,15 @@ def _info_field(label: str, value: str, muted: bool = False) -> str:
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
-    st.markdown(_PAGE_CSS, unsafe_allow_html=True)
+    st.markdown(_CSS, unsafe_allow_html=True)
 
-    # ── Page header ──────────────────────────────────────────────────────────
     st.markdown(
         "<div class='page-eyebrow'>// Reports</div>"
-        "<div class='page-title'>Machine History Report</div>",
+        "<div class='page-title'>Machine History</div>"
+        "<div style='font-size:13px;color:#6B7280;margin-top:4px;margin-bottom:24px;'>"
+        "Full deployment timeline including idle periods between work orders.</div>",
         unsafe_allow_html=True,
     )
-    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
 
     # ── Load data ─────────────────────────────────────────────────────────────
     try:
@@ -283,7 +266,6 @@ def render() -> None:
         work_orders    = sb.list_work_orders()
         customers_list = sb.list_customers()
         sites_list     = sb.list_sites()
-        deployments    = sb.list_deployments()
     except Exception as exc:
         st.error(f"Could not load data: {exc}")
         return
@@ -292,228 +274,311 @@ def render() -> None:
         st.info("No machines found.")
         return
 
-    cust_map  = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
-    site_map  = {s["id"]: s.get("site_name",     "—") for s in sites_list     if s.get("id")}
-    dep_by_wo = {d["work_order_id"]: d for d in deployments if d.get("work_order_id")}
+    cust_map = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
+    site_map = {s["id"]: s.get("site_name",     "—") for s in sites_list     if s.get("id")}
+
+    today = date.today()
 
     # ── Machine selector ──────────────────────────────────────────────────────
     with st.container(border=True):
-        _section_hdr("manage_search", "Select Machine")
-
-        def _machine_label(m: dict) -> str:
-            code  = m.get("asset_code", "")
-            make  = m.get("make", "")
-            model = m.get("model", "")
-            sn    = m.get("serial_number", "")
-            parts = [p for p in [make, model] if p]
-            desc  = " ".join(parts)
-            label = f"{code}" if code else m.get("machine_type", "Unknown")
-            if desc:
-                label += f" — {desc}"
-            if sn:
-                label += f"  (S/N: {sn})"
-            return label
-
-        machine_options = sorted(machines, key=lambda m: m.get("asset_code") or "")
-        machine_labels  = [_machine_label(m) for m in machine_options]
-        machine_ids     = [m.get("id", "") for m in machine_options]
-
-        sel_label = st.selectbox(
-            "Machine",
-            machine_labels,
-            label_visibility="collapsed",
-            key="mh_machine",
+        st.markdown(
+            "<div class='mh-sec-hdr'>"
+            "<span class='msr' style='font-size:14px;color:#E87722;'>manage_search</span>"
+            "Select Machine</div>",
+            unsafe_allow_html=True,
         )
-        sel_idx = machine_labels.index(sel_label)
-        sel_id  = machine_ids[sel_idx]
-        sel_m   = machine_options[sel_idx]
 
-    # ── Machine hero card ─────────────────────────────────────────────────────
-    op_status = sel_m.get("operational_status", "—") or "—"
-    cn_status = sel_m.get("condition_status",   "—") or "—"
-    code_disp = sel_m.get("asset_code", "") or ""
-    type_disp = sel_m.get("machine_type", "") or ""
-    hero_sub  = " · ".join(p for p in [type_disp, code_disp] if p) or "Machine"
+        def _label(m: dict) -> str:
+            parts = [p for p in [m.get("make"), m.get("model")] if p]
+            desc  = " ".join(parts)
+            code  = m.get("asset_code", "") or m.get("machine_type", "Unknown")
+            return f"{code}  —  {desc}" if desc else code
+
+        sorted_machines = sorted(machines, key=lambda m: m.get("asset_code") or "")
+        labels          = [_label(m) for m in sorted_machines]
+        ids             = [m.get("id", "") for m in sorted_machines]
+
+        sel_label = st.selectbox("Machine", labels, label_visibility="collapsed", key="mh_machine")
+        idx       = labels.index(sel_label)
+        sel_id    = ids[idx]
+        m         = sorted_machines[idx]
+
+    # ── Machine profile ───────────────────────────────────────────────────────
+    code_disp = m.get("asset_code", "") or ""
+    type_disp = m.get("machine_type", "") or ""
+    make_model = " ".join(p for p in [m.get("make", ""), m.get("model", "")] if p) or code_disp
+    hero_sub   = " · ".join(p for p in [type_disp, code_disp] if p) or "Machine"
+    op_st      = m.get("operational_status", "") or "—"
+    cond_st    = m.get("condition_status",   "") or "—"
+    if op_st in ("Mobilizing", "Demobilizing"):
+        op_st = "In Transit"
 
     st.markdown(
-        f"<div class='mach-hero'>"
-        f"<div class='mach-hero-icon'>"
-        f"<span class='msr' style='font-size:28px;color:#fff;'>precision_manufacturing</span>"
+        f"<div class='mh-hero'>"
+        f"<div class='mh-hero-icon'>"
+        f"<span class='msr' style='font-size:26px;color:#fff;'>precision_manufacturing</span>"
         f"</div>"
         f"<div style='flex:1;min-width:0;position:relative;z-index:1;'>"
-        f"<div class='mach-hero-name'>{sel_m.get('make', '')} {sel_m.get('model', '') or code_disp}</div>"
-        f"<div class='mach-hero-sub'>{hero_sub}</div>"
+        f"<div class='mh-hero-name'>{make_model or type_disp or code_disp}</div>"
+        f"<div class='mh-hero-sub'>{hero_sub}</div>"
         f"</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
-
-    # Machine detail grid (below hero)
     st.markdown(
-        "<div class='mach-info-grid'>"
-        + _info_field("Asset Code",    sel_m.get("asset_code",       "—"))
-        + _info_field("Machine Type",  sel_m.get("machine_type",     "—"))
-        + _info_field("Make",          sel_m.get("make",             "—"))
-        + _info_field("Model",         sel_m.get("model",            "—"))
-        + _info_field("Serial Number", sel_m.get("serial_number",    "—"))
-        + _info_field("Capacity",      sel_m.get("working_capacity", "—"))
-        + _info_field("Op. Status",    op_status)
-        + _info_field("Condition",     cn_status)
+        "<div class='mh-info-grid'>"
+        + _info_cell("Asset Code",    m.get("asset_code",       "—"))
+        + _info_cell("Type",          m.get("machine_type",     "—"))
+        + _info_cell("Make",          m.get("make",             "—"))
+        + _info_cell("Model",         m.get("model",            "—"))
+        + _info_cell("Serial Number", m.get("serial_number",    "—"))
+        + _info_cell("Ownership",     m.get("ownership",        "—"))
+        + _info_cell("Op. Status",    op_st)
+        + _info_cell("Condition",     cond_st)
         + "</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Build deployment history ───────────────────────────────────────────────
-    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-
-    history: list[dict] = []
+    # ── Build deployment events ───────────────────────────────────────────────
+    deployments: list[dict] = []
     for wo in work_orders:
-        mc_raw = wo.get("machine_config")
-        if not mc_raw:
-            continue
-        try:
-            mc_list = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
-        except Exception:
-            continue
-        if not isinstance(mc_list, list):
-            continue
-
-        mc_row = next((r for r in mc_list if r.get("machine_id") == sel_id), None)
+        mc_row = _machine_in_config(wo.get("machine_config"), sel_id)
         if mc_row is None:
             continue
+        sd     = _parse_date(wo.get("start_date"))
+        ed     = _parse_date(wo.get("end_date"))
+        rental = mc_row.get("rental_per_month")
+        wo_st  = (wo.get("status") or "").strip()
+        is_active = (
+            wo_st.lower() in ("active", "running", "approved")
+            or (ed is None or ed >= today)
+        ) and (sd is not None and sd <= today)
 
-        wo_id      = wo.get("id", "")
-        dep        = dep_by_wo.get(wo_id, {})
-        rental     = mc_row.get("rental_per_month")
-        end_d      = _parse_date(wo.get("end_date"))
-        dep_status = (dep.get("deployment_status") or "—") if dep else "—"
+        wo_num = wo.get("wo_number") or "—"
+        client_wo = wo.get("client_work_ordernumber") or ""
+        wo_display = f"{wo_num} / {client_wo}" if client_wo and client_wo != wo_num else wo_num
 
-        # Compute a sortable date for ordering
-        dep_date_raw = None
-        md_raw = dep.get("machine_deployments") if dep else None
-        if md_raw:
-            try:
-                mds = json.loads(md_raw) if isinstance(md_raw, str) else md_raw
-                if isinstance(mds, list):
-                    for md in mds:
-                        if md.get("machine_id") == sel_id:
-                            dep_date_raw = (
-                                md.get("billing_start_date")
-                                or md.get("transaction_start_date")
-                                or md.get("site_reached_date")
-                            )
-                            break
-            except Exception:
-                pass
-        if not dep_date_raw and dep:
-            dep_date_raw = dep.get("deployment_date")
-        if not dep_date_raw:
-            dep_date_raw = wo.get("start_date")
-
-        wo_num    = wo.get("wo_number",             "—") or "—"
-        client_wo = wo.get("client_work_ordernumber", "") or ""
-        wo_display = wo_num
-        if client_wo and client_wo != wo_num:
-            wo_display = f"{wo_num} / {client_wo}"
-
-        history.append({
-            "_sort_date":        _parse_date(dep_date_raw) or date.min,
-            "_rental_raw":       float(rental) if rental is not None else None,
-            "_is_active":        dep_status.lower() == "active",
-            "Customer":          cust_map.get(wo.get("customer_id", ""), "—"),
-            "Site":              site_map.get(wo.get("site_id",       ""), "—"),
-            "Deployment Date":   _dep_date_for_machine(dep, sel_id, wo.get("start_date")),
-            "Release Date":      _fmt_date(end_d) if end_d else "Active",
-            "Work Order":        wo_display,
-            "Monthly Rental":    f"₹ {float(rental):,.0f}" if rental is not None else "—",
-            "Deployment Status": dep_status,
+        deployments.append({
+            "type":      "deployment",
+            "start":     sd or date.min,
+            "end":       ed,
+            "customer":  cust_map.get(wo.get("customer_id", ""), "—"),
+            "site":      site_map.get(wo.get("site_id",      ""), "—"),
+            "wo":        wo_display,
+            "rental":    float(rental) if rental is not None else None,
+            "is_active": is_active,
+            "wo_status": wo_st,
         })
 
-    # ── History KPI strip ─────────────────────────────────────────────────────
-    if history:
-        n_total_dep   = len(history)
-        n_active      = sum(1 for r in history if r["_is_active"])
-        n_cust_unique = len({r["Customer"] for r in history if r["Customer"] != "—"})
-        rentals       = [r["_rental_raw"] for r in history if r["_rental_raw"] is not None]
-        avg_rental    = (
-            f"₹ {sum(rentals) / len(rentals):,.0f}" if rentals else "—"
-        )
+    # Sort chronologically ascending to detect gaps
+    deployments.sort(key=lambda e: e["start"])
 
-        st.markdown(
-            "<div class='kpi-grid'>"
-            + _kpi_card(
-                "history", "Total Deployments", n_total_dep,
-                "across all work orders",
-                "#2563EB",
-            )
-            + _kpi_card(
-                "check_circle", "Currently Active", n_active,
-                "open deployments",
-                "#10B981",
-            )
-            + _kpi_card(
-                "groups", "Unique Customers", n_cust_unique,
-                "served over lifetime",
-                "#8B5CF6",
-            )
-            + _kpi_card(
-                "payments", "Avg Monthly Rental", avg_rental,
-                "per deployment",
-                "#F59E0B",
-            )
-            + "</div>",
-            unsafe_allow_html=True,
-        )
+    # ── Build full timeline (deployments + idle gaps) ─────────────────────────
+    timeline: list[dict] = []
+    purchase_d = _parse_date(m.get("purchase_date"))
 
-    # ── Display ───────────────────────────────────────────────────────────────
-    if not history:
-        _section_hdr("history", "Deployment History")
+    for i, dep in enumerate(deployments):
+        # Gap before this deployment
+        if i == 0:
+            gap_start = purchase_d + timedelta(days=1) if purchase_d else None
+        else:
+            prev_end = deployments[i - 1].get("end")
+            gap_start = (prev_end + timedelta(days=1)) if prev_end else None
+
+        if gap_start and dep["start"] > gap_start:
+            gap_days = (dep["start"] - gap_start).days
+            if gap_days >= 1:
+                timeline.append({
+                    "type":      "idle",
+                    "start":     gap_start,
+                    "end":       dep["start"] - timedelta(days=1),
+                    "days":      gap_days,
+                    "customer":  "—",
+                    "site":      "—",
+                    "wo":        "—",
+                    "rental":    None,
+                    "is_active": False,
+                })
+        timeline.append(dep)
+
+    # Trailing idle: if last deployment has ended
+    if deployments:
+        last_end = deployments[-1].get("end")
+        if last_end and last_end < today:
+            gap_days = (today - last_end).days
+            if gap_days >= 1:
+                timeline.append({
+                    "type":      "idle",
+                    "start":     last_end + timedelta(days=1),
+                    "end":       today,
+                    "days":      gap_days,
+                    "customer":  "—",
+                    "site":      "—",
+                    "wo":        "—",
+                    "rental":    None,
+                    "is_active": False,
+                })
+
+    # Sort descending (most recent first for display)
+    timeline.sort(key=lambda e: e["start"], reverse=True)
+
+    # ── KPI strip ─────────────────────────────────────────────────────────────
+    n_deps       = sum(1 for e in timeline if e["type"] == "deployment")
+    n_active     = sum(1 for e in timeline if e.get("is_active"))
+    n_customers  = len({e["customer"] for e in timeline
+                        if e["type"] == "deployment" and e["customer"] != "—"})
+    rentals      = [e["rental"] for e in timeline if e["rental"] is not None]
+    avg_rental   = f"₹ {sum(rentals)/len(rentals):,.0f}" if rentals else "—"
+    total_rent_d = sum(
+        (min(e.get("end") or today, today) - e["start"]).days + 1
+        for e in timeline
+        if e["type"] == "deployment" and e["start"] <= today
+    )
+
+    st.markdown(
+        "<div class='mh-kpi-grid'>"
+        + _kpi("history",   "Total Deployments", str(n_deps),    "work orders assigned",     "#2563EB")
+        + _kpi("check_circle","Active Now",      str(n_active),  "open deployments",          "#10B981")
+        + _kpi("groups",    "Unique Customers",  str(n_customers),"served over lifetime",     "#8B5CF6")
+        + _kpi("calendar_month","Rental Days",   f"{total_rent_d:,}","total on-rent days",   "#E87722")
+        + _kpi("payments",  "Avg Monthly Rental", avg_rental,    "per deployment",            "#F59E0B")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Timeline display ───────────────────────────────────────────────────────
+    if not timeline:
         st.markdown(
-            "<div class='empty-state-v2'>"
-            "<div class='empty-icon-ring'>"
-            "<span class='msr' style='color:#F97316;font-size:34px;'>history</span>"
+            "<div class='mh-empty'>"
+            "<div class='mh-empty-ring'>"
+            "<span class='msr' style='color:#F97316;font-size:32px;'>history</span>"
             "</div>"
-            "<h3>No deployment history</h3>"
+            "<h3>No history found</h3>"
             "<p>This machine has not been assigned to any work orders yet.</p>"
             "</div>",
             unsafe_allow_html=True,
         )
         return
 
-    history.sort(key=lambda r: r["_sort_date"], reverse=True)
+    # Header + Export
+    n_idle       = sum(1 for e in timeline if e["type"] == "idle")
+    dep_label    = f"{n_deps} deployment{'s' if n_deps != 1 else ''}"
+    idle_label   = f", {n_idle} idle period{'s' if n_idle != 1 else ''}" if n_idle else ""
+    tl_title     = f"Timeline — {dep_label}{idle_label}"
 
-    _section_hdr(
-        "history",
-        f"Deployment History — {len(history)} record{'s' if len(history) != 1 else ''}",
+    hdr_l, hdr_r = st.columns([5, 1])
+    with hdr_l:
+        st.markdown(
+            f"<div class='mh-sec-hdr'>"
+            f"<span class='msr' style='font-size:14px;color:#E87722;'>timeline</span>"
+            f"{tl_title}</div>",
+            unsafe_allow_html=True,
+        )
+    with hdr_r:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["Type", "Customer", "Site", "Work Order",
+                         "Start Date", "End Date", "Duration", "Monthly Rental"])
+        for e in timeline:
+            writer.writerow([
+                "On Rent" if e["type"] == "deployment" else "Idle",
+                e["customer"], e["site"], e["wo"],
+                _fmt(e["start"]),
+                _fmt(e.get("end")) if e.get("end") else ("Active" if e.get("is_active") else "—"),
+                _duration_label(e["start"], e.get("end"), today),
+                f"₹ {e['rental']:,.0f}" if e.get("rental") is not None else "—",
+            ])
+        st.download_button(
+            "↓ Export",
+            data=buf.getvalue().encode("utf-8"),
+            file_name=f"machine_history_{m.get('asset_code', sel_id)}.csv",
+            mime="text/csv",
+            key="mh_export",
+            use_container_width=True,
+        )
+
+    # Table header
+    st.markdown(
+        "<div class='mh-tl-hdr'>"
+        "<div></div>"
+        "<div>Type</div>"
+        "<div>Customer</div>"
+        "<div>Site</div>"
+        "<div>Start Date</div>"
+        "<div>End Date</div>"
+        "<div>Duration</div>"
+        "<div>Monthly Rental</div>"
+        "</div>",
+        unsafe_allow_html=True,
     )
 
-    _COLS = [
-        "Customer", "Site", "Deployment Date", "Release Date",
-        "Work Order", "Monthly Rental", "Deployment Status",
-    ]
-    df = pd.DataFrame([{k: r[k] for k in _COLS} for r in history], columns=_COLS)
+    # Table rows
+    rows_html = ""
+    for e in timeline:
+        is_dep    = e["type"] == "deployment"
+        is_active = e.get("is_active", False)
+        start_d   = e["start"]
+        end_d     = e.get("end")
+        duration  = _duration_label(start_d, end_d, today)
 
-    # Color-code Deployment Status column
-    def _style_status(val):
-        clr = _status_color(str(val))
-        return f"color:{clr};font-weight:700;"
+        # Left bar color
+        if is_dep and is_active:
+            bar_clr = "#10B981"
+        elif is_dep:
+            bar_clr = "#2563EB"
+        else:
+            bar_clr = "#D1D5DB"
 
-    st.dataframe(
-        df.style.map(_style_status, subset=["Deployment Status"]),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Deployment Date":   st.column_config.TextColumn("Deployed On",  width="medium"),
-            "Release Date":      st.column_config.TextColumn("Released On",  width="medium"),
-            "Monthly Rental":    st.column_config.TextColumn("Mthly Rental", width="medium"),
-            "Deployment Status": st.column_config.TextColumn("Status",       width="medium"),
-        },
-    )
+        # Badge
+        if is_dep and is_active:
+            badge = "<span class='mh-badge mh-badge-active'>● Active</span>"
+        elif is_dep:
+            badge = "<span class='mh-badge mh-badge-rent'>On Rent</span>"
+        else:
+            badge = "<span class='mh-badge mh-badge-idle'>Idle</span>"
 
-    st.download_button(
-        label="Export CSV",
-        data=df.to_csv(index=False).encode("utf-8"),
-        file_name=f"machine_history_{sel_m.get('asset_code', sel_id)}.csv",
-        mime="text/csv",
-        key="mh_export",
-    )
+        end_disp = (
+            "<span style='color:#10B981;font-weight:600;'>Active</span>"
+            if (is_dep and is_active and not end_d)
+            else _fmt(end_d) if end_d else "—"
+        )
+
+        rental_disp = (
+            f"<span style='color:#E87722;font-weight:700;font-variant-numeric:tabular-nums;'>"
+            f"₹ {e['rental']:,.0f}</span>"
+            if e.get("rental") is not None else
+            "<span style='color:#9CA3AF;'>—</span>"
+        )
+
+        cust_disp = (
+            f"<div style='font-size:12px;font-weight:600;color:#111827;'>{e['customer']}</div>"
+            if e["customer"] != "—" else
+            "<div style='font-size:12px;color:#9CA3AF;'>—</div>"
+        )
+        site_disp = (
+            f"<div style='font-size:12px;color:#374151;'>{e['site']}</div>"
+            if e["site"] != "—" else
+            "<div style='font-size:12px;color:#9CA3AF;'>—</div>"
+        )
+
+        wo_hint = (
+            f"<div style='font-size:10px;color:#9CA3AF;margin-top:1px;'>{e['wo']}</div>"
+            if is_dep and e["wo"] != "—" else ""
+        )
+
+        row_bg = "#FAFFFE" if (is_dep and is_active) else ("#F9FAFC" if not is_dep else "#fff")
+
+        rows_html += (
+            f"<div class='mh-tl-row' style='background:{row_bg};'>"
+            f"<div class='mh-tl-bar' style='background:{bar_clr};'></div>"
+            f"<div>{badge}</div>"
+            f"<div>{cust_disp}{wo_hint}</div>"
+            f"<div>{site_disp}</div>"
+            f"<div style='font-size:12px;color:#374151;'>{_fmt(start_d)}</div>"
+            f"<div style='font-size:12px;color:#374151;'>{end_disp}</div>"
+            f"<div style='font-size:12px;font-weight:600;color:#374151;'>{duration}</div>"
+            f"<div>{rental_disp}</div>"
+            f"</div>"
+        )
+
+    st.markdown(rows_html, unsafe_allow_html=True)
