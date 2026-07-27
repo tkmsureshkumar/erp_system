@@ -718,6 +718,12 @@ class SupabaseClient:
         """Update the currently authenticated user's password."""
         self.client.auth.update_user({"password": new_password})
 
+    def admin_reset_user_password(self, user_id: str, new_password: str) -> None:
+        """Directly set a user's password via the admin API (no email required)."""
+        self.admin_client.auth.admin.update_user_by_id(
+            user_id, {"password": new_password}
+        )
+
     def sign_in(self, email: str, password: str) -> tuple:
         """
         Authenticate with Supabase, then fetch the matching user_profiles row.

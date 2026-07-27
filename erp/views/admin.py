@@ -456,6 +456,52 @@ def render() -> None:
                         except Exception as exc:
                             st.error(f"Failed to update: {exc}")
 
+                    # ── Reset Password (admin direct reset, no email needed) ──
+                    st.markdown(
+                        "<div style='margin-top:14px;border-top:1px solid var(--border,#E2EBF0);padding-top:14px'></div>",
+                        unsafe_allow_html=True,
+                    )
+                    _section_hdr("lock_reset", "Reset Password")
+                    with st.form(f"reset_pw_{uid}"):
+                        rp1, rp2 = st.columns(2)
+                        with rp1:
+                            new_pw = st.text_input(
+                                "New Password",
+                                type="password",
+                                placeholder="Min 6 characters",
+                                key=f"np1_{uid}",
+                            )
+                        with rp2:
+                            new_pw2 = st.text_input(
+                                "Confirm Password",
+                                type="password",
+                                placeholder="Re-enter password",
+                                key=f"np2_{uid}",
+                            )
+                        reset_btn = st.form_submit_button("Reset Password", type="primary")
+
+                    if reset_btn:
+                        if not new_pw or len(new_pw) < 6:
+                            st.error("Password must be at least 6 characters.")
+                        elif new_pw != new_pw2:
+                            st.error("Passwords do not match.")
+                        else:
+                            try:
+                                sb.admin_reset_user_password(uid, new_pw)
+                                sb.log_activity(
+                                    user_id=user.id if user else None,
+                                    user_email=profile.get("email", ""),
+                                    user_name=profile.get("full_name", ""),
+                                    action="UPDATE_USER",
+                                    module="Admin",
+                                    record_id=uid,
+                                    record_label=uname,
+                                    details={"action": "password_reset"},
+                                )
+                                st.success(f"Password for {uname} has been reset successfully.")
+                            except Exception as exc:
+                                st.error(f"Failed to reset password: {exc}")
+
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 2 — Activity Log
     # ══════════════════════════════════════════════════════════════════════════
