@@ -247,6 +247,7 @@ def render() -> None:
     # â”€â”€ Load data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         sb             = SupabaseClient()
+        machines       = sb.list_machines()
         work_orders    = sb.list_work_orders()
         customers_list = sb.list_customers()
         sites_list     = sb.list_sites()
@@ -257,6 +258,8 @@ def render() -> None:
     cust_map = {c["id"]: c.get("customer_name", "â€”") for c in customers_list if c.get("id")}
     site_map = {s["id"]: s.get("site_name",     "â€”") for s in sites_list     if s.get("id")}
     today    = date.today()
+    mach_map = {m["id"]: m for m in machines if m.get("id")}
+    wo_map   = {wo.get("id"): wo for wo in work_orders}
 
     # Build all rows
     all_rows = [_build_wo_row(wo, cust_map, site_map, today) for wo in work_orders]
