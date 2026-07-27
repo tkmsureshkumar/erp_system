@@ -127,6 +127,15 @@ def _recalc_df(
         raw_net   = _net_hours(st_, et_)
         is_sunday = str(row.get("Weekday", "")) == "Sunday"
 
+        # 00:00 / 00:00 means "no entry" — clear derived columns and skip.
+        _zero = time(0, 0)
+        if st_ == _zero and et_ == _zero:
+            for _col, _val in [("Net Time", None), ("OT", 0.0), ("Breakdown Hours", 0.0)]:
+                if out.at[idx, _col] != _val:
+                    out.at[idx, _col] = _val
+                    changed = True
+            continue
+
         if raw_net is not None:
             if is_sunday:
                 exp_net = None
