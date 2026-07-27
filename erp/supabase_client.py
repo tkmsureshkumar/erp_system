@@ -704,7 +704,19 @@ class SupabaseClient:
 
     def send_password_reset_email(self, email: str) -> None:
         """Send a Supabase password-reset email to the given address."""
-        self.client.auth.reset_password_email(email)
+        site_url = _secret("SITE_URL", "")
+        options: dict = {}
+        if site_url:
+            options["redirect_to"] = site_url
+        self.client.auth.reset_password_email(email, options)
+
+    def set_recovery_session(self, access_token: str, refresh_token: str) -> None:
+        """Establish a Supabase session from password-reset tokens."""
+        self.client.auth.set_session(access_token, refresh_token or access_token)
+
+    def update_user_password(self, new_password: str) -> None:
+        """Update the currently authenticated user's password."""
+        self.client.auth.update_user({"password": new_password})
 
     def sign_in(self, email: str, password: str) -> tuple:
         """

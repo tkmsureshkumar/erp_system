@@ -8,6 +8,7 @@ navbar) and uses st.columns for centering.
 from __future__ import annotations
 
 import streamlit as st
+import streamlit.components.v1 as _components
 
 from erp.supabase_client import SupabaseClient
 
@@ -195,6 +196,13 @@ div[data-testid="element-container"]:has(button#back_to_login) {
     line-height  : 1.5;
 }
 
+/* ── Password hint ───────────────────────────────────────────────────────── */
+.pw-hint {
+    font-size  : 11px;
+    color      : #9CA3AF;
+    margin-top : 4px;
+}
+
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .login-footer {
     text-align    : center;
@@ -217,7 +225,32 @@ def render() -> None:
 
     st.markdown(_LOGIN_CSS, unsafe_allow_html=True)
 
-    # Toggle between sign-in and reset-password modes
+    # ── Hash → query-param bridge ─────────────────────────────────────────────
+    # Supabase password-reset links use a URL hash (#access_token=...).
+    # Python / Streamlit cannot read hash fragments, so we inject a tiny JS
+    # snippet that detects the recovery hash and replaces it with query params,
+    # causing a page reload that Python CAN read.
+    _components.html("""
+<script>
+(function(){
+    try {
+        var h = window.parent.location.hash;
+        if (!h || h.indexOf('access_token') === -1) return;
+        var p = new URLSearchParams(h.replace(/^#/, ''));
+        if (p.get('type') !== 'recovery') return;
+        var u = new URL(window.parent.location.href);
+        u.hash = '';
+        u.searchParams.set('access_token', p.get('access_token') || '');
+        u.searchParams.set('type', 'recovery');
+        var rt = p.get('refresh_token');
+        if (rt) u.searchParams.set('refresh_token', rt);
+        window.parent.location.replace(u.toString());
+    } catch(e) {}
+})();
+</script>
+""", height=0, scrolling=False)
+
+    # Toggle between sign-in and forgot-password modes
     if "show_reset" not in st.session_state:
         st.session_state["show_reset"] = False
 
@@ -239,9 +272,69 @@ def render() -> None:
         )
 
         # ══════════════════════════════════════════════════════════════
-        # RESET PASSWORD MODE
+        # SET NEW PASSWORD MODE  (user arrived via email reset link)
         # ══════════════════════════════════════════════════════════════
-        if st.session_state["show_reset"]:
+        _at = st.query_params.get("access_token", "")
+        _rt = st.query_params.get("refresh_token", "")
+        _tp = st.query_params.get("type", "")
+
+        if _tp == "recovery" and _at:
+            st.markdown(
+                "<p class='login-heading'>Set a new password</p>"
+                "<p class='login-sub'>Choose a strong password for your account.</p>"
+                "<hr class='login-divider'>",
+                unsafe_allow_html=True,
+            )
+
+            with st.form("set_password_form", clear_on_submit=False):
+                new_pw  = st.text_input("New Password",     type="password", placeholder="Min. 8 characters")
+                conf_pw = st.text_input("Confirm Password", type="password", placeholder="Repeat new password")
+                set_submitted = st.form_submit_button("Update Password", use_container_width=True, type="primary")
+
+            st.markdown("<p class='pw-hint'>Password must be at least 8 characters.</p>", unsafe_allow_html=True)
+
+            if set_submitted:
+                if not new_pw or not conf_pw:
+                    st.markdown(
+                        "<div class='login-error'><span class='login-error-icon'>&#9888;</span>"
+                        "Please fill in both password fields.</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif new_pw != conf_pw:
+                    st.markdown(
+                        "<div class='login-error'><span class='login-error-icon'>&#9888;</span>"
+                        "Passwords do not match.</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif len(new_pw) < 8:
+                    st.markdown(
+                        "<div class='login-error'><span class='login-error-icon'>&#9888;</span>"
+                        "Password must be at least 8 characters.</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    try:
+                        sb = SupabaseClient()
+                        sb.set_recovery_session(_at, _rt)
+                        sb.update_user_password(new_pw)
+                        st.query_params.clear()
+                        st.markdown(
+                            "<div class='login-success'>&#10003;&nbsp; Password updated successfully! "
+                            "You can now sign in with your new password.</div>",
+                            unsafe_allow_html=True,
+                        )
+                        st.session_state["show_reset"] = False
+                    except Exception as exc:
+                        st.markdown(
+                            f"<div class='login-error'><span class='login-error-icon'>&#9888;</span>"
+                            f"Could not update password: {exc}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+        # ══════════════════════════════════════════════════════════════
+        # FORGOT PASSWORD MODE  (user clicked "Forgot password?")
+        # ══════════════════════════════════════════════════════════════
+        elif st.session_state["show_reset"]:
             st.markdown(
                 "<p class='login-heading'>Reset your password</p>"
                 "<p class='login-sub'>Enter your email and we'll send you a reset link.</p>"
