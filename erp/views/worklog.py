@@ -1661,13 +1661,18 @@ def render() -> None:
 
     # ── Documents ──────────────────────────────────────────────────────────────
     _wl_doc_id = _wl_rec.get("id")
-    if _wl_doc_id:
-        with st.expander("📎 Documents", expanded=False):
+    with st.expander("📎 Documents", expanded=False):
+        if _wl_doc_id:
             render_document_panel(
                 sb,
                 record_type = "work_log",
                 record_id   = _wl_doc_id,
                 key_prefix  = f"wl_{selected_wo_id}_{machine_idx}",
+            )
+        else:
+            st.info(
+                "Save the work log first (as a draft or final) to enable document uploads "
+                "for this work log entry."
             )
 
     # ── Action buttons (hidden when locked) ────────────────────────────────────
