@@ -625,7 +625,14 @@ def render() -> None:
                 record_type=None if rq_type == "All" else rq_type,
             )
         except Exception as exc:
-            st.error(f"Failed to load requests: {exc}")
+            _err = str(exc)
+            if "PGRST205" in _err or "edit_requests" in _err:
+                st.info(
+                    "The Edit Requests table has not been created in the database yet. "
+                    "Run the setup SQL in Supabase to enable this feature."
+                )
+            else:
+                st.error(f"Failed to load requests: {exc}")
             reqs = []
 
         if not reqs:
