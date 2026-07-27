@@ -706,6 +706,8 @@ if not auth.is_logged_in():
                     if _profile and _profile.get("is_active", True):
                         st.session_state["user"]    = _resp.user
                         st.session_state["profile"] = _profile
+                        st.session_state["_at"]     = _at
+                        st.session_state["_rt"]     = _rt
                         st.rerun()
             except Exception:
                 _all2 = _cc.getAll() or {}
@@ -724,8 +726,10 @@ if "_new_tokens" in st.session_state:
     _tok = st.session_state.pop("_new_tokens")
     if _tok.get("at"):
         _cc.set("il_at", _tok["at"], max_age=86400 * 7)   # 7 days
+        st.session_state["_at"] = _tok["at"]
     if _tok.get("rt"):
         _cc.set("il_rt", _tok["rt"], max_age=86400 * 30)  # 30 days
+        st.session_state["_rt"] = _tok["rt"]
 
 # ============================================================
 # SIDEBAR + TOPBAR

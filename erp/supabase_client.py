@@ -43,6 +43,17 @@ class SupabaseClient:
             raise RuntimeError("supabase package not installed. Run: pip install supabase")
         self.client = create_client(url, key)
 
+        # If a logged-in user's JWT is stored in session_state, attach it so
+        # self.client runs as `authenticated` and RLS policies apply correctly.
+        try:
+            import streamlit as _st  # noqa: PLC0415
+            _at = _st.session_state.get("_at")
+            _rt = _st.session_state.get("_rt")
+            if _at and _rt:
+                self.client.auth.set_session(_at, _rt)
+        except Exception:
+            pass
+
         # Admin client uses the service-role key (bypasses RLS, needed for
         # auth.admin.create_user and user_profiles writes).
         service_key = _secret('SUPABASE_SERVICE_KEY')
