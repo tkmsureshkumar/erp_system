@@ -420,12 +420,6 @@ def render() -> None:
                 )
 
             # Forgot password link (below the form)
-            st.markdown(
-                "<div class='forgot-link'>"
-                "<a id='forgot_trigger'>Forgot password?</a>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
             if st.button("Forgot password?", key="goto_reset",
                          help="Send a password reset link to your email"):
                 st.session_state["show_reset"] = True
