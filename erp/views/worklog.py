@@ -130,9 +130,15 @@ def _recalc_df(
         # 00:00 / 00:00 means "no entry" — clear derived columns and skip.
         _zero = time(0, 0)
         if st_ == _zero and et_ == _zero:
-            for _col, _val in [("Net Time", None), ("OT", 0.0), ("Breakdown Hours", 0.0)]:
-                if out.at[idx, _col] != _val:
-                    out.at[idx, _col] = _val
+            _cur_net = out.at[idx, "Net Time"]
+            if not _safe_isnan(_cur_net):
+                out.at[idx, "Net Time"] = None
+                changed = True
+            for _col in ("OT", "Breakdown Hours"):
+                _cur = out.at[idx, _col]
+                _cur_f = 0.0 if _safe_isnan(_cur) else float(_cur)
+                if abs(_cur_f) > 0.001:
+                    out.at[idx, _col] = 0.0
                     changed = True
             continue
 
