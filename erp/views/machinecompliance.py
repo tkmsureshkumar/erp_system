@@ -108,7 +108,7 @@ def _build_export_df(machines: list[dict], records_by_machine: dict) -> pd.DataF
         def _st(ct: str) -> str:
             return _status(_machine_expiry(m, latest, ct))[0]
 
-        exps = [_machine_expiry(m, ct) for ct in _TYPES_EXPORT]
+        exps = [_machine_expiry(m, latest, ct) for ct in _TYPES_EXPORT]
         rows.append({
             "Asset Code":       m.get("asset_code", ""),
             "Machine Type":     m.get("machine_type", ""),
