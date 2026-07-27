@@ -702,6 +702,10 @@ class SupabaseClient:
 
     # ── Auth / User profiles ──────────────────────────────────────────────
 
+    def send_password_reset_email(self, email: str) -> None:
+        """Send a Supabase password-reset email to the given address."""
+        self.client.auth.reset_password_email(email)
+
     def sign_in(self, email: str, password: str) -> tuple:
         """
         Authenticate with Supabase, then fetch the matching user_profiles row.

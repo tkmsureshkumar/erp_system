@@ -142,6 +142,59 @@ header                     { visibility: hidden !important; }
     outline     : none !important;
 }
 
+/* ── Forgot-password link ────────────────────────────────────────────────── */
+.forgot-link {
+    text-align : right;
+    margin-top : -10px;
+    margin-bottom: 6px;
+    font-size  : 12px;
+}
+.forgot-link a {
+    color          : #E87722;
+    text-decoration: none;
+    font-weight    : 600;
+    cursor         : pointer;
+}
+.forgot-link a:hover { text-decoration: underline; }
+
+/* ── Style the Forgot/Back buttons as plain text links ───────────────────── */
+[data-testid="stBaseButton-secondary"][kind="secondary"]:has(> p) {
+    background : transparent !important;
+    border     : none !important;
+    padding    : 0 !important;
+    color      : #E87722 !important;
+    font-size  : 12px !important;
+    font-weight: 600 !important;
+    box-shadow : none !important;
+    margin-top : 4px !important;
+}
+button[kind="secondary"][data-testid="stBaseButton-secondary"] {
+    background : transparent !important;
+    border     : none !important;
+    box-shadow : none !important;
+}
+/* Specifically target the forgot / back buttons by key */
+div[data-testid="element-container"]:has(button#goto_reset),
+div[data-testid="element-container"]:has(button#back_to_login) {
+    text-align: right;
+}
+
+/* ── Success banner ──────────────────────────────────────────────────────── */
+.login-success {
+    display      : flex;
+    align-items  : flex-start;
+    gap          : 10px;
+    background   : #F0FDF4;
+    border       : 1px solid #BBF7D0;
+    border-left  : 4px solid #16A34A;
+    border-radius: 8px;
+    padding      : 11px 14px;
+    margin-top   : 14px;
+    font-size    : 13px;
+    color        : #166534;
+    line-height  : 1.5;
+}
+
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .login-footer {
     text-align    : center;
@@ -162,18 +215,16 @@ header                     { visibility: hidden !important; }
 def render() -> None:
     """Render the full-page login card."""
 
-    # ------------------------------------------------------------------
-    # CSS — dark background, card style, orange button, animations
-    # ------------------------------------------------------------------
     st.markdown(_LOGIN_CSS, unsafe_allow_html=True)
 
-    # ------------------------------------------------------------------
-    # Centre the card using three equal columns
-    # ------------------------------------------------------------------
+    # Toggle between sign-in and reset-password modes
+    if "show_reset" not in st.session_state:
+        st.session_state["show_reset"] = False
+
     _, col, _ = st.columns([1, 1, 1])
 
     with col:
-        # Brand header
+        # ── Brand header ───────────────────────────────────────────────
         st.markdown(
             """
             <div class="login-brand">
@@ -183,115 +234,186 @@ def render() -> None:
                 <div class="login-brand-sub">Fleet Operations ERP</div>
               </div>
             </div>
-            <p class="login-heading">Sign in to your account</p>
-            <p class="login-sub">Enter your credentials to continue.</p>
-            <hr class="login-divider">
             """,
             unsafe_allow_html=True,
         )
 
-        # ------------------------------------------------------------------
-        # Login form
-        # ------------------------------------------------------------------
-        with st.form("login_form", clear_on_submit=False):
-            email = st.text_input(
-                "Email Address",
-                placeholder="you@example.com",
-                autocomplete="email",
-            )
-            password = st.text_input(
-                "Password",
-                type="password",
-                placeholder="••••••••",
-                autocomplete="current-password",
-            )
-            submitted = st.form_submit_button(
-                "Sign In",
-                use_container_width=True,
-                type="primary",
+        # ══════════════════════════════════════════════════════════════
+        # RESET PASSWORD MODE
+        # ══════════════════════════════════════════════════════════════
+        if st.session_state["show_reset"]:
+            st.markdown(
+                "<p class='login-heading'>Reset your password</p>"
+                "<p class='login-sub'>Enter your email and we'll send you a reset link.</p>"
+                "<hr class='login-divider'>",
+                unsafe_allow_html=True,
             )
 
-        # ------------------------------------------------------------------
-        # Handle submission (outside the form context so widgets are stable)
-        # ------------------------------------------------------------------
-        if submitted:
-            email_clean = (email or "").strip()
-            if not email_clean or not password:
-                st.markdown(
-                    "<div class='login-error'>"
-                    "<span class='login-error-icon'>&#9888;</span>"
-                    "Please enter your email address and password."
-                    "</div>",
-                    unsafe_allow_html=True,
+            with st.form("reset_form", clear_on_submit=False):
+                reset_email = st.text_input(
+                    "Email Address",
+                    placeholder="you@example.com",
+                    autocomplete="email",
                 )
-                return
+                reset_submitted = st.form_submit_button(
+                    "Send Reset Link",
+                    use_container_width=True,
+                    type="primary",
+                )
 
-            try:
-                sb = SupabaseClient()
-                user, profile, session = sb.sign_in(email_clean, password)
-            except Exception as exc:
-                msg = str(exc)
-                if any(k in msg.lower() for k in (
-                    "invalid login", "invalid_credentials",
-                    "wrong password", "email not confirmed",
-                )):
-                    err_txt = "Invalid email or password. Please try again."
+            if reset_submitted:
+                email_clean = (reset_email or "").strip()
+                if not email_clean:
+                    st.markdown(
+                        "<div class='login-error'>"
+                        "<span class='login-error-icon'>&#9888;</span>"
+                        "Please enter your email address."
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
                 else:
-                    err_txt = f"Sign-in failed: {msg}"
-                st.markdown(
-                    f"<div class='login-error'>"
-                    f"<span class='login-error-icon'>&#9888;</span>"
-                    f"{err_txt}"
-                    f"</div>",
-                    unsafe_allow_html=True,
+                    try:
+                        sb = SupabaseClient()
+                        sb.send_password_reset_email(email_clean)
+                        st.markdown(
+                            "<div class='login-success'>"
+                            "&#10003;&nbsp; Password reset email sent. "
+                            "Check your inbox and follow the link to set a new password."
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
+                    except Exception as exc:
+                        st.markdown(
+                            f"<div class='login-error'>"
+                            f"<span class='login-error-icon'>&#9888;</span>"
+                            f"Could not send reset email: {exc}"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+
+            st.markdown("<div style='margin-top:16px;text-align:center;font-size:13px;color:#6B7280;'>", unsafe_allow_html=True)
+            if st.button("← Back to Sign In", key="back_to_login", use_container_width=False):
+                st.session_state["show_reset"] = False
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # ══════════════════════════════════════════════════════════════
+        # SIGN IN MODE
+        # ══════════════════════════════════════════════════════════════
+        else:
+            st.markdown(
+                "<p class='login-heading'>Sign in to your account</p>"
+                "<p class='login-sub'>Enter your credentials to continue.</p>"
+                "<hr class='login-divider'>",
+                unsafe_allow_html=True,
+            )
+
+            with st.form("login_form", clear_on_submit=False):
+                email = st.text_input(
+                    "Email Address",
+                    placeholder="you@example.com",
+                    autocomplete="email",
                 )
-                return
-
-            if not profile:
-                st.markdown(
-                    "<div class='login-error'>"
-                    "<span class='login-error-icon'>&#9888;</span>"
-                    "Your account profile was not found. "
-                    "Contact your administrator."
-                    "</div>",
-                    unsafe_allow_html=True,
+                password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="••••••••",
+                    autocomplete="current-password",
                 )
-                return
-
-            if not profile.get("is_active", True):
-                st.markdown(
-                    "<div class='login-error'>"
-                    "<span class='login-error-icon'>&#9888;</span>"
-                    "Your account has been deactivated. "
-                    "Contact your administrator."
-                    "</div>",
-                    unsafe_allow_html=True,
+                submitted = st.form_submit_button(
+                    "Sign In",
+                    use_container_width=True,
+                    type="primary",
                 )
-                return
 
-            # Store session
-            st.session_state["user"] = user
-            st.session_state["profile"] = profile
-            # Stash tokens so app.py can save them to cookies
-            if session:
-                st.session_state["_new_tokens"] = {
-                    "at": session.access_token,
-                    "rt": session.refresh_token,
-                }
+            # Forgot password link (below the form)
+            st.markdown(
+                "<div class='forgot-link'>"
+                "<a id='forgot_trigger'>Forgot password?</a>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("Forgot password?", key="goto_reset",
+                         help="Send a password reset link to your email"):
+                st.session_state["show_reset"] = True
+                st.rerun()
 
-            # Log the login event (non-fatal)
-            try:
-                sb.log_activity(
-                    user_id=user.id,
-                    user_email=profile.get("email", email_clean),
-                    user_name=profile.get("full_name", ""),
-                    action="LOGIN",
-                    module="Auth",
-                )
-            except Exception:
-                pass
+            # Handle sign-in submission
+            if submitted:
+                email_clean = (email or "").strip()
+                if not email_clean or not password:
+                    st.markdown(
+                        "<div class='login-error'>"
+                        "<span class='login-error-icon'>&#9888;</span>"
+                        "Please enter your email address and password."
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    return
 
-            st.rerun()
+                try:
+                    sb = SupabaseClient()
+                    user, profile, session = sb.sign_in(email_clean, password)
+                except Exception as exc:
+                    msg = str(exc)
+                    if any(k in msg.lower() for k in (
+                        "invalid login", "invalid_credentials",
+                        "wrong password", "email not confirmed",
+                    )):
+                        err_txt = "Invalid email or password. Please try again."
+                    else:
+                        err_txt = f"Sign-in failed: {msg}"
+                    st.markdown(
+                        f"<div class='login-error'>"
+                        f"<span class='login-error-icon'>&#9888;</span>"
+                        f"{err_txt}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                    return
+
+                if not profile:
+                    st.markdown(
+                        "<div class='login-error'>"
+                        "<span class='login-error-icon'>&#9888;</span>"
+                        "Your account profile was not found. "
+                        "Contact your administrator."
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    return
+
+                if not profile.get("is_active", True):
+                    st.markdown(
+                        "<div class='login-error'>"
+                        "<span class='login-error-icon'>&#9888;</span>"
+                        "Your account has been deactivated. "
+                        "Contact your administrator."
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    return
+
+                st.session_state["user"]    = user
+                st.session_state["profile"] = profile
+                if session:
+                    st.session_state["_new_tokens"] = {
+                        "at": session.access_token,
+                        "rt": session.refresh_token,
+                    }
+
+                try:
+                    sb.log_activity(
+                        user_id=user.id,
+                        user_email=profile.get("email", email_clean),
+                        user_name=profile.get("full_name", ""),
+                        action="LOGIN",
+                        module="Auth",
+                    )
+                except Exception:
+                    pass
+
+                st.rerun()
 
     # Footer sits on the dark background, below the card
     st.markdown(
