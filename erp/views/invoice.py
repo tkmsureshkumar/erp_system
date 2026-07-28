@@ -143,6 +143,13 @@ def _compute_billing(wl: dict, mc: dict) -> dict:
     ot_rate   = float(wl.get("ot_rate") or 0)
     deduction = float(wl.get("deduction") or 0)
 
+    add_op_qty   = float(wl.get("add_operator_qty") or 0)
+    add_op_rate  = float(wl.get("add_operator_rate") or 0)
+    add_op_amt   = round(add_op_qty * add_op_rate, 2)
+    add_acc_qty  = float(wl.get("add_accommodation_qty") or 0)
+    add_acc_rate = float(wl.get("add_accommodation_rate") or 0)
+    add_acc_amt  = round(add_acc_qty * add_acc_rate, 2)
+
     work_hrs   = no_days * shift_hr
     actual_hrs = sum(float(r.get("net_time") or 0) for r in rows)
     qty        = round(actual_hrs / work_hrs, 3) if work_hrs > 0 else 0.0
@@ -153,7 +160,9 @@ def _compute_billing(wl: dict, mc: dict) -> dict:
         "qty": qty, "rate": rental, "hiring": hiring,
         "ot_hrs": ot_hrs, "ot_rate": ot_rate, "ot_amt": ot_amt,
         "deduction": deduction,
-        "net": max(0.0, hiring + ot_amt - deduction),
+        "add_op_qty": add_op_qty, "add_op_rate": add_op_rate, "add_op_amt": add_op_amt,
+        "add_acc_qty": add_acc_qty, "add_acc_rate": add_acc_rate, "add_acc_amt": add_acc_amt,
+        "net": max(0.0, hiring + ot_amt - deduction + add_op_amt + add_acc_amt),
     }
 
 
@@ -1652,6 +1661,22 @@ def render() -> None:
                             "qty":    "—",
                             "rate":   0,
                             "amount": -b["deduction"],
+                        })
+                    if b["add_op_amt"] > 0:
+                        grp["items"].append({
+                            "desc":   "Additional Operator Charges",
+                            "uom":    "Nos",
+                            "qty":    f"{b['add_op_qty']:.0f}",
+                            "rate":   b["add_op_rate"],
+                            "amount": b["add_op_amt"],
+                        })
+                    if b["add_acc_amt"] > 0:
+                        grp["items"].append({
+                            "desc":   "Additional Accommodation Charges",
+                            "uom":    "Nos",
+                            "qty":    f"{b['add_acc_qty']:.0f}",
+                            "rate":   b["add_acc_rate"],
+                            "amount": b["add_acc_amt"],
                         })
                 elif item["type"] == "mob":
                     grp["items"].append({

@@ -1367,11 +1367,27 @@ def render() -> None:
         except Exception:
             _wl_rec_sync = {}
         if _wl_rec_sync:
-            st.session_state["wl_ot_rate"]   = float(_wl_rec_sync.get("ot_rate") or 0.0)
-            st.session_state["wl_deduction"] = float(_wl_rec_sync.get("deduction") or 0.0)
+            st.session_state["wl_ot_rate"]        = float(_wl_rec_sync.get("ot_rate") or 0.0)
+            st.session_state["wl_deduction"]      = float(_wl_rec_sync.get("deduction") or 0.0)
+            _aop_q = float(_wl_rec_sync.get("add_operator_qty") or 0.0)
+            _aop_r = float(_wl_rec_sync.get("add_operator_rate") or 0.0)
+            _aac_q = float(_wl_rec_sync.get("add_accommodation_qty") or 0.0)
+            _aac_r = float(_wl_rec_sync.get("add_accommodation_rate") or 0.0)
+            st.session_state["wl_add_op_on"]       = _aop_q > 0 or _aop_r > 0
+            st.session_state["wl_add_op_qty"]      = _aop_q
+            st.session_state["wl_add_op_rate"]     = _aop_r
+            st.session_state["wl_add_acc_on"]      = _aac_q > 0 or _aac_r > 0
+            st.session_state["wl_add_acc_qty"]     = _aac_q
+            st.session_state["wl_add_acc_rate"]    = _aac_r
         else:
-            st.session_state["wl_ot_rate"]   = float(selected_machine.get("ot_rate") or 0.0)
-            st.session_state["wl_deduction"] = 0.0
+            st.session_state["wl_ot_rate"]         = float(selected_machine.get("ot_rate") or 0.0)
+            st.session_state["wl_deduction"]       = 0.0
+            st.session_state["wl_add_op_on"]       = False
+            st.session_state["wl_add_op_qty"]      = 0.0
+            st.session_state["wl_add_op_rate"]     = 0.0
+            st.session_state["wl_add_acc_on"]      = False
+            st.session_state["wl_add_acc_qty"]     = 0.0
+            st.session_state["wl_add_acc_rate"]    = 0.0
 
         # Cache previous month's schedule for history auto-fill (one DB fetch per month/machine change)
         _prev_pm = selected_month_num - 1 if selected_month_num > 1 else 12
@@ -1430,6 +1446,44 @@ def render() -> None:
             help="Defaults to No. of Days from Work Order. Edit here to override for this billing calculation.",
             key="wl_working_days",
         )
+
+    # ── Additional Operator / Accommodation Charges ───────────────────────────
+    _ac1, _ac2 = st.columns(2)
+    with _ac1:
+        _add_op_on = st.checkbox("Additional Operator Charges", key="wl_add_op_on")
+        if _add_op_on:
+            _op_a, _op_b = st.columns(2)
+            with _op_a:
+                add_operator_qty = st.number_input(
+                    "Qty", min_value=0.0, step=1.0, format="%.0f", key="wl_add_op_qty",
+                )
+            with _op_b:
+                add_operator_rate = st.number_input(
+                    "Rate (₹)", min_value=0.0, step=500.0, format="%.2f", key="wl_add_op_rate",
+                )
+            if add_operator_qty > 0 and add_operator_rate > 0:
+                st.caption(f"Amount: ₹ {add_operator_qty * add_operator_rate:,.2f}")
+        else:
+            add_operator_qty  = 0.0
+            add_operator_rate = 0.0
+
+    with _ac2:
+        _add_acc_on = st.checkbox("Additional Accommodation Charges", key="wl_add_acc_on")
+        if _add_acc_on:
+            _acc_a, _acc_b = st.columns(2)
+            with _acc_a:
+                add_accommodation_qty = st.number_input(
+                    "Qty", min_value=0.0, step=1.0, format="%.0f", key="wl_add_acc_qty",
+                )
+            with _acc_b:
+                add_accommodation_rate = st.number_input(
+                    "Rate (₹)", min_value=0.0, step=500.0, format="%.2f", key="wl_add_acc_rate",
+                )
+            if add_accommodation_qty > 0 and add_accommodation_rate > 0:
+                st.caption(f"Amount: ₹ {add_accommodation_qty * add_accommodation_rate:,.2f}")
+        else:
+            add_accommodation_qty  = 0.0
+            add_accommodation_rate = 0.0
 
     # ── Load DB record once (draft banner + schedule init) ────────────────────
     _mkey = selected_machine.get("machine_id") or str(machine_idx)
@@ -1728,6 +1782,10 @@ def render() -> None:
                         year=_billing_month_str,
                         ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
                         deduction=deduction_input,
+                        add_operator_qty=add_operator_qty if _add_op_on else 0.0,
+                        add_operator_rate=add_operator_rate if _add_op_on else 0.0,
+                        add_accommodation_qty=add_accommodation_qty if _add_acc_on else 0.0,
+                        add_accommodation_rate=add_accommodation_rate if _add_acc_on else 0.0,
                         schedule_data=_sjson,
                         is_draft=True,
                     ))
@@ -1759,6 +1817,10 @@ def render() -> None:
                 year=_billing_month_str,
                 ot_rate=ot_rate_input if ot_rate_input > 0 else 0.0,
                 deduction=deduction_input,
+                add_operator_qty=add_operator_qty if _add_op_on else 0.0,
+                add_operator_rate=add_operator_rate if _add_op_on else 0.0,
+                add_accommodation_qty=add_accommodation_qty if _add_acc_on else 0.0,
+                add_accommodation_rate=add_accommodation_rate if _add_acc_on else 0.0,
                 schedule_data=_make_schedule_json(),
                 is_draft=False,
             )
