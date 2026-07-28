@@ -786,13 +786,15 @@ def render() -> None:
                 ):
                     selected_items.append({"type": "demob", "mc": mc, "amount": demob, "sl": i + 1})
 
-                # Item code — shown only when the toggle is on (reads prior session state)
+                # Item code — auto-populated from the machine config (set in Work Orders)
                 if st.session_state.get("inv_ic", False):
+                    _mc_ic = mc.get("item_code") or ""
                     st.text_input(
                         "Item Code",
+                        value=_mc_ic,
                         key=f"inv_ic_val_{mid}",
                         placeholder="e.g. SRV-001",
-                        help="Printed in the Item Code column of the invoice",
+                        help="Auto-filled from Work Order machine config. Edit here to override for this invoice.",
                     )
 
         # ── Invoice config ─────────────────────────────────────────────────────

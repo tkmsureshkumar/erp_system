@@ -410,6 +410,7 @@ def _init_dialog_state(row: dict, label_to_details: dict, ref_date) -> None:
         p + "vendor_rental":  float(row.get("vendor_rental_amount") or 0),
         p + "vendor_mobile":  row.get("vendor_mobile_no")     or "",
         p + "vendor_demob":   row.get("vendor_demob")         or "",
+        p + "item_code":      row.get("item_code")            or "",
     })
 
 
@@ -466,6 +467,13 @@ def _machine_row_dialog(
 
     rental = st.number_input(
         "Rental / Month", min_value=0.0, step=1000.0, format="%.0f", key=p + "rental",
+    )
+
+    item_code = st.text_input(
+        "Item Code",
+        placeholder="e.g. SRV-001",
+        help="Printed in the Item Code column of the invoice",
+        key=p + "item_code",
     )
 
     # Cycle day dropdowns — Calendar Month auto-fills to day 1 → 31
@@ -606,6 +614,7 @@ def _machine_row_dialog(
                     "vendor_rental_amount":     float(vendor_rental or 0),
                     "vendor_mobile_no":         vendor_mobile  or None,
                     "vendor_demob":             vendor_demob   or None,
+                    "item_code":                item_code      or None,
                 }
                 rows = list(mc_rows)
                 if is_new:
