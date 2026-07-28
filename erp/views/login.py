@@ -247,7 +247,7 @@ def render() -> None:
     } catch(e) {}
 })();
 </script>
-""", height=0)
+""", height=1)
 
     # Toggle between sign-in and forgot-password modes
     if "show_reset" not in st.session_state:
