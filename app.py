@@ -33,6 +33,7 @@ from erp.views import (
     machinemovement,
     machinehistory,
     wlreports,
+    wldetailreport,
     invoicereport,
     workorderreport,
     operatorreport,
@@ -765,7 +766,8 @@ _SIDEBAR_ITEMS = [
     ("invreport",         "receipt_long",            "Invoice Report",    "REPORTS",      "BILLING"),
     ("woreport",          "receipt_long",            "WO Report",         "REPORTS",      "BILLING"),
     ("custreport",        "person_search",           "Cust Report",       "REPORTS",      "BILLING"),
-    ("wlreport",          "description",             "WL Detail",         "REPORTS",      "WORK LOG"),
+    ("wlreport",          "summarize",               "WL Summary",        "REPORTS",      "WORK LOG"),
+    ("wldetailreport",    "description",             "WL Detail",         "REPORTS",      "WORK LOG"),
     ("wlreports",         "pending_actions",         "Pending Worklogs",  "REPORTS",      "WORK LOG"),
     ("opreport",          "badge",                   "Op Report",         "REPORTS",      "REVENUE"),
     # ── Config ────────────────────────────────────────────────────────────────
@@ -1000,6 +1002,12 @@ elif page == "worklog":
 elif page == "wlreport":
     if auth.has_page_access("wlreport"):
         worklogreport.render()
+    else:
+        _access_denied()
+
+elif page == "wldetailreport":
+    if auth.has_page_access("wldetailreport"):
+        wldetailreport.render()
     else:
         _access_denied()
 

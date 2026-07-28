@@ -11,7 +11,11 @@ import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
-from ._report_utils import render_export_buttons, render_drilldown_table, WL_STATUS
+from ._report_utils import (
+    render_print_export_buttons,
+    render_drilldown_table,
+    WL_STATUS,
+)
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -363,7 +367,7 @@ def render() -> None:
     st.markdown(_PAGE_CSS, unsafe_allow_html=True)
     st.markdown(
         "<div class='page-eyebrow'>// Reports</div>"
-        "<div class='page-title'>Worklog Report</div>",
+        "<div class='page-title'>Worklog Summary</div>",
         unsafe_allow_html=True,
     )
     st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
@@ -415,7 +419,7 @@ def render() -> None:
             "<span class='msr' style='font-size:36px;color:#2563EB;'>assignment</span>"
             "</div>"
             "<h3>No worklog data found</h3>"
-            "<p>Save a work log first to see detailed reports here.</p>"
+            "<p>Save a work log first to see reports here.</p>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -471,6 +475,10 @@ def render() -> None:
     working_df = df[df["Start Time"].notna() & (df["Start Time"] != "")]
 
     # ── KPI strip ──────────────────────────────────────────────────────────────
+    billing_df = _billing_summary(df)
+    total_billing    = billing_df["Billing"].sum()    if not billing_df.empty else 0
+    total_ot_billing = billing_df["OT Billing"].sum() if not billing_df.empty else 0
+
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
     st.markdown(
         f"<div class='kpi-grid-6'>"
@@ -482,10 +490,10 @@ def render() -> None:
                     "shift entries",             "#10B981")
         + _kpi_card("schedule",                "Net Hours",     f"{working_df['Net Time'].sum():,.1f}",
                     "total net hours",           "#8B5CF6")
-        + _kpi_card("more_time",               "OT Hours",      f"{working_df['OT'].sum():,.1f}",
-                    "overtime hours",            "#EF4444")
-        + _kpi_card("build",                   "Breakdown Hrs", f"{working_df['Breakdown Hrs'].sum():,.1f}",
-                    "downtime hours",            "#6B7280")
+        + _kpi_card("payments",                "Rental Billing",f"₹{total_billing:,.0f}",
+                    "rental charges",            "#E87722")
+        + _kpi_card("more_time",               "OT Billing",    f"₹{total_ot_billing:,.0f}",
+                    "overtime charges",          "#EF4444")
         + "</div>",
         unsafe_allow_html=True,
     )
@@ -494,11 +502,11 @@ def render() -> None:
     with st.container(border=True):
         st.markdown(
             "<div class='billing-title'>Billing Summary</div>"
-            "<div class='billing-subtitle'>per Machine · per Month — rental charges computed from shift log</div>",
+            "<div class='billing-subtitle'>per Machine · per Month — rental charges computed from shift log"
+            " · click any row to open its detailed shift log</div>",
             unsafe_allow_html=True,
         )
 
-        billing_df = _billing_summary(df)
         if billing_df.empty:
             st.markdown(
                 "<div class='empty-state-v2'>"
@@ -511,8 +519,6 @@ def render() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            total_billing    = billing_df["Billing"].sum()
-            total_ot_billing = billing_df["OT Billing"].sum()
             st.markdown(
                 f"<div class='billing-totals'>"
                 f"<span style='color:#6B7280;'>Rental Billing: "
@@ -527,17 +533,19 @@ def render() -> None:
             )
             billing_col_cfg = {
                 "Billing Month":  st.column_config.TextColumn("Month",        width="small"),
-                "Machine":        st.column_config.TextColumn("Machine",       width="medium"),
-                "Serial Number":  st.column_config.TextColumn("Serial No.",    width="small"),
-                "Rental/Month":   st.column_config.NumberColumn("Rate/Month",  format="₹%,.0f"),
-                "Working Days":   st.column_config.NumberColumn("Work Days",   format="%d",   width="small"),
-                "Working Hrs":    st.column_config.NumberColumn("Std Hrs",     format="%.1f", width="small"),
-                "Actual Hrs":     st.column_config.NumberColumn("Act Hrs",     format="%.2f", width="small"),
-                "Qty":            st.column_config.NumberColumn("Qty",         format="%.4f", width="small"),
-                "Billing":        st.column_config.NumberColumn("Billing (₹)", format="₹%,.0f"),
-                "OT Hrs":         st.column_config.NumberColumn("OT Hrs",      format="%.2f", width="small"),
-                "OT Billing":     st.column_config.NumberColumn("OT Bill (₹)", format="₹%,.0f"),
-                "Breakdown Hrs":  st.column_config.NumberColumn("B/D Hrs",     format="%.2f", width="small"),
+                "Customer":       st.column_config.TextColumn("Customer",     width="medium"),
+                "Site":           st.column_config.TextColumn("Site",         width="medium"),
+                "Machine":        st.column_config.TextColumn("Machine",      width="medium"),
+                "Serial Number":  st.column_config.TextColumn("Serial No.",   width="small"),
+                "Rental/Month":   st.column_config.NumberColumn("Rate/Month", format="₹%,.0f"),
+                "Working Days":   st.column_config.NumberColumn("Work Days",  format="%d",   width="small"),
+                "Working Hrs":    st.column_config.NumberColumn("Std Hrs",    format="%.1f", width="small"),
+                "Actual Hrs":     st.column_config.NumberColumn("Act Hrs",    format="%.2f", width="small"),
+                "Qty":            st.column_config.NumberColumn("Qty",        format="%.4f", width="small"),
+                "Billing":        st.column_config.NumberColumn("Billing (₹)",format="₹%,.0f"),
+                "OT Hrs":         st.column_config.NumberColumn("OT Hrs",     format="%.2f", width="small"),
+                "OT Billing":     st.column_config.NumberColumn("OT Bill (₹)",format="₹%,.0f"),
+                "Breakdown Hrs":  st.column_config.NumberColumn("B/D Hrs",    format="%.2f", width="small"),
             }
             selected_idx = render_drilldown_table(
                 billing_df,
@@ -554,122 +562,42 @@ def render() -> None:
                     "Breakdown Hrs": "{:.2f}",
                 }),
             )
-            render_export_buttons(
+            render_print_export_buttons(
                 billing_df,
-                base_name="billing_summary",
-                excel_key="wlr_xlsx",
-                pdf_key="wlr_pdf",
-                title="Billing Summary",
+                base_name="worklog_summary",
+                key_prefix="wlr_sum",
+                title="Worklog Summary",
                 subtitle="per Machine · per Month",
-                sheet_name="Billing Summary",
+                sheet_name="Worklog Summary",
             )
 
-            # ── Drill-down: click a billing row → show its shift entries ───────
+            # ── Selected row → navigate to detailed shift log ─────────────────
             if selected_idx is not None:
-                row = billing_df.iloc[selected_idx]
-                machine_val = row.get("Asset Code") if "Asset Code" in billing_df.columns else row.get("Machine", "")
+                row         = billing_df.iloc[selected_idx]
+                asset_val   = row.get("Asset Code", "") or ""
+                machine_val = row.get("Machine", "")
                 month_val   = row.get("Billing Month", "")
+                cust_val    = row.get("Customer", "")
+
                 st.markdown(
-                    f"<div style='margin-top:16px;padding:10px 14px;"
+                    f"<div style='margin-top:14px;padding:10px 16px;"
                     f"background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;"
-                    f"font-size:13px;color:#1E40AF;font-weight:600;'>"
-                    f"Showing shift entries for "
-                    f"<strong>{row.get('Machine','')}</strong> · "
-                    f"<strong>{month_val}</strong></div>",
+                    f"font-size:13px;color:#1E40AF;'>"
+                    f"Selected: <strong>{machine_val}</strong> &bull; "
+                    f"<strong>{month_val}</strong> &bull; {cust_val}</div>",
                     unsafe_allow_html=True,
                 )
-                drill_mask = pd.Series([True] * len(df))
-                if machine_val and "Asset Code" in df.columns:
-                    drill_mask &= (df["Asset Code"] == machine_val)
-                if month_val and "Billing Month" in df.columns:
-                    drill_mask &= (df["Billing Month"] == month_val)
-                drill_df = df[drill_mask][[
-                    "Date", "Weekday", "Start Time", "End Time",
-                    "Net Time", "OT", "Breakdown Hrs", "Operator", "Remarks",
-                ]].sort_values("Date")
-                st.dataframe(
-                    drill_df.style.format(
-                        {"Net Time": "{:.2f}", "OT": "{:.1f}", "Breakdown Hrs": "{:.2f}"},
-                        na_rep="—",
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Date":          st.column_config.DateColumn("Date",    format="DD-MM-YYYY", width="small"),
-                        "Weekday":       st.column_config.TextColumn("Day",     width="small"),
-                        "Start Time":    st.column_config.TextColumn("Start",   width="small"),
-                        "End Time":      st.column_config.TextColumn("End",     width="small"),
-                        "Net Time":      st.column_config.NumberColumn("Net Hrs",  format="%.2f", width="small"),
-                        "OT":            st.column_config.NumberColumn("OT Hrs",   format="%.1f", width="small"),
-                        "Breakdown Hrs": st.column_config.NumberColumn("B/D Hrs",  format="%.2f", width="small"),
-                        "Operator":      st.column_config.TextColumn("Operator",  width="medium"),
-                        "Remarks":       st.column_config.TextColumn("Remarks",   width="medium"),
-                    },
-                )
-
-    # ── Detailed Shift Log (collapsed) ─────────────────────────────────────────
-    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
-
-    with st.expander(f"View Detailed Shift Log  ({len(df):,} entries)", expanded=False):
-        export_cols = [
-            "Billing Month", "Customer", "Site", "Asset Code", "Machine",
-            "Serial Number", "Date", "Weekday", "Start Time", "End Time",
-            "Net Time", "Start HMR", "End HMR", "Breakdown Hrs",
-            "OT", "HSD in Ltr", "Operator", "Remarks",
-        ]
-        export_cols = [c for c in export_cols if c in df.columns]
-        render_export_buttons(
-            df[export_cols], "worklog_shift_log",
-            "wlr_sl_xl", "wlr_sl_pdf", "Work Log Shift Log",
-        )
-
-        display_cols = [
-            "Billing Month", "Customer", "Site", "Asset Code", "Machine",
-            "Serial Number", "Date", "Weekday", "Start Time", "End Time",
-            "Net Time", "Start HMR", "End HMR", "Breakdown Hrs",
-            "OT", "HSD in Ltr", "Operator", "Remarks",
-        ]
-        display_cols = [c for c in display_cols if c in df.columns]
-        detail_df = df[display_cols].copy()
-
-        def _highlight_sunday(row):
-            if str(row.get("Weekday", "")) == "Sunday":
-                return ["background-color:#fef08a; color:#713f12"] * len(row)
-            return [""] * len(row)
-
-        st.dataframe(
-            detail_df.style.apply(_highlight_sunday, axis=1).format(
-                {"Net Time": "{:.2f}", "OT": "{:.1f}",
-                 "Breakdown Hrs": "{:.2f}", "HSD in Ltr": "{:.1f}"},
-                na_rep="—",
-            ),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Billing Month":  st.column_config.TextColumn("Month",      width="small"),
-                "Asset Code":     st.column_config.TextColumn("Asset",      width="small"),
-                "Machine":        st.column_config.TextColumn("Machine",    width="medium"),
-                "Serial Number":  st.column_config.TextColumn("Serial No.", width="small"),
-                "Date":           st.column_config.DateColumn("Date",       width="small", format="DD-MM-YYYY"),
-                "Weekday":        st.column_config.TextColumn("Day",        width="small"),
-                "Start Time":     st.column_config.TextColumn("Start",      width="small"),
-                "End Time":       st.column_config.TextColumn("End",        width="small"),
-                "Net Time":       st.column_config.NumberColumn("Net Hrs",  format="%.2f", width="small"),
-                "Start HMR":      st.column_config.NumberColumn("HMR In",   format="%.1f", width="small"),
-                "End HMR":        st.column_config.NumberColumn("HMR Out",  format="%.1f", width="small"),
-                "Breakdown Hrs":  st.column_config.NumberColumn("B/D Hrs",  format="%.1f", width="small"),
-                "OT":             st.column_config.NumberColumn("OT Hrs",   format="%.1f", width="small"),
-                "HSD in Ltr":     st.column_config.NumberColumn("HSD (Ltr)",format="%.1f", width="small"),
-                "Operator":       st.column_config.TextColumn("Operator",   width="medium"),
-                "Remarks":        st.column_config.TextColumn("Remarks",    width="medium"),
-            },
-        )
-
-        st.markdown(
-            f"<div style='margin-top:8px;font-size:11px;color:#9CA3AF;'>"
-            f"Showing {len(detail_df):,} rows · {len(working_df):,} working days</div>",
-            unsafe_allow_html=True,
-        )
+                if st.button(
+                    "📋 View Detailed Shift Log →",
+                    key="wlr_goto_detail",
+                    help="Opens the Detailed Worklog page pre-filtered for this machine and month",
+                ):
+                    if asset_val:
+                        st.session_state["wld_mach"]  = asset_val
+                    if month_val:
+                        st.session_state["wld_month"] = month_val
+                    st.query_params["page"] = "wldetailreport"
+                    st.rerun()
 
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
     if st.button("Refresh Data", key="rpt_refresh"):

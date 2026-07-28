@@ -227,6 +227,45 @@ def render_export_buttons(
         )
 
 
+def render_print_export_buttons(
+    df: pd.DataFrame,
+    base_name: str,
+    key_prefix: str,
+    title: str = "Report",
+    subtitle: str = "",
+    sheet_name: str = "Report",
+) -> None:
+    """Render Print (inline) + Export PDF (download) + Export Excel (download)."""
+    import streamlit.components.v1 as _comp
+
+    c1, c2, c3, _ = st.columns([1, 1, 1, 5])
+    with c1:
+        if st.button("🖨️ Print", key=f"{key_prefix}_print_btn", use_container_width=True):
+            st.session_state[f"_rpe_print_{key_prefix}"] = True
+    with c2:
+        st.download_button(
+            "⬇ Export PDF",
+            data=to_pdf_html(title, subtitle, df).encode("utf-8"),
+            file_name=f"{base_name}_{date.today()}.html",
+            mime="text/html",
+            key=f"{key_prefix}_pdf_btn",
+            use_container_width=True,
+            help="Opens in browser → Ctrl+P → Save as PDF",
+        )
+    with c3:
+        st.download_button(
+            "⬇ Export Excel",
+            data=to_excel_bytes(df, sheet_name),
+            file_name=f"{base_name}_{date.today()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{key_prefix}_xl_btn",
+            use_container_width=True,
+        )
+
+    if st.session_state.pop(f"_rpe_print_{key_prefix}", False):
+        _comp.html(to_pdf_html(title, subtitle, df), height=820, scrolling=True)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # STREAMLIT: SORTABLE + DRILL-DOWN TABLE
 # ══════════════════════════════════════════════════════════════════════════════
