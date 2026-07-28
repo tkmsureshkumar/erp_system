@@ -10,7 +10,6 @@ from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as _components
 
 from ..supabase_client import SupabaseClient
 from ._report_utils import (
@@ -341,10 +340,10 @@ def render() -> None:
         # Print trigger
         if st.session_state.get("ir_print_trigger") == inv_id:
             st.session_state.pop("ir_print_trigger", None)
-            _components.html(inv_html, height=980, scrolling=True)
+            st.iframe(inv_html, height=980)
         else:
             with st.expander("📄 Invoice Preview", expanded=True):
-                _components.html(inv_html, height=960, scrolling=True)
+                st.iframe(inv_html, height=960)
 
         # ── Download section ───────────────────────────────────────────────────
         _inv_fname = inv_no.replace("/", "_")

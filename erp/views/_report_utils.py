@@ -236,7 +236,6 @@ def render_print_export_buttons(
     sheet_name: str = "Report",
 ) -> None:
     """Render Print (inline) + Export PDF (download) + Export Excel (download)."""
-    import streamlit.components.v1 as _comp
 
     c1, c2, c3, _ = st.columns([1, 1, 1, 5])
     with c1:
@@ -263,7 +262,7 @@ def render_print_export_buttons(
         )
 
     if st.session_state.pop(f"_rpe_print_{key_prefix}", False):
-        _comp.html(to_pdf_html(title, subtitle, df), height=820, scrolling=True)
+        st.iframe(to_pdf_html(title, subtitle, df), height=820)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

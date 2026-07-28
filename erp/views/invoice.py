@@ -28,7 +28,6 @@ import calendar
 from datetime import date, datetime
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from ..supabase_client import SupabaseClient
 from erp.views._documents import render_document_panel
@@ -1712,7 +1711,7 @@ def render() -> None:
                 notes=notes.strip() if notes else "",
             )
 
-            components.html(inv_html, height=960, scrolling=True)
+            st.iframe(inv_html, height=960)
 
             # ── Action row ─────────────────────────────────────────────────────
             _inv_fname = inv_no.replace("/", "_") if inv_no else "invoice"
@@ -1838,7 +1837,7 @@ def render() -> None:
                         "margin-bottom:6px;'>Invoice + Work Log (Print Preview)</div>",
                         unsafe_allow_html=True,
                     )
-                    components.html(combined_html, height=1200, scrolling=True)
+                    st.iframe(combined_html, height=1200)
                 else:
                     st.info("No completed work log schedules found for the selected charges.")
 

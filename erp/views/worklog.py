@@ -12,7 +12,6 @@ from datetime import date, datetime, time, timedelta
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as _stc
 
 from ..supabase_client import SupabaseClient
 from erp.views._documents import render_document_panel
@@ -1711,7 +1710,7 @@ def render() -> None:
                 ).get("site_name", ""),
                 schedule_df=_print_df,
             )
-            _stc.html(_print_html, height=820, scrolling=True)
+            st.iframe(_print_html, height=820)
 
     # ── Documents ──────────────────────────────────────────────────────────────
     _wl_doc_id = _wl_rec.get("id")

@@ -8,7 +8,6 @@ navbar) and uses st.columns for centering.
 from __future__ import annotations
 
 import streamlit as st
-import streamlit.components.v1 as _components
 
 from erp.supabase_client import SupabaseClient
 
@@ -230,7 +229,7 @@ def render() -> None:
     # Python / Streamlit cannot read hash fragments, so we inject a tiny JS
     # snippet that detects the recovery hash and replaces it with query params,
     # causing a page reload that Python CAN read.
-    _components.html("""
+    st.iframe("""
 <script>
 (function(){
     try {
@@ -248,7 +247,7 @@ def render() -> None:
     } catch(e) {}
 })();
 </script>
-""", height=0, scrolling=False)
+""", height=0)
 
     # Toggle between sign-in and forgot-password modes
     if "show_reset" not in st.session_state:
