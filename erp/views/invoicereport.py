@@ -17,7 +17,7 @@ from ._report_utils import (
     render_export_buttons,
     render_drilldown_table,
 )
-from .invoice import _build_html  # reuse invoice HTML builder
+from .invoice import _build_html, _build_docx  # reuse invoice builders
 
 
 # ── Status palette ─────────────────────────────────────────────────────────────
@@ -339,11 +339,35 @@ def render() -> None:
             with st.expander("📄 Invoice Preview", expanded=True):
                 _components.html(inv_html, height=960, scrolling=True)
 
-        # Download HTML copy
-        st.download_button(
-            "⬇ Download Invoice (HTML)",
-            data=inv_html.encode("utf-8"),
-            file_name=f"{inv_no.replace('/', '_')}.html",
-            mime="text/html",
-            key="ir_dl_html",
+        # Download buttons — HTML and Word side by side
+        _dl1, _dl2, _ = st.columns([1, 1, 4])
+        _inv_fname = inv_no.replace("/", "_")
+        _docx_kwargs = dict(
+            inv_no=inv_no, inv_date=inv_date,
+            wo=wo, customer=cust, site=site,
+            groups=groups, tax_type=tax_type, tax_on=tax_on,
+            hsn_on=hsn_on, hsn_code=hsn_code,
+            item_code_on=ic_on, notes=notes,
         )
+        with _dl1:
+            st.download_button(
+                "⬇ Download (HTML)",
+                data=inv_html.encode("utf-8"),
+                file_name=f"{_inv_fname}.html",
+                mime="text/html",
+                key="ir_dl_html",
+                use_container_width=True,
+            )
+        with _dl2:
+            try:
+                st.download_button(
+                    "⬇ Download (Word)",
+                    data=_build_docx(**_docx_kwargs),
+                    file_name=f"{_inv_fname}.docx",
+                    mime="application/vnd.openxmlformats-officedocument"
+                         ".wordprocessingml.document",
+                    key="ir_dl_docx",
+                    use_container_width=True,
+                )
+            except Exception as _docx_err:
+                st.error(f"Word export failed: {_docx_err}")

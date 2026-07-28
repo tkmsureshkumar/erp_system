@@ -593,6 +593,358 @@ def _build_html(
 </body></html>"""
 
 
+# ── Word (.docx) invoice builder ───────────────────────────────────────────────
+
+def _build_docx(
+    *,
+    inv_no: str,
+    inv_date: date,
+    wo: dict,
+    customer: dict,
+    site: dict,
+    groups: list[dict],
+    tax_type: str,
+    tax_on: bool,
+    hsn_on: bool,
+    hsn_code: str,
+    item_code_on: bool,
+    notes: str,
+) -> bytes:
+    """Return a .docx invoice as raw bytes. Mirrors _build_html structure."""
+    from io import BytesIO
+    from docx import Document
+    from docx.shared import Pt, Mm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    # ── helpers ────────────────────────────────────────────────────────────────
+
+    def _shd(cell, hex_fill: str) -> None:
+        tc   = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        for x in tcPr.findall(qn("w:shd")):
+            tcPr.remove(x)
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"),   "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"),  hex_fill.lstrip("#").upper())
+        tcPr.append(shd)
+
+    def _cwrite(cell, text: str, size: float = 8.5, bold: bool = False,
+                align: str = "left", first: bool = True) -> None:
+        """Write possibly multi-line text into a cell paragraph."""
+        lines = str(text if text is not None else "").split("\n")
+        for li, line in enumerate(lines):
+            use_first = first and li == 0
+            para = cell.paragraphs[0] if use_first else cell.add_paragraph()
+            para.paragraph_format.space_before = Pt(1)
+            para.paragraph_format.space_after  = Pt(1)
+            if align == "center":
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif align == "right":
+                para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = para.add_run(line)
+            run.font.size = Pt(size)
+            run.bold = bold
+
+    def _lv(cell, label: str, value: str) -> None:
+        """Add a bold-label : value paragraph to a cell."""
+        para = cell.add_paragraph()
+        para.paragraph_format.space_before = Pt(1)
+        para.paragraph_format.space_after  = Pt(1)
+        r1 = para.add_run(f"{label}: ")
+        r1.bold = True
+        r1.font.size = Pt(8.5)
+        r2 = para.add_run(value or "—")
+        r2.font.size = Pt(8.5)
+
+    def _merge_row(row, from_col: int, to_col: int) -> None:
+        """Merge cells from_col..to_col (inclusive) in row."""
+        for j in range(from_col + 1, to_col + 1):
+            row.cells[from_col].merge(row.cells[j])
+
+    def _mktbl(rows: int, cols: int, widths_mm: list) -> object:
+        t = doc.add_table(rows=rows, cols=cols)
+        t.style   = "Table Grid"
+        t.autofit = False
+        for i, col in enumerate(t.columns):
+            w = widths_mm[i] if i < len(widths_mm) else widths_mm[-1]
+            for cell in col.cells:
+                cell.width = Mm(w)
+        return t
+
+    # ── pre-compute totals ─────────────────────────────────────────────────────
+    subtotal  = sum(sum(it["amount"] for it in g["items"]) for g in groups)
+    tax_tot   = round(subtotal * 0.18, 2) if tax_on else 0.0
+    grand_ex  = subtotal + tax_tot
+    grand     = round(grand_ex)
+    rnd_off   = round(grand - grand_ex, 2)
+    cgst = sgst = igst = 0.0
+    if tax_on:
+        if tax_type == "CGST/SGST":
+            cgst = sgst = round(tax_tot / 2, 2)
+        else:
+            igst = tax_tot
+
+    inv_date_str = inv_date.strftime("%d-%B-%Y") if isinstance(inv_date, date) else str(inv_date)
+    wo_num    = wo.get("wo_number", "—")
+    client_wo = wo.get("client_work_ordernumber") or wo_num
+    wo_date   = str(wo.get("start_date", "—"))
+    cname     = customer.get("customer_name", "")
+
+    bill_addr  = (site.get("bill_to_address") or customer.get("billing_address")
+                  or site.get("address") or "")
+    bill_city  = ", ".join(filter(None, [
+        customer.get("city") or site.get("city"),
+        customer.get("state") or site.get("state"),
+        customer.get("pincode") or site.get("pincode"),
+    ]))
+    bill_gst   = site.get("gst_number") or customer.get("gst_number") or "—"
+    bill_state = customer.get("state") or site.get("state") or "—"
+
+    ship_addr  = site.get("ship_to_address") or site.get("address") or ""
+    ship_city  = ", ".join(filter(None, [
+        site.get("city"), site.get("state"), site.get("pincode"),
+    ]))
+    ship_gst   = site.get("gst_number") or customer.get("gst_number") or "—"
+    ship_state = site.get("state") or "—"
+
+    # ── document setup ─────────────────────────────────────────────────────────
+    doc = Document()
+    ns  = doc.styles["Normal"]
+    ns.font.name  = "Arial"
+    ns.font.size  = Pt(9)
+    ns.paragraph_format.space_before = Pt(0)
+    ns.paragraph_format.space_after  = Pt(2)
+
+    sec = doc.sections[0]
+    sec.page_width    = Mm(210)
+    sec.page_height   = Mm(297)
+    sec.left_margin   = Mm(12)
+    sec.right_margin  = Mm(12)
+    sec.top_margin    = Mm(12)
+    sec.bottom_margin = Mm(12)
+
+    PAGE_W = 186  # usable page width in mm
+
+    # ── 1. Company header ──────────────────────────────────────────────────────
+    t_hdr = _mktbl(1, 2, [148, 38])
+
+    lc = t_hdr.cell(0, 0)
+    p  = lc.paragraphs[0]
+    r  = p.add_run("CTO LOGISTICS & INFRA")
+    r.bold = True
+    r.font.size  = Pt(16)
+    r.font.color.rgb = RGBColor(0xB2, 0x22, 0x22)
+
+    _cwrite(lc, "(CTO GROUP)  ·  LOGISTICS & INFRA EQUIPMENTS",
+            size=7.5, first=False)
+    addr_ln = (
+        f"B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514, KALAMBOLI - 410 208, "
+        f"DIST. RAIGAD  ·  Tel.: {_CO['tel']}  ·  {_CO['email']}"
+    )
+    p_addr = lc.add_paragraph(addr_ln)
+    p_addr.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_addr.runs[0].font.size = Pt(7.5)
+    p_addr.paragraph_format.space_before = Pt(2)
+
+    rc = t_hdr.cell(0, 1)
+    rc.vertical_alignment = 1  # CENTER
+    p_ti = rc.paragraphs[0]
+    p_ti.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r_ti = p_ti.add_run("TAX\nINVOICE")
+    r_ti.bold = True
+    r_ti.font.size = Pt(13)
+
+    # ── 2. GSTIN / invoice meta ────────────────────────────────────────────────
+    t_meta = _mktbl(1, 2, [93, 93])
+
+    lm = t_meta.cell(0, 0)
+    _cwrite(lm, _CO["name"], bold=True)
+    for line in [_CO["addr1"], _CO["addr2"], _CO["addr3"], _CO["addr4"]]:
+        _cwrite(lm, line, size=8.5, first=False)
+    _lv(lm, "GSTIN/UIN",   _CO["gstin"])
+    _lv(lm, "State Name",  f"{_CO['state']}, Code: {_CO['state_code']}")
+    _lv(lm, "E-Mail",      _CO["email"])
+
+    rm = t_meta.cell(0, 1)
+    _cwrite(rm, "")  # empty anchor paragraph
+    _lv(rm, "Invoice No.", inv_no)
+    _lv(rm, "Dated",       inv_date_str)
+    rm.add_paragraph()
+    _lv(rm, "Work Order No.", client_wo)
+    _lv(rm, "Work Order Dt.", wo_date)
+
+    # ── 3. Ship to / Bill to ──────────────────────────────────────────────────
+    t_addr = _mktbl(1, 2, [93, 93])
+
+    sc = t_addr.cell(0, 0)
+    p  = sc.paragraphs[0]
+    r  = p.add_run("Consignee (Ship to)")
+    r.bold = True; r.underline = True; r.font.size = Pt(8.5)
+    _cwrite(sc, cname, bold=True, size=8.5, first=False)
+    for ln in filter(None, [ship_addr, ship_city]):
+        _cwrite(sc, ln, size=8.5, first=False)
+    _lv(sc, "GSTIN/UIN",  ship_gst)
+    _lv(sc, "State Name", ship_state)
+
+    bc = t_addr.cell(0, 1)
+    p  = bc.paragraphs[0]
+    r  = p.add_run("Buyer (Bill to)")
+    r.bold = True; r.underline = True; r.font.size = Pt(8.5)
+    _cwrite(bc, cname, bold=True, size=8.5, first=False)
+    for ln in filter(None, [bill_addr, bill_city]):
+        _cwrite(bc, ln, size=8.5, first=False)
+    _lv(bc, "GSTIN/UIN",  bill_gst)
+    _lv(bc, "State Name", bill_state)
+
+    # ── 4. Line items table ────────────────────────────────────────────────────
+    col_hdrs: list[str] = ["Sl\nNo."]
+    col_w:    list[float] = [8.0]
+    if item_code_on:
+        col_hdrs.append("Item\nCode"); col_w.append(14.0)
+    col_hdrs.append("Description of Services"); col_w.append(0.0)  # fill later
+    if hsn_on:
+        col_hdrs.append("HSN/\nSAC"); col_w.append(14.0)
+    col_hdrs += ["Tax\nRate", "UOM", "Quantity",  "Rate",  "Amount\n(INR)"]
+    col_w    += [9.0,         11.0,   16.0,        21.0,    22.0]
+
+    desc_i = col_hdrs.index("Description of Services")
+    col_w[desc_i] = PAGE_W - sum(w for w in col_w if w > 0)
+
+    n_cols = len(col_hdrs)
+    t_items = _mktbl(1, n_cols, col_w)
+
+    # header row
+    for i, hdr in enumerate(col_hdrs):
+        cell = t_items.rows[0].cells[i]
+        _shd(cell, "EEF2F7")
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(hdr)
+        r.bold = True; r.font.size = Pt(8.0)
+
+    # line item rows
+    for grp in groups:
+        label = grp["machine_label"]
+        if grp.get("make") or grp.get("model"):
+            label += " — " + " ".join(filter(None, [grp.get("make",""), grp.get("model","")]))
+        if grp.get("serial"):
+            label += f" S/N - {grp['serial']}"
+
+        eq_row = t_items.add_row()
+        _merge_row(eq_row, 0, n_cols - 1)
+        _shd(eq_row.cells[0], "E4ECF5")
+        r = eq_row.cells[0].paragraphs[0].add_run(label)
+        r.bold = True; r.font.size = Pt(9.0)
+
+        sl = grp["sl_no"]
+        ic = grp.get("item_code", "") or ""
+
+        for idx, it in enumerate(grp["items"]):
+            irow = t_items.add_row()
+            ci   = 0
+            _cwrite(irow.cells[ci], str(sl) if idx == 0 else "", align="center"); ci += 1
+            if item_code_on:
+                _cwrite(irow.cells[ci], ic if idx == 0 else "", align="center"); ci += 1
+            _cwrite(irow.cells[ci], it["desc"], align="left"); ci += 1
+            if hsn_on:
+                _cwrite(irow.cells[ci], hsn_code, align="center"); ci += 1
+            _cwrite(irow.cells[ci], "18%" if tax_on else "", align="center"); ci += 1
+            _cwrite(irow.cells[ci], it["uom"],           align="center"); ci += 1
+            _cwrite(irow.cells[ci], str(it["qty"]),       align="right");  ci += 1
+            _cwrite(irow.cells[ci], _fmt_inr(it["rate"]), align="right");  ci += 1
+            _cwrite(irow.cells[ci], _fmt_inr(it["amount"]), align="right")
+
+    # subtotal
+    sr = t_items.add_row()
+    _merge_row(sr, 0, n_cols - 2)
+    _shd(sr.cells[0], "F5F5F5"); _shd(sr.cells[-1], "F5F5F5")
+    r = sr.cells[0].paragraphs[0].add_run("Total taxable value")
+    r.bold = True; r.font.size = Pt(8.5)
+    _cwrite(sr.cells[-1], _fmt_inr(subtotal), bold=True, align="right")
+
+    # tax rows
+    if tax_on:
+        if tax_type == "CGST/SGST":
+            for lbl, val in [("CGST 9%", cgst), ("SGST 9%", sgst)]:
+                tr_ = t_items.add_row()
+                if n_cols > 2:
+                    _merge_row(tr_, 0, n_cols - 3)
+                tr_.cells[-2].paragraphs[0].add_run(lbl).font.size = Pt(8.5)
+                _cwrite(tr_.cells[-1], _fmt_inr(val), align="right")
+        else:
+            tr_ = t_items.add_row()
+            if n_cols > 2:
+                _merge_row(tr_, 0, n_cols - 3)
+            tr_.cells[-2].paragraphs[0].add_run("IGST @ 18%").font.size = Pt(8.5)
+            _cwrite(tr_.cells[-1], _fmt_inr(igst), align="right")
+
+    # round off
+    rr = t_items.add_row()
+    if n_cols > 2:
+        _merge_row(rr, 0, n_cols - 3)
+    rr.cells[-2].paragraphs[0].add_run("Round Off").font.size = Pt(8.5)
+    _cwrite(rr.cells[-1], _fmt_inr(rnd_off) if rnd_off != 0 else "—", align="right")
+
+    # grand total
+    gr = t_items.add_row()
+    _merge_row(gr, 0, n_cols - 2)
+    _shd(gr.cells[0], "DFE8F4"); _shd(gr.cells[-1], "DFE8F4")
+    r = gr.cells[0].paragraphs[0].add_run("Grand Total")
+    r.bold = True; r.font.size = Pt(10.0)
+    p_ga = gr.cells[-1].paragraphs[0]
+    p_ga.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r = p_ga.add_run(_fmt_inr(grand))
+    r.bold = True; r.font.size = Pt(10.0)
+
+    # ── 5. Amount in words ─────────────────────────────────────────────────────
+    p_w = doc.add_paragraph()
+    p_w.paragraph_format.space_before = Pt(4)
+    r1 = p_w.add_run("Amount Chargeable (in words): ")
+    r1.bold = True; r1.font.size = Pt(8.5)
+    r2 = p_w.add_run(f"INR {_num_to_words_inr(grand)}")
+    r2.font.size = Pt(8.5)
+
+    # ── 6. Notes ──────────────────────────────────────────────────────────────
+    if notes:
+        p_n = doc.add_paragraph()
+        r1 = p_n.add_run("Notes: ")
+        r1.bold = True; r1.font.size = Pt(8.5)
+        r2 = p_n.add_run(notes)
+        r2.font.size = Pt(8.5)
+
+    # ── 7. Bank details + authorised signatory ────────────────────────────────
+    t_foot = _mktbl(1, 2, [126, 60])
+
+    bk = t_foot.cell(0, 0)
+    _cwrite(bk, "Company Bank Details", bold=True)
+    bk.add_paragraph()
+    _lv(bk, "A/c Holder Name",    _BANK["holder"])
+    _lv(bk, "Bank Name",          _BANK["bank"])
+    _lv(bk, "A/c No.",            _BANK["account"])
+    _lv(bk, "Branch & IFSC Code", _BANK["ifsc"])
+
+    sg = t_foot.cell(0, 1)
+    p_sg = sg.paragraphs[0]
+    p_sg.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r = p_sg.add_run(f"For {_CO['name']}")
+    r.bold = True; r.font.size = Pt(8.5)
+    for _ in range(4):
+        p_sp = sg.add_paragraph("")
+        p_sp.paragraph_format.space_after = Pt(8)
+    p_as = sg.add_paragraph("Authorised Signatory")
+    p_as.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if p_as.runs:
+        p_as.runs[0].font.size = Pt(8.5)
+
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
 # ── Main view ──────────────────────────────────────────────────────────────────
 
 def render() -> None:
@@ -961,23 +1313,45 @@ def render() -> None:
             components.html(inv_html, height=960, scrolling=True)
 
             # ── Action row ─────────────────────────────────────────────────────
-            a1, a2, a3 = st.columns(3)
+            _inv_fname = inv_no.replace("/", "_") if inv_no else "invoice"
+            _docx_kwargs = dict(
+                inv_no=inv_no or f"{prefix}???",
+                inv_date=inv_date,
+                wo=sel_wo, customer=sel_customer, site=sel_site,
+                groups=groups, tax_type=tax_type, tax_on=tax_on,
+                hsn_on=hsn_on, hsn_code=hsn_code,
+                item_code_on=ic_on,
+                notes=notes.strip() if notes else "",
+            )
+            a1, a2, a3, a4 = st.columns(4)
             with a1:
                 st.download_button(
-                    "⬇  Download Invoice (HTML)",
+                    "⬇  Download (HTML)",
                     data=inv_html.encode("utf-8"),
-                    file_name=f"{inv_no.replace('/', '_') if inv_no else 'invoice'}.html",
+                    file_name=f"{_inv_fname}.html",
                     mime="text/html",
                     use_container_width=True,
                 )
             with a2:
+                try:
+                    st.download_button(
+                        "⬇  Download (Word)",
+                        data=_build_docx(**_docx_kwargs),
+                        file_name=f"{_inv_fname}.docx",
+                        mime="application/vnd.openxmlformats-officedocument"
+                             ".wordprocessingml.document",
+                        use_container_width=True,
+                    )
+                except Exception as _docx_err:
+                    st.error(f"Word export failed: {_docx_err}")
+            with a3:
                 if st.button(
-                    "🖨️  Print Invoice + Work Log",
+                    "🖨️  Print + Work Log",
                     key="btn_print_with_wl",
                     use_container_width=True,
                 ):
                     st.session_state["_inv_print_mode"] = "with_wl"
-            with a3:
+            with a4:
                 if gen_btn and can_gen:
                     subtotal = sum(sum(it["amount"] for it in g["items"]) for g in groups)
                     tax_tot  = round(subtotal * 0.18, 2) if tax_on else 0.0
