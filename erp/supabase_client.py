@@ -1198,7 +1198,9 @@ class SupabaseClient:
     def list_all_invoices(self) -> List[Dict[str, Any]]:
         resp = (
             self.client.table("invoices")
-            .select("id,work_order_id,invoice_date,grand_total,status")
+            .select("id,invoice_number,work_order_id,customer_id,site_id,"
+                    "invoice_date,subtotal,tax_amount,tax_type,round_off,"
+                    "grand_total,status,notes,line_items,created_at")
             .order("invoice_date", desc=True)
             .execute()
         )
@@ -1206,3 +1208,18 @@ class SupabaseClient:
             resp.get("data") if isinstance(resp, dict) else None
         )
         return data if isinstance(data, list) else []
+
+    def get_invoice_by_id(self, invoice_id: str) -> Dict[str, Any]:
+        resp = (
+            self.client.table("invoices")
+            .select("*")
+            .eq("id", invoice_id)
+            .limit(1)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        if isinstance(data, list) and data:
+            return data[0]
+        return {}

@@ -33,6 +33,7 @@ from erp.views import (
     machinemovement,
     machinehistory,
     wlreports,
+    invoicereport,
     workorderreport,
     operatorreport,
     machine,
@@ -761,6 +762,7 @@ _SIDEBAR_ITEMS = [
     ("fleetstatus",       "fact_check",              "Fleet Status",      "REPORTS",      "FLEET"),
     ("fleetutil",         "bar_chart",               "Fleet Util",        "REPORTS",      "FLEET"),
     ("machinehistory",    "history",                 "Mach History",      "REPORTS",      "FLEET"),
+    ("invreport",         "receipt_long",            "Invoice Report",    "REPORTS",      "BILLING"),
     ("woreport",          "receipt_long",            "WO Report",         "REPORTS",      "BILLING"),
     ("custreport",        "person_search",           "Cust Report",       "REPORTS",      "BILLING"),
     ("wlreport",          "description",             "WL Detail",         "REPORTS",      "WORK LOG"),
@@ -1022,6 +1024,12 @@ elif page == "machinehistory":
 elif page == "woreport":
     if auth.has_page_access("woreport"):
         workorderreport.render()
+    else:
+        _access_denied()
+
+elif page == "invreport":
+    if auth.has_page_access("invreport"):
+        invoicereport.render()
     else:
         _access_denied()
 
