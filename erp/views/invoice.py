@@ -997,6 +997,16 @@ def render() -> None:
                             "status":         "Draft",
                             "notes":          notes.strip() or None,
                         })
+                        # Mark every worklog line-item as invoiced so they
+                        # disappear from the Pending for Billing list.
+                        for _item in selected_items:
+                            if _item.get("type") == "worklog":
+                                _wl_id = (_item.get("wl") or {}).get("id")
+                                if _wl_id:
+                                    try:
+                                        sb.mark_worklog_invoiced(_wl_id, inv_no)
+                                    except Exception:
+                                        pass
                         st.success(f"✔ Invoice **{inv_no}** saved.")
                     except Exception as exc:
                         st.warning(f"Preview ready — could not save to DB: {exc}")

@@ -669,6 +669,13 @@ class SupabaseClient:
             .eq("year", billing_month) \
             .execute()
 
+    def mark_worklog_invoiced(self, worklog_id: str, invoice_number: str) -> None:
+        """Set invoiced=true and record the invoice number on a submitted worklog."""
+        self.client.table("work_logs") \
+            .update({"invoiced": True, "invoice_number": invoice_number}) \
+            .eq("id", worklog_id) \
+            .execute()
+
     def list_all_worklogs(self) -> List[Dict[str, Any]]:
         resp = self.client.table("work_logs").select("*").execute()
         data = None

@@ -263,26 +263,31 @@ def render() -> None:
                         status   = "Missing"
                     elif wl.get("is_draft", True):
                         status   = "Draft"
+                    elif wl.get("invoiced"):
+                        status   = "Invoiced"
                     else:
                         status   = "Submitted"
 
                     row = {
-                        "Customer":      customer,
-                        "Site":          site,
-                        "Asset Code":    asset_code,
-                        "Machine":       machine_label,
-                        "Serial No.":    serial_no,
-                        "Month":         bm_str,
-                        "_date":         date(yr, mo, 1),
-                        "Status":        status,
-                        "_wo_id":        wo_id,
-                        "_machine_id":   mid,
-                        "_yr":           yr,
-                        "_mo":           mo,
+                        "Customer":        customer,
+                        "Site":            site,
+                        "Asset Code":      asset_code,
+                        "Machine":         machine_label,
+                        "Serial No.":      serial_no,
+                        "Month":           bm_str,
+                        "_date":           date(yr, mo, 1),
+                        "Status":          status,
+                        "Invoice No.":     wl.get("invoice_number", "") if wl else "",
+                        "_wo_id":          wo_id,
+                        "_machine_id":     mid,
+                        "_yr":             yr,
+                        "_mo":             mo,
                     }
 
                     if status in ("Missing", "Draft"):
                         pending_rows.append(row)
+                    elif status == "Invoiced":
+                        pass  # exclude from all lists — already billed
                     else:
                         completed_rows.append(row)
 
