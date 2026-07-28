@@ -17,22 +17,28 @@ from ._report_utils import (
     render_export_buttons,
     render_drilldown_table,
 )
-from .invoice import _build_html, _build_docx  # reuse invoice builders
+from .invoice import _build_html, _build_docx, _build_pdf_bytes  # reuse invoice builders
 
 
 # ── Status palette ─────────────────────────────────────────────────────────────
+# DB stores "Final"; we display it as "Completed" throughout this page.
 _STATUS_COLORS: dict[str, tuple[str, str]] = {
-    "Draft":    ("#FEF3C7", "#92400E"),
-    "Final":    ("#DCFCE7", "#166534"),
-    "Cancelled":("#FEE2E2", "#991B1B"),
+    "Draft":     ("#FEF3C7", "#92400E"),
+    "Completed": ("#D1FAE5", "#065F46"),
+    "Cancelled": ("#FEE2E2", "#991B1B"),
 }
+
+def _display_status(raw: str) -> str:
+    """Map DB status values to UI labels ('Final' → 'Completed')."""
+    return "Completed" if raw == "Final" else str(raw)
 
 
 def _status_chip(status: str) -> str:
-    bg, fg = _STATUS_COLORS.get(status, ("#F1F5F9", "#374151"))
+    label = _display_status(status)
+    bg, fg = _STATUS_COLORS.get(label, ("#F1F5F9", "#374151"))
     return (
         f"<span style='display:inline-block;padding:2px 10px;border-radius:20px;"
-        f"background:{bg};color:{fg};font-size:10px;font-weight:700;'>{status}</span>"
+        f"background:{bg};color:{fg};font-size:10px;font-weight:700;'>{label}</span>"
     )
 
 
@@ -48,7 +54,8 @@ def _fmt_date(val: str | None) -> str:
 def _style_status(col: pd.Series) -> list[str]:
     out = []
     for v in col:
-        bg, fg = _STATUS_COLORS.get(str(v), ("#F1F5F9", "#374151"))
+        label = _display_status(str(v))
+        bg, fg = _STATUS_COLORS.get(label, ("#F1F5F9", "#374151"))
         out.append(f"background-color:{bg};color:{fg};font-weight:700;")
     return out
 
@@ -110,7 +117,7 @@ def render() -> None:
             "Subtotal (₹)":  float(inv.get("subtotal") or 0),
             "Tax (₹)":       float(inv.get("tax_amount") or 0),
             "Grand Total (₹)": float(inv.get("grand_total") or 0),
-            "Status":        inv.get("status") or "Draft",
+            "Status":        _display_status(inv.get("status") or "Draft"),
         })
 
     full_df = pd.DataFrame(rows)
@@ -118,8 +125,8 @@ def render() -> None:
     # ── KPI strip ──────────────────────────────────────────────────────────────
     total_inv   = len(full_df)
     total_value = full_df["Grand Total (₹)"].sum()
-    draft_count = int((full_df["Status"] == "Draft").sum())
-    final_count = int((full_df["Status"] == "Final").sum())
+    draft_count     = int((full_df["Status"] == "Draft").sum())
+    completed_count = int((full_df["Status"] == "Completed").sum())
 
     def _kpi(icon: str, label: str, value: str, color: str = "#111827") -> str:
         return (
@@ -137,8 +144,8 @@ def render() -> None:
         "<div style='display:flex;gap:12px;margin-bottom:20px;'>"
         + _kpi("🧾", "Total Invoices",  str(total_inv))
         + _kpi("💰", "Total Value",     f"₹ {total_value:,.0f}", "#E87722")
-        + _kpi("📝", "Draft",           str(draft_count), "#92400E")
-        + _kpi("✅", "Final",           str(final_count), "#166534")
+        + _kpi("📝", "Draft",           str(draft_count),     "#92400E")
+        + _kpi("✅", "Completed",       str(completed_count), "#065F46")
         + "</div>",
         unsafe_allow_html=True,
     )
@@ -339,16 +346,67 @@ def render() -> None:
             with st.expander("📄 Invoice Preview", expanded=True):
                 _components.html(inv_html, height=960, scrolling=True)
 
-        # Download buttons — HTML and Word side by side
-        _dl1, _dl2, _ = st.columns([1, 1, 4])
+        # ── Download section ───────────────────────────────────────────────────
         _inv_fname = inv_no.replace("/", "_")
-        _docx_kwargs = dict(
+
+        # kwargs shared by all file builders
+        _build_kwargs = dict(
             inv_no=inv_no, inv_date=inv_date,
             wo=wo, customer=cust, site=site,
             groups=groups, tax_type=tax_type, tax_on=tax_on,
             hsn_on=hsn_on, hsn_code=hsn_code,
             item_code_on=ic_on, notes=notes,
         )
+
+        # Resolve Word bytes: stored original → fallback regenerated
+        _word_data: bytes | None = None
+        _word_src = ""
+        try:
+            _raw = sb.download_invoice_file(inv_no, "docx")
+            if _raw:
+                _word_data = bytes(_raw)
+                _word_src  = "original"
+        except Exception:
+            pass
+        if _word_data is None:
+            try:
+                _word_data = bytes(_build_docx(**_build_kwargs))
+                _word_src  = "generated"
+            except Exception as _e:
+                _word_src  = f"error: {_e}"
+
+        # Resolve PDF bytes: stored original → fallback regenerated
+        _pdf_data: bytes | None = None
+        _pdf_src = ""
+        try:
+            _raw = sb.download_invoice_file(inv_no, "pdf")
+            if _raw:
+                _pdf_data = bytes(_raw)
+                _pdf_src  = "original"
+        except Exception:
+            pass
+        if _pdf_data is None:
+            try:
+                _pdf_data = bytes(_build_pdf_bytes(**_build_kwargs))
+                _pdf_src  = "generated"
+            except Exception as _e:
+                _pdf_src  = f"error: {_e}"
+
+        # Source indicator strip
+        _src_parts = []
+        if _word_src:
+            _src_parts.append(
+                f"Word: {'🗄 stored' if _word_src == 'original' else ('⚙ generated' if _word_src == 'generated' else '❌ ' + _word_src)}"
+            )
+        if _pdf_src:
+            _src_parts.append(
+                f"PDF: {'🗄 stored' if _pdf_src == 'original' else ('⚙ generated' if _pdf_src == 'generated' else '❌ ' + _pdf_src)}"
+            )
+        if _src_parts:
+            st.caption("  ·  ".join(_src_parts))
+
+        # Download buttons — always rendered
+        _dl1, _dl2, _dl3 = st.columns(3)
         with _dl1:
             st.download_button(
                 "⬇ Download (HTML)",
@@ -359,15 +417,35 @@ def render() -> None:
                 use_container_width=True,
             )
         with _dl2:
-            try:
-                st.download_button(
-                    "⬇ Download (Word)",
-                    data=_build_docx(**_docx_kwargs),
-                    file_name=f"{_inv_fname}.docx",
-                    mime="application/vnd.openxmlformats-officedocument"
-                         ".wordprocessingml.document",
-                    key="ir_dl_docx",
-                    use_container_width=True,
-                )
-            except Exception as _docx_err:
-                st.error(f"Word export failed: {_docx_err}")
+            if _word_data:
+                try:
+                    st.download_button(
+                        "⬇ Download (Word)",
+                        data=_word_data,
+                        file_name=f"{_inv_fname}.docx",
+                        mime="application/vnd.openxmlformats-officedocument"
+                             ".wordprocessingml.document",
+                        key="ir_dl_docx",
+                        use_container_width=True,
+                    )
+                except Exception as _btn_err:
+                    st.error(f"Word download error: {_btn_err}")
+            else:
+                st.button("⬇ Download (Word)", disabled=True,
+                          key="ir_dl_docx_na", use_container_width=True)
+        with _dl3:
+            if _pdf_data:
+                try:
+                    st.download_button(
+                        "⬇ Download (PDF)",
+                        data=_pdf_data,
+                        file_name=f"{_inv_fname}.pdf",
+                        mime="application/pdf",
+                        key="ir_dl_pdf",
+                        use_container_width=True,
+                    )
+                except Exception as _btn_err:
+                    st.error(f"PDF download error: {_btn_err}")
+            else:
+                st.button("⬇ Download (PDF)", disabled=True,
+                          key="ir_dl_pdf_na", use_container_width=True)

@@ -1223,3 +1223,32 @@ class SupabaseClient:
         if isinstance(data, list) and data:
             return data[0]
         return {}
+
+    # ── Invoice file storage (Word + PDF) ──────────────────────────────────────
+
+    @staticmethod
+    def _inv_storage_path(inv_no: str, extension: str) -> str:
+        safe = inv_no.replace("/", "_").replace(" ", "_")
+        return f"invoices/{safe}.{extension}"
+
+    def upload_invoice_file(self, inv_no: str, file_bytes: bytes, extension: str) -> None:
+        """Upload invoice .docx or .pdf to erp-documents/invoices/. Overwrites if exists."""
+        path = self._inv_storage_path(inv_no, extension)
+        mime = self._mime_for_ext(extension)
+        try:
+            self.admin_client.storage.from_(self._DOCUMENTS_BUCKET).remove([path])
+        except Exception:
+            pass
+        self.admin_client.storage.from_(self._DOCUMENTS_BUCKET).upload(
+            path, file_bytes,
+            {"content-type": mime, "upsert": "true"},
+        )
+
+    def download_invoice_file(self, inv_no: str, extension: str) -> bytes | None:
+        """Download stored invoice .docx or .pdf. Returns None if not in storage."""
+        path = self._inv_storage_path(inv_no, extension)
+        try:
+            data = self.admin_client.storage.from_(self._DOCUMENTS_BUCKET).download(path)
+            return bytes(data) if data else None
+        except Exception:
+            return None

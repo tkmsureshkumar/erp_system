@@ -945,6 +945,359 @@ def _build_docx(
     return buf.getvalue()
 
 
+# ── PDF (.pdf) invoice builder ────────────────────────────────────────────────
+
+def _build_pdf_bytes(
+    *,
+    inv_no: str,
+    inv_date: date,
+    wo: dict,
+    customer: dict,
+    site: dict,
+    groups: list[dict],
+    tax_type: str,
+    tax_on: bool,
+    hsn_on: bool,
+    hsn_code: str,
+    item_code_on: bool,
+    notes: str,
+) -> bytes:
+    """Return a .pdf invoice as raw bytes using fpdf2 (no system-library deps)."""
+    from fpdf import FPDF
+
+    # ── shared data extraction ──────────────────────────────────────────────────
+    cname     = customer.get("customer_name", "")
+    bill_addr = (
+        site.get("bill_to_address") or customer.get("billing_address")
+        or site.get("address") or ""
+    )
+    bill_city = ", ".join(filter(None, [
+        customer.get("city") or site.get("city"),
+        customer.get("state") or site.get("state"),
+        customer.get("pincode") or site.get("pincode"),
+    ]))
+    bill_gst   = site.get("gst_number") or customer.get("gst_number") or "—"
+    bill_state = customer.get("state") or site.get("state") or "—"
+    ship_addr  = site.get("ship_to_address") or site.get("address") or ""
+    ship_city  = ", ".join(filter(None, [
+        site.get("city"), site.get("state"), site.get("pincode"),
+    ]))
+    ship_gst   = site.get("gst_number") or customer.get("gst_number") or "—"
+    ship_state = site.get("state") or "—"
+    wo_num     = wo.get("wo_number", "—")
+    client_wo  = wo.get("client_work_ordernumber") or wo_num
+    wo_date    = wo.get("start_date", "—")
+
+    subtotal = sum(sum(it["amount"] for it in g["items"]) for g in groups)
+    tax_rate = 0.18 if tax_on else 0.0
+    tax_tot  = round(subtotal * tax_rate, 2)
+    grand_ex = subtotal + tax_tot
+    grand    = round(grand_ex)
+    rnd_off  = round(grand - grand_ex, 2)
+    cgst = sgst = igst = 0.0
+    if tax_on:
+        if tax_type == "CGST/SGST":
+            cgst = sgst = round(tax_tot / 2, 2)
+        else:
+            igst = tax_tot
+
+    inv_date_str = (
+        inv_date.strftime("%d-%B-%Y") if isinstance(inv_date, date) else str(inv_date)
+    )
+
+    # ── fpdf2 helpers ───────────────────────────────────────────────────────────
+    def _s(t: object) -> str:
+        """Sanitize text to windows-1252; replace anything still unrepresentable."""
+        return (
+            str(t or "")
+            .encode("windows-1252", errors="replace")
+            .decode("windows-1252")
+        )
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_doc_option("core_fonts_encoding", "windows-1252")
+    pdf.set_margins(10, 10, 10)
+    pdf.set_auto_page_break(auto=True, margin=10)
+    pdf.add_page()
+
+    LM: float = 10
+    W:  float = 190
+
+    def _hline(y: float | None = None, thick: bool = False) -> None:
+        yy = y if y is not None else pdf.get_y()
+        r = 51 if thick else 136
+        pdf.set_draw_color(r, r, r)
+        pdf.line(LM, yy, LM + W, yy)
+        pdf.set_draw_color(0, 0, 0)
+
+    # ── HEADER: company name | TAX INVOICE box ──────────────────────────────────
+    y0   = pdf.get_y()
+    co_w = W - 42      # company name width
+    ti_x = LM + co_w  # TAX INVOICE box x
+
+    pdf.set_xy(LM, y0)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(178, 34, 34)
+    pdf.cell(co_w, 7, "CTO LOGISTICS & INFRA", ln=True)
+
+    pdf.set_xy(LM, y0 + 7)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(68, 68, 68)
+    pdf.cell(co_w, 4, "(CTO GROUP)   (LOGISTICS & INFRA EQUIPMENTS)", ln=True)
+
+    pdf.set_xy(LM, y0 + 11)
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_text_color(51, 51, 51)
+    addr_str = (
+        "B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514,"
+        " KALAMBOLI - 410 208, DIST. RAIGAD"
+    )
+    pdf.multi_cell(co_w, 3.5, addr_str, new_x="LEFT", new_y="NEXT")
+    pdf.set_x(LM)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.cell(co_w, 3.5, f"Tel.: {_CO['tel']}   E-mail: {_CO['email']}", ln=True)
+
+    # TAX INVOICE box
+    pdf.set_draw_color(51, 51, 51)
+    pdf.rect(ti_x, y0, 42, 14)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_xy(ti_x, y0 + 1)
+    pdf.cell(42, 6, "TAX", align="C")
+    pdf.set_xy(ti_x, y0 + 7)
+    pdf.cell(42, 6, "INVOICE", align="C")
+
+    hdr_end = max(pdf.get_y(), y0 + 15)
+    pdf.set_y(hdr_end)
+    _hline(hdr_end, thick=True)
+
+    # ── SECTION 1: company details | invoice meta ────────────────────────────────
+    s1y  = hdr_end + 2
+    half = W / 2
+
+    # left column — company GST details
+    pdf.set_xy(LM, s1y)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(half - 2, 5, _CO["name"], ln=True)
+    pdf.set_x(LM)
+    pdf.set_font("Helvetica", "", 7.5)
+    for ln_txt in [_CO["addr1"], _CO["addr2"], _CO["addr3"], _CO["addr4"]]:
+        pdf.cell(half - 2, 4, ln_txt, ln=True)
+        pdf.set_x(LM)
+    for lbl, val in [
+        ("GSTIN/UIN:", _CO["gstin"]),
+        ("State Name:", f"{_CO['state']}, Code: {_CO['state_code']}"),
+        ("E-Mail:", _CO["email"]),
+    ]:
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.cell(26, 4.5, lbl)
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.cell(half - 28, 4.5, val, ln=True)
+        pdf.set_x(LM)
+    left_y1 = pdf.get_y()
+
+    # right column — invoice meta
+    rx = LM + half + 2
+    pdf.set_xy(rx, s1y)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(half - 4, 5, f"Invoice No.: {inv_no}", ln=True)
+    pdf.set_x(rx)
+    pdf.set_font("Helvetica", "", 8)
+    for txt in [f"Dated: {inv_date_str}", "", f"Work Order No.: {client_wo}",
+                f"Work Order Dt.: {wo_date}"]:
+        pdf.cell(half - 4, 5, txt, ln=True)
+        pdf.set_x(rx)
+    right_y1 = pdf.get_y()
+
+    divx = LM + half
+    bot1 = max(left_y1, right_y1)
+    pdf.set_draw_color(136, 136, 136)
+    pdf.line(divx, s1y, divx, bot1)
+    pdf.set_y(bot1)
+    _hline()
+
+    # ── SECTION 2: ship to | bill to ────────────────────────────────────────────
+    s2y = pdf.get_y() + 1.5
+
+    def _addr_block(x: float, heading: str, addr: str, city: str,
+                    gst: str, state: str) -> float:
+        """Draw one address column; returns bottom Y."""
+        pdf.set_xy(x, s2y)
+        pdf.set_font("Helvetica", "BU", 8)
+        pdf.cell(half - 2, 5, heading, ln=True)
+        pdf.set_x(x)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(half - 2, 4.5, cname, ln=True)
+        pdf.set_x(x)
+        pdf.set_font("Helvetica", "", 7.5)
+        for part in (addr + "\n" + city).split("\n"):
+            if part.strip():
+                pdf.cell(half - 2, 4, part.strip(), ln=True)
+                pdf.set_x(x)
+        for lbl, val in [("GSTIN/UIN:", gst), ("State Name:", state)]:
+            pdf.set_font("Helvetica", "B", 7.5)
+            pdf.cell(22, 4.5, lbl)
+            pdf.set_font("Helvetica", "", 7.5)
+            pdf.cell(half - 24, 4.5, val, ln=True)
+            pdf.set_x(x)
+        return pdf.get_y()
+
+    left_y2  = _addr_block(LM,      "Consignee (Ship to)", ship_addr, ship_city, ship_gst, ship_state)
+    right_y2 = _addr_block(LM + half + 2, "Buyer (Bill to)", bill_addr, bill_city, bill_gst, bill_state)
+
+    bot2 = max(left_y2, right_y2)
+    pdf.set_draw_color(136, 136, 136)
+    pdf.line(divx, s2y, divx, bot2)
+    pdf.set_y(bot2)
+    _hline()
+
+    # ── LINE ITEMS TABLE ─────────────────────────────────────────────────────────
+    pdf.ln(1)
+
+    sl_w  = 8
+    ic_w  = 15 if item_code_on else 0
+    hn_w  = 14 if hsn_on else 0
+    tr_w  = 10
+    um_w  = 12
+    qt_w  = 14
+    rt_w  = 22
+    am_w  = 24
+    dc_w  = W - sl_w - ic_w - hn_w - tr_w - um_w - qt_w - rt_w - am_w
+    rh    = 5
+
+    def _th(txt: str, w: float, al: str = "C") -> None:
+        pdf.set_fill_color(238, 242, 247)
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.cell(w, rh, _s(txt), border=1, align=al, fill=True)
+
+    def _td(txt: str, w: float, al: str = "L", bold: bool = False,
+            rgb: tuple | None = None) -> None:
+        if rgb:
+            pdf.set_fill_color(*rgb)
+        pdf.set_font("Helvetica", "B" if bold else "", 8)
+        pdf.cell(w, rh, _s(txt), border=1, align=al, fill=bool(rgb))
+
+    _th("Sl No.", sl_w)
+    if item_code_on:
+        _th("Item Code", ic_w)
+    _th("Description of Services", dc_w, "L")
+    if hsn_on:
+        _th("HSN/SAC", hn_w)
+    _th("Tax Rate", tr_w)
+    _th("UOM", um_w)
+    _th("Quantity", qt_w)
+    _th("Rate", rt_w)
+    _th("Amount (INR)", am_w)
+    pdf.ln()
+
+    GRP_RGB = (228, 236, 245)
+    SUB_RGB = (245, 245, 245)
+    GRD_RGB = (223, 232, 244)
+
+    for grp in groups:
+        lbl = grp["machine_label"]
+        if grp.get("make") or grp.get("model"):
+            lbl += " - " + " ".join(filter(None, [grp.get("make",""), grp.get("model","")]))
+        if grp.get("serial"):
+            lbl += f" S/N {grp['serial']}"
+        pdf.set_fill_color(*GRP_RGB)
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.cell(W, rh, lbl, border=1, align="L", fill=True, ln=True)
+
+        for idx, it in enumerate(grp["items"]):
+            desc = (it["desc"] or "")[:90]
+            _td(str(grp["sl_no"]) if idx == 0 else "", sl_w, "C")
+            if item_code_on:
+                _td((grp.get("item_code") or "") if idx == 0 else "", ic_w, "C")
+            _td(desc, dc_w)
+            if hsn_on:
+                _td(hsn_code, hn_w, "C")
+            _td("18%" if tax_on else "", tr_w, "C")
+            _td(it["uom"], um_w, "C")
+            _td(str(it["qty"]), qt_w, "R")
+            _td(_fmt_inr(it["rate"]), rt_w, "R")
+            _td(_fmt_inr(it["amount"]), am_w, "R")
+            pdf.ln()
+
+    # totals
+    span_w = W - am_w
+    pdf.set_fill_color(*SUB_RGB)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(span_w, rh, "Total taxable value", border=1, align="L", fill=True)
+    pdf.cell(am_w,   rh, _fmt_inr(subtotal), border=1, align="R", fill=True, ln=True)
+
+    if tax_on:
+        tax_items = (
+            [("CGST 9%", cgst), ("SGST 9%", sgst)]
+            if tax_type == "CGST/SGST"
+            else [("IGST @ 18%", igst)]
+        )
+        for t_lbl, t_amt in tax_items:
+            pdf.set_font("Helvetica", "", 7.5)
+            pdf.cell(span_w - rt_w, rh, "", border=1)
+            pdf.cell(rt_w,          rh, t_lbl, border=1, align="L")
+            pdf.cell(am_w,          rh, _fmt_inr(t_amt), border=1, align="R", ln=True)
+
+    pdf.set_font("Helvetica", "", 8)
+    pdf.cell(span_w, rh, "Round Off", border=1, align="L")
+    pdf.cell(am_w,   rh, _fmt_inr(rnd_off) if rnd_off != 0 else "—", border=1, align="R", ln=True)
+
+    pdf.set_fill_color(*GRD_RGB)
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.cell(span_w, rh + 1, "Grand total", border=1, align="L", fill=True)
+    pdf.cell(am_w,   rh + 1, _fmt_inr(grand), border=1, align="R", fill=True, ln=True)
+
+    # ── Amount in words ──────────────────────────────────────────────────────────
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_x(LM)
+    pdf.multi_cell(W, 5, f"Amount Chargeable (in words) — INR {_num_to_words_inr(grand)}")
+
+    if notes:
+        pdf.set_x(LM)
+        pdf.set_text_color(80, 80, 80)
+        pdf.multi_cell(W, 5, f"Notes: {notes}")
+        pdf.set_text_color(0, 0, 0)
+
+    # ── Footer: bank details | signatory ─────────────────────────────────────────
+    pdf.ln(2)
+    _hline()
+    foot_y = pdf.get_y() + 2
+    bank_w = 115
+
+    pdf.set_xy(LM, foot_y)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(bank_w, 5, "Company Bank Details", ln=True)
+    pdf.set_x(LM)
+    pdf.ln(1)
+    for f_lbl, f_val in [
+        ("A/c Holder Name:", _BANK["holder"]),
+        ("Bank Name:",       _BANK["bank"]),
+        ("A/c No.:",         _BANK["account"]),
+        ("Branch & IFSC:",   _BANK["ifsc"]),
+    ]:
+        pdf.set_x(LM)
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.cell(32, 4.5, f_lbl)
+        pdf.set_font("Helvetica", "", 7.5)
+        pdf.cell(bank_w - 32, 4.5, f_val, ln=True)
+    bank_bot = pdf.get_y()
+
+    sig_x = LM + bank_w + 2
+    pdf.set_xy(sig_x, foot_y)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.cell(W - bank_w - 2, 5, f"For {_CO['name']}", align="R")
+    pdf.set_xy(sig_x, foot_y + 20)
+    pdf.cell(W - bank_w - 2, 5, "Authorised Signatory", align="R")
+
+    pdf.set_draw_color(136, 136, 136)
+    pdf.line(LM + bank_w, foot_y, LM + bank_w, max(bank_bot, foot_y + 25))
+
+    return bytes(pdf.output())
+
+
 # ── Main view ──────────────────────────────────────────────────────────────────
 
 def render() -> None:
@@ -1095,21 +1448,24 @@ def render() -> None:
             mlbl = mc.get("machine_label", f"Machine {i+1}")
 
             with st.expander(f"🔧 {mlbl}", expanded=(i == 0)):
-                # Completed worklogs
-                wls: list[dict] = []
+                # Completed worklogs — split into pending (not yet billed) and already billed
+                all_wls: list[dict] = []
                 try:
-                    all_wls = sb.list_worklogs_for_machine(sel_wo_id, mid)
-                    wls = [w for w in all_wls if not w.get("is_draft", True)]
+                    raw_wls = sb.list_worklogs_for_machine(sel_wo_id, mid)
+                    all_wls = [w for w in raw_wls if not w.get("is_draft", True)]
                 except Exception:
                     pass
 
-                if wls:
+                pending_wls = [w for w in all_wls if not w.get("invoiced")]
+                billed_wls  = [w for w in all_wls if w.get("invoiced")]
+
+                if pending_wls:
                     st.markdown(
                         "<div style='font-size:9px;font-weight:700;color:#6B7280;"
-                        "text-transform:uppercase;margin-bottom:6px;'>Completed Worklogs</div>",
+                        "text-transform:uppercase;margin-bottom:6px;'>Pending Billing</div>",
                         unsafe_allow_html=True,
                     )
-                    for wl in wls:
+                    for wl in pending_wls:
                         bm      = wl.get("year", "—")
                         billing = _compute_billing(wl, mc)
                         period  = _period_str(bm)
@@ -1121,8 +1477,29 @@ def render() -> None:
                                 "type": "worklog", "mc": mc, "wl": wl,
                                 "billing": billing, "period": period, "sl": i + 1,
                             })
-                else:
+                elif not billed_wls:
                     st.caption("No completed worklogs for this machine.")
+
+                if billed_wls:
+                    st.markdown(
+                        "<div style='font-size:9px;font-weight:700;color:#166534;"
+                        "text-transform:uppercase;margin-bottom:4px;"
+                        + ("margin-top:10px;" if pending_wls else "")
+                        + "'>Already Billed</div>",
+                        unsafe_allow_html=True,
+                    )
+                    for wl in billed_wls:
+                        bm      = wl.get("year", "—")
+                        inv_ref = wl.get("invoice_number") or "—"
+                        billing = _compute_billing(wl, mc)
+                        st.markdown(
+                            f"<div style='padding:5px 10px;background:#f0fdf4;"
+                            f"border:1px solid #86efac;border-radius:6px;font-size:11px;"
+                            f"color:#166534;margin-bottom:4px;'>"
+                            f"✓ <b>{bm}</b> — ₹ {_fmt_inr(billing['net'])}"
+                            f"&nbsp;&nbsp;·&nbsp;&nbsp;Invoice: <b>{inv_ref}</b></div>",
+                            unsafe_allow_html=True,
+                        )
 
                 mob  = float(mc.get("mobilization_cost") or 0)
                 demob = float(mc.get("demobilization_cost") or 0)
@@ -1323,7 +1700,19 @@ def render() -> None:
                 item_code_on=ic_on,
                 notes=notes.strip() if notes else "",
             )
-            a1, a2, a3, a4 = st.columns(4)
+            # Build file bytes once — shared by buttons and storage upload
+            _docx_bytes: bytes | None = None
+            _pdf_bytes:  bytes | None = None
+            try:
+                _docx_bytes = _build_docx(**_docx_kwargs)
+            except Exception:
+                pass
+            try:
+                _pdf_bytes = _build_pdf_bytes(**_docx_kwargs)
+            except Exception:
+                pass
+
+            a1, a2, a3, a4, a5 = st.columns(5)
             with a1:
                 st.download_button(
                     "⬇  Download (HTML)",
@@ -1333,25 +1722,36 @@ def render() -> None:
                     use_container_width=True,
                 )
             with a2:
-                try:
+                if _docx_bytes:
                     st.download_button(
                         "⬇  Download (Word)",
-                        data=_build_docx(**_docx_kwargs),
+                        data=_docx_bytes,
                         file_name=f"{_inv_fname}.docx",
                         mime="application/vnd.openxmlformats-officedocument"
                              ".wordprocessingml.document",
                         use_container_width=True,
                     )
-                except Exception as _docx_err:
-                    st.error(f"Word export failed: {_docx_err}")
+                else:
+                    st.error("Word export failed")
             with a3:
+                if _pdf_bytes:
+                    st.download_button(
+                        "⬇  Download (PDF)",
+                        data=_pdf_bytes,
+                        file_name=f"{_inv_fname}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                else:
+                    st.error("PDF export failed")
+            with a4:
                 if st.button(
                     "🖨️  Print + Work Log",
                     key="btn_print_with_wl",
                     use_container_width=True,
                 ):
                     st.session_state["_inv_print_mode"] = "with_wl"
-            with a4:
+            with a5:
                 if gen_btn and can_gen:
                     subtotal = sum(sum(it["amount"] for it in g["items"]) for g in groups)
                     tax_tot  = round(subtotal * 0.18, 2) if tax_on else 0.0
@@ -1370,7 +1770,7 @@ def render() -> None:
                             "tax_amount":     tax_tot,
                             "round_off":      rnd_off,
                             "grand_total":    grand,
-                            "status":         "Draft",
+                            "status":         "Final",
                             "notes":          notes.strip() or None,
                         })
                         # Mark every worklog line-item as invoiced so they
@@ -1383,7 +1783,19 @@ def render() -> None:
                                         sb.mark_worklog_invoiced(_wl_id, inv_no)
                                     except Exception:
                                         pass
-                        st.success(f"✔ Invoice **{inv_no}** saved.")
+                        # Upload Word + PDF to storage for future downloads
+                        _upload_ok: list[str] = []
+                        for _ext, _fbytes in [("docx", _docx_bytes), ("pdf", _pdf_bytes)]:
+                            if _fbytes:
+                                try:
+                                    sb.upload_invoice_file(inv_no, _fbytes, _ext)
+                                    _upload_ok.append(_ext.upper())
+                                except Exception:
+                                    pass
+                        _saved_msg = f"✔ Invoice **{inv_no}** saved."
+                        if _upload_ok:
+                            _saved_msg += f" Files stored: {', '.join(_upload_ok)}."
+                        st.success(_saved_msg)
                     except Exception as exc:
                         st.warning(f"Preview ready — could not save to DB: {exc}")
 
