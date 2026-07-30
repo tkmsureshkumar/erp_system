@@ -518,26 +518,26 @@ def render() -> None:
     if st.session_state.get("_op_sync_key") != sync_key:
         st.session_state["_op_sync_key"] = sync_key
         op = selected_operator or {}
-        st.session_state["op_emp_code"]      = op.get("emp_code", "")
-        st.session_state["op_name"]          = op.get("operator_name", "")
-        st.session_state["op_father_name"]   = op.get("father_name", "")
-        raw_desig = op.get("designation", _DESIGNATION_OPTIONS[0])
+        st.session_state["op_emp_code"]      = op.get("emp_code") or ""
+        st.session_state["op_name"]          = op.get("operator_name") or ""
+        st.session_state["op_father_name"]   = op.get("father_name") or ""
+        raw_desig = op.get("designation") or _DESIGNATION_OPTIONS[0]
         st.session_state["op_designation"]   = (
             raw_desig if raw_desig in _DESIGNATION_OPTIONS else _DESIGNATION_OPTIONS[0]
         )
-        st.session_state["op_mobile"]        = op.get("mobile_number", "")
-        st.session_state["op_aadhar"]        = op.get("aadhar_number", "")
+        st.session_state["op_mobile"]        = op.get("mobile_number") or ""
+        st.session_state["op_aadhar"]        = op.get("aadhar_number") or ""
         st.session_state["op_joining_date"]  = _parse_date(op.get("joining_date"))
-        st.session_state["op_status"]        = op.get("status", OperatorStatus.ACTIVE.value)
-        st.session_state["op_license_number"]      = op.get("license_number", "")
-        st.session_state["op_license_type"]        = op.get("license_type", "")
+        st.session_state["op_status"]        = op.get("status") or OperatorStatus.ACTIVE.value
+        st.session_state["op_license_number"]      = op.get("license_number") or ""
+        st.session_state["op_license_type"]        = op.get("license_type") or ""
         st.session_state["op_license_expiry"]      = _parse_date(op.get("license_expiry"))
         st.session_state["op_heavy_license_start"] = _parse_date(op.get("heavy_license_startdate"))
         st.session_state["op_light_license_start"] = _parse_date(op.get("light_license_startdate"))
-        st.session_state["op_bank_account"]  = op.get("bank_account_number", "")
-        st.session_state["op_ifsc"]          = op.get("ifsc_code", "")
-        st.session_state["op_bank_name"]     = op.get("bank_name", "")
-        st.session_state["op_name_passbook"] = op.get("name_in_passbook", "")
+        st.session_state["op_bank_account"]  = op.get("bank_account_number") or ""
+        st.session_state["op_ifsc"]          = op.get("ifsc_code") or ""
+        st.session_state["op_bank_name"]     = op.get("bank_name") or ""
+        st.session_state["op_name_passbook"] = op.get("name_in_passbook") or ""
         st.session_state["op_fixed_salary"]  = float(op.get("fixed_salary") or 0.0)
 
     # ── Two-panel layout ───────────────────────────────────────────────────────
