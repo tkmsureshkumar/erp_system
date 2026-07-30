@@ -308,6 +308,18 @@ def _generate_asset_code(prefix: str, existing_machines: list[dict]) -> str:
     return f"{prefix}{(max_seq + 1):03d}"
 
 
+def _generate_leased_asset_code(existing_machines: list[dict]) -> str:
+    prefix = "BL-Leased-"
+    max_seq = 0
+    for m in existing_machines:
+        code = (m.get("asset_code") or "").strip()
+        if code.upper().startswith(prefix.upper()):
+            suffix = code[len(prefix):]
+            if suffix.isdigit():
+                max_seq = max(max_seq, int(suffix))
+    return f"{prefix}{(max_seq + 1):03d}"
+
+
 def _avatar_color(name: str) -> str:
     palette = [
         "#2563EB", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444",
@@ -1019,10 +1031,13 @@ def render() -> None:
                     )
 
                     if mode == "new":
-                        prefix = asset_prefix_map.get(
-                            machine_type_val, machine_type_val[:3]
-                        ).strip().upper()
-                        payload["asset_code"] = _generate_asset_code(prefix, machines)
+                        if ownership_val == "Leased":
+                            payload["asset_code"] = _generate_leased_asset_code(machines)
+                        else:
+                            prefix = asset_prefix_map.get(
+                                machine_type_val, machine_type_val[:3]
+                            ).strip().upper()
+                            payload["asset_code"] = _generate_asset_code(prefix, machines)
 
                     _err       = None
                     _toast_msg = None
