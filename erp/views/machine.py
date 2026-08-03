@@ -962,7 +962,7 @@ def render() -> None:
 
             # ── Action buttons (outside tabs) ─────────────────────────────────
             st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
-            sv1, sv2, sv3, _ = st.columns([3, 1, 1, 2])
+            sv1, sv2, sv3, sv4 = st.columns([3, 1, 1, 1])
             with sv1:
                 save_clicked = st.button(
                     "💾  Update Machine" if mode == "edit" else "💾  Create Machine",
@@ -972,14 +972,54 @@ def render() -> None:
                 )
             with sv2:
                 if st.button("Cancel", use_container_width=True, key="mach_cancel_btn"):
-                    st.session_state["_mach_mode"]     = "none"
-                    st.session_state["_mach_sel_id"]   = ""
-                    st.session_state["_mach_sync_key"] = None
+                    st.session_state["_mach_mode"]          = "none"
+                    st.session_state["_mach_sel_id"]        = ""
+                    st.session_state["_mach_sync_key"]      = None
+                    st.session_state.pop("_mach_del_confirm", None)
                     st.rerun()
             with sv3:
                 if st.button("↻ Refresh", use_container_width=True, key="mach_refresh_btn"):
                     st.session_state["_mach_sync_key"] = None
                     st.rerun()
+            with sv4:
+                if mode == "edit" and selected_machine:
+                    if st.button("🗑 Delete", use_container_width=True, key="mach_del_btn"):
+                        st.session_state["_mach_del_confirm"] = True
+                        st.rerun()
+
+            # ── Delete confirmation ────────────────────────────────────────────
+            if mode == "edit" and selected_machine and st.session_state.get("_mach_del_confirm"):
+                st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+                with st.container(border=True):
+                    st.warning(
+                        f"**Permanently delete machine "
+                        f"`{asset_code_disp or machine_type_disp}`?**  \n"
+                        "This cannot be undone. All associated records (work logs, "
+                        "deployments) that reference this machine may be affected.",
+                        icon="⚠️",
+                    )
+                    _dc1, _dc2, _ = st.columns([1, 1, 4])
+                    with _dc1:
+                        if st.button("Yes, Delete", type="primary",
+                                     use_container_width=True, key="mach_del_confirm_btn"):
+                            try:
+                                sb.delete_machine(selected_machine_id)
+                                st.session_state["_mach_mode"]     = "none"
+                                st.session_state["_mach_sel_id"]   = ""
+                                st.session_state["_mach_sync_key"] = None
+                                st.session_state.pop("_mach_del_confirm", None)
+                                st.toast(
+                                    f"Machine {asset_code_disp or machine_type_disp} deleted.",
+                                    icon="🗑",
+                                )
+                                st.rerun()
+                            except Exception as _del_err:
+                                st.error(f"Could not delete machine: {_del_err}")
+                    with _dc2:
+                        if st.button("Cancel", use_container_width=True,
+                                     key="mach_del_cancel_btn"):
+                            st.session_state.pop("_mach_del_confirm", None)
+                            st.rerun()
 
             # ── Save logic ─────────────────────────────────────────────────────
             if save_clicked:
