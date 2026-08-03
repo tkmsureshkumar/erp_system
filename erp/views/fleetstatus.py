@@ -339,32 +339,32 @@ def render() -> None:
         fc1, fc2, fc3, fc4 = st.columns(4)
 
         with fc1:
-            status_opts = ["All"] + sorted({r["Status"] for r in rows if r["Status"] != "—"})
-            sel_status = st.selectbox("Status", status_opts,
-                                      label_visibility="collapsed", key="fsr_status")
+            status_opts = sorted({r["Status"] for r in rows if r["Status"] != "—"})
+            sel_status = st.multiselect("Status", status_opts,
+                                        placeholder="All statuses", key="fsr_status")
         with fc2:
-            cust_opts = ["All"] + sorted({r["Customer"] for r in rows if r["Customer"] != "—"})
-            sel_cust = st.selectbox("Customer", cust_opts,
-                                    label_visibility="collapsed", key="fsr_cust")
+            cust_opts = sorted({r["Customer"] for r in rows if r["Customer"] != "—"})
+            sel_cust = st.multiselect("Customer", cust_opts,
+                                      placeholder="All customers", key="fsr_cust")
         with fc3:
-            mtype_opts = ["All"] + sorted({r["_machine_type"] for r in rows if r["_machine_type"]})
-            sel_mtype = st.selectbox("Machine Type", mtype_opts,
-                                     label_visibility="collapsed", key="fsr_mtype")
+            mtype_opts = sorted({r["_machine_type"] for r in rows if r["_machine_type"]})
+            sel_mtype = st.multiselect("Machine Type", mtype_opts,
+                                       placeholder="All types", key="fsr_mtype")
         with fc4:
-            make_opts = ["All"] + sorted({r["_make"] for r in rows if r["_make"]})
-            sel_make = st.selectbox("Make", make_opts,
-                                    label_visibility="collapsed", key="fsr_make")
+            make_opts = sorted({r["_make"] for r in rows if r["_make"]})
+            sel_make = st.multiselect("Make", make_opts,
+                                      placeholder="All makes", key="fsr_make")
 
     # ── Apply filters ─────────────────────────────────────────────────────────
     filtered = rows
-    if sel_status != "All":
-        filtered = [r for r in filtered if r["Status"] == sel_status]
-    if sel_cust != "All":
-        filtered = [r for r in filtered if r["Customer"] == sel_cust]
-    if sel_mtype != "All":
-        filtered = [r for r in filtered if r["_machine_type"] == sel_mtype]
-    if sel_make != "All":
-        filtered = [r for r in filtered if r["_make"] == sel_make]
+    if sel_status:
+        filtered = [r for r in filtered if r["Status"] in sel_status]
+    if sel_cust:
+        filtered = [r for r in filtered if r["Customer"] in sel_cust]
+    if sel_mtype:
+        filtered = [r for r in filtered if r["_machine_type"] in sel_mtype]
+    if sel_make:
+        filtered = [r for r in filtered if r["_make"] in sel_make]
 
     # ── Table header row ──────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
