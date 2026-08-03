@@ -638,8 +638,8 @@ def render() -> None:
             if (show_inactive or s.get("is_active", True))
             and (
                 not q
-                or q in s.get("site_name", "").lower()
-                or q in s.get("city", "").lower()
+                or q in (s.get("site_name") or "").lower()
+                or q in (s.get("city") or "").lower()
             )
         }
 
