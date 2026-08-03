@@ -296,7 +296,7 @@ def render() -> None:
             "Site":            (
                 site_map.get((wo or {}).get("site_id", ""), "—")
                 if wo else
-                site_map.get(m.get("current_location") or "", "—")
+                (m.get("current_location") or "—")
             ),
             "Monthly Rental":  rental,
             "Deployment Date": _deploy_date(dep, mid),
