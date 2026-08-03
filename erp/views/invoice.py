@@ -295,10 +295,14 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:8.5pt;color:#111;
 .wrapper{width:190mm;margin:0 auto;background:#fff;border:1.5px solid #333;}
 /* header */
 .hdr{display:flex;align-items:stretch;border-bottom:1.5px solid #333;}
-.hdr-left{flex:1;padding:8px 10px;display:flex;flex-direction:column;justify-content:center;}
-.co-name{font-size:17pt;font-weight:900;color:#B22222;letter-spacing:.5px;line-height:1;}
-.co-sub{font-size:7pt;color:#444;margin-top:2px;}
-.co-addr{font-size:7pt;color:#333;font-weight:600;margin-top:6px;text-align:center;}
+.hdr-logo{display:flex;align-items:center;justify-content:center;padding:6px 8px 6px 6px;}
+.hdr-center{flex:1;padding:6px 10px;display:flex;flex-direction:column;
+            align-items:center;justify-content:center;text-align:center;}
+.co-name{font-size:18pt;font-weight:900;color:#1A6B1A;letter-spacing:.5px;line-height:1.1;}
+.co-sub1{font-size:8.5pt;color:#1A6B1A;font-weight:700;margin-top:3px;}
+.co-sub2{font-size:8pt;color:#333;margin-top:1px;}
+.co-divider{width:90%;border:none;border-top:1px solid #999;margin:5px 0 4px;}
+.co-addr{font-size:7pt;color:#333;font-weight:600;text-align:center;}
 .hdr-right{width:130px;display:flex;align-items:center;justify-content:center;
            border-left:1.5px solid #333;padding:8px;}
 .ti-box{font-size:11pt;font-weight:900;letter-spacing:2px;border:1.5px solid #333;
@@ -491,9 +495,23 @@ def _build_html(
 
 <!-- ── Company header ── -->
 <div class="hdr">
-  <div class="hdr-left">
+  <div class="hdr-logo">
+    <svg width="90" height="56" viewBox="0 0 90 56" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="1" width="40" height="54" fill="#1A6B1A"/>
+      <text x="20" y="35" fill="white" font-size="18" font-weight="900"
+            font-family="Arial,Helvetica,sans-serif" text-anchor="middle">cto</text>
+      <rect x="45" y="1"  width="43" height="9" fill="#1A6B1A"/>
+      <rect x="45" y="13" width="43" height="9" fill="#1A6B1A"/>
+      <rect x="45" y="25" width="43" height="9" fill="#1A6B1A"/>
+      <rect x="45" y="37" width="43" height="9" fill="#1A6B1A"/>
+      <rect x="45" y="47" width="43" height="8" fill="#1A6B1A"/>
+    </svg>
+  </div>
+  <div class="hdr-center">
     <div class="co-name">CTO LOGISTICS &amp; INFRA</div>
-    <div class="co-sub">(CTO GROUP) &nbsp;&nbsp; (LOGISTICS &amp; INFRA EQUIPMENTS)</div>
+    <div class="co-sub1">(CTO GROUP)</div>
+    <div class="co-sub2">(LOGISTICS &amp; INFRA EQUIPMENTS)</div>
+    <hr class="co-divider"/>
     <div class="co-addr">
       B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514, KALAMBOLI - 410 208, DIST. RAIGAD
       &nbsp; Tel.: {_CO['tel']} &nbsp; E-mail: {_CO['email']}
@@ -744,10 +762,16 @@ def _build_docx(
     r  = p.add_run("CTO LOGISTICS & INFRA")
     r.bold = True
     r.font.size  = Pt(16)
-    r.font.color.rgb = RGBColor(0xB2, 0x22, 0x22)
+    r.font.color.rgb = RGBColor(0x1A, 0x6B, 0x1A)
 
-    _cwrite(lc, "(CTO GROUP)  ·  LOGISTICS & INFRA EQUIPMENTS",
-            size=7.5, first=False)
+    p2 = lc.add_paragraph("(CTO GROUP)")
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r2 = p2.runs[0]
+    r2.bold = True
+    r2.font.size = Pt(8)
+    r2.font.color.rgb = RGBColor(0x1A, 0x6B, 0x1A)
+
+    _cwrite(lc, "(LOGISTICS & INFRA EQUIPMENTS)", size=7.5, first=False)
     addr_ln = (
         f"B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514, KALAMBOLI - 410 208, "
         f"DIST. RAIGAD  ·  Tel.: {_CO['tel']}  ·  {_CO['email']}"
@@ -1038,44 +1062,79 @@ def _build_pdf_bytes(
         pdf.line(LM, yy, LM + W, yy)
         pdf.set_draw_color(0, 0, 0)
 
-    # ── HEADER: company name | TAX INVOICE box ──────────────────────────────────
-    y0   = pdf.get_y()
-    co_w = W - 42      # company name width
-    ti_x = LM + co_w  # TAX INVOICE box x
+    # ── HEADER: CTO logo | company name | TAX INVOICE box ───────────────────────
+    y0      = pdf.get_y()
+    _GRN    = (26, 107, 26)   # #1A6B1A
+    logo_w  = 30              # total logo zone width (mm)
+    ti_w    = 42
+    co_w    = W - logo_w - ti_w   # company name width
+    logo_x  = LM
+    co_x    = LM + logo_w
+    ti_x    = LM + logo_w + co_w
+    hdr_h   = 22              # total header height
 
-    pdf.set_xy(LM, y0)
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.set_text_color(178, 34, 34)
-    pdf.cell(co_w, 7, "CTO LOGISTICS & INFRA", ln=True)
+    # ── logo: green filled box with "cto" ────
+    box_w, box_h = 13, hdr_h
+    pdf.set_fill_color(*_GRN)
+    pdf.rect(logo_x, y0, box_w, box_h, "F")
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_xy(logo_x, y0 + box_h / 2 - 3)
+    pdf.cell(box_w, 6, "cto", align="C")
 
-    pdf.set_xy(LM, y0 + 7)
-    pdf.set_font("Helvetica", "", 7)
-    pdf.set_text_color(68, 68, 68)
-    pdf.cell(co_w, 4, "(CTO GROUP)   (LOGISTICS & INFRA EQUIPMENTS)", ln=True)
+    # ── logo: 5 horizontal green bars ────
+    bar_x = logo_x + box_w + 1.5
+    bar_w = logo_w - box_w - 2.5
+    bar_h = 3.2
+    gap   = (hdr_h - 5 * bar_h) / 6
+    pdf.set_fill_color(*_GRN)
+    for i in range(5):
+        by = y0 + gap + i * (bar_h + gap)
+        pdf.rect(bar_x, by, bar_w, bar_h, "F")
 
-    pdf.set_xy(LM, y0 + 11)
+    # ── company name ────
+    pdf.set_xy(co_x, y0 + 1)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*_GRN)
+    pdf.cell(co_w, 6, "CTO LOGISTICS & INFRA", align="C")
+
+    pdf.set_xy(co_x, y0 + 7)
     pdf.set_font("Helvetica", "B", 7)
+    pdf.set_text_color(*_GRN)
+    pdf.cell(co_w, 4, "(CTO GROUP)", align="C")
+
+    pdf.set_xy(co_x, y0 + 11)
+    pdf.set_font("Helvetica", "", 6.5)
+    pdf.set_text_color(51, 51, 51)
+    pdf.cell(co_w, 3.5, "(LOGISTICS & INFRA EQUIPMENTS)", align="C")
+
+    pdf.set_draw_color(160, 160, 160)
+    pdf.line(co_x + 2, y0 + 15, co_x + co_w - 2, y0 + 15)
+    pdf.set_draw_color(0, 0, 0)
+
+    pdf.set_xy(co_x, y0 + 15.5)
+    pdf.set_font("Helvetica", "B", 6)
     pdf.set_text_color(51, 51, 51)
     addr_str = (
         "B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514,"
         " KALAMBOLI - 410 208, DIST. RAIGAD"
     )
-    pdf.multi_cell(co_w, 3.5, addr_str, new_x="LEFT", new_y="NEXT")
-    pdf.set_x(LM)
-    pdf.set_font("Helvetica", "", 7)
-    pdf.cell(co_w, 3.5, f"Tel.: {_CO['tel']}   E-mail: {_CO['email']}", ln=True)
+    pdf.multi_cell(co_w, 3, addr_str, align="C", new_x="LEFT", new_y="NEXT")
+    pdf.set_xy(co_x, pdf.get_y())
+    pdf.set_font("Helvetica", "", 6)
+    pdf.cell(co_w, 3, f"Tel.: {_CO['tel']}   E-mail: {_CO['email']}", align="C")
 
-    # TAX INVOICE box
+    # ── TAX INVOICE box ────
     pdf.set_draw_color(51, 51, 51)
-    pdf.rect(ti_x, y0, 42, 14)
+    pdf.rect(ti_x, y0, ti_w, hdr_h)
     pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(0, 0, 0)
-    pdf.set_xy(ti_x, y0 + 1)
-    pdf.cell(42, 6, "TAX", align="C")
-    pdf.set_xy(ti_x, y0 + 7)
-    pdf.cell(42, 6, "INVOICE", align="C")
+    pdf.set_xy(ti_x, y0 + 4)
+    pdf.cell(ti_w, 6, "TAX", align="C")
+    pdf.set_xy(ti_x, y0 + 11)
+    pdf.cell(ti_w, 6, "INVOICE", align="C")
 
-    hdr_end = max(pdf.get_y(), y0 + 15)
+    hdr_end = y0 + hdr_h
     pdf.set_y(hdr_end)
     _hline(hdr_end, thick=True)
 
