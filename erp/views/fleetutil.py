@@ -692,6 +692,29 @@ def render() -> None:
 
         st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
+        # ── Sort controls ─────────────────────────────────────────────────────
+        _FU_SORT_COLS = ["Machine", "Serial Number", "Category", "Op. Status",
+                         "Rental Days", "Transit Days", "Available Days",
+                         "Idle Days", "Reserved Days", "Utilization %"]
+        _FU_SORT_NUM  = {"Rental Days", "Transit Days", "Available Days",
+                         "Idle Days", "Reserved Days", "Utilization %"}
+        _fu1, _fu2, _ = st.columns([2, 1, 5])
+        with _fu1:
+            _fu_col = st.selectbox("Sort by", _FU_SORT_COLS,
+                                   index=_FU_SORT_COLS.index("Utilization %"),
+                                   key="fu_sort_col")
+        with _fu2:
+            _fu_dir = st.selectbox("Order", ["↓ Desc", "↑ Asc"], key="fu_sort_dir",
+                                   label_visibility="collapsed")
+        def _fuk(r):
+            v = r.get(_fu_col)
+            if v is None:
+                return (1, 0, "")
+            if _fu_col in _FU_SORT_NUM and isinstance(v, (int, float)):
+                return (0, v, "")
+            return (0, 0, str(v).lower())
+        rows = sorted(rows, key=_fuk, reverse=(_fu_dir == "↓ Desc"))
+
         # ── Main table using HTML for status badge ────────────────────────────
         hdr = (
             "<div style='display:grid;"

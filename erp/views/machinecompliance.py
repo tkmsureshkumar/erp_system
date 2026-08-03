@@ -293,6 +293,23 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
     _order = {"Overdue": 0, "Expiring Soon": 1, "Valid": 2, "Not Set": 3}
     filtered.sort(key=lambda m: _order.get(_row_worst(m)[0], 4))
 
+    # ── Sort controls ─────────────────────────────────────────────────────────
+    _MC_SORT_COLS = ["Compliance Status", "Asset Code", "Machine Type", "Make", "Model"]
+    _mc1, _mc2, _ = st.columns([2, 1, 5])
+    with _mc1:
+        _mc_col = st.selectbox("Sort by", _MC_SORT_COLS, key="mc_sort_col")
+    with _mc2:
+        _mc_dir = st.selectbox("Order", ["↑ Asc", "↓ Desc"], key="mc_sort_dir",
+                               label_visibility="collapsed")
+    _MC_SORT_MAP = {
+        "Compliance Status": lambda m: _order.get(_row_worst(m)[0], 4),
+        "Asset Code":        lambda m: (m.get("asset_code") or "").lower(),
+        "Machine Type":      lambda m: (m.get("machine_type") or "").lower(),
+        "Make":              lambda m: (m.get("make") or "").lower(),
+        "Model":             lambda m: (m.get("model") or "").lower(),
+    }
+    filtered.sort(key=_MC_SORT_MAP[_mc_col], reverse=(_mc_dir == "↓ Desc"))
+
     # ── Export buttons ─────────────────────────────────────────────────────────
     ex1, ex2, _ = st.columns([1, 1, 6])
 

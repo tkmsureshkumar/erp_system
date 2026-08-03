@@ -323,8 +323,26 @@ def _render_operator_master(operators: list[dict]) -> None:
         "Name in Passbook", "Account Number", "IFSC Code",
     ]
 
+    # ── Sort controls ─────────────────────────────────────────────────────────
+    _OM_SORT_COLS = ["Emp Code", "Name", "Status", "Joining Date", "Fixed Salary", "Mobile"]
+    _OM_SORT_MAP  = {
+        "Emp Code":     lambda o: (o.get("emp_code") or "").lower(),
+        "Name":         lambda o: (o.get("operator_name") or "").lower(),
+        "Status":       lambda o: (o.get("status") or "").lower(),
+        "Joining Date": lambda o: str(o.get("joining_date") or ""),
+        "Fixed Salary": lambda o: float(o.get("fixed_salary") or 0),
+        "Mobile":       lambda o: (o.get("mobile_number") or "").lower(),
+    }
+    _om1, _om2, _ = st.columns([2, 1, 5])
+    with _om1:
+        _om_col = st.selectbox("Sort by", _OM_SORT_COLS, key="om_sort_col")
+    with _om2:
+        _om_dir = st.selectbox("Order", ["↑ Asc", "↓ Desc"], key="om_sort_dir",
+                               label_visibility="collapsed")
+    data = sorted(data, key=_OM_SORT_MAP[_om_col], reverse=(_om_dir == "↓ Desc"))
+
     rows_html = ""
-    for i, op in enumerate(sorted(data, key=lambda x: x.get("emp_code") or "")):
+    for i, op in enumerate(data):
         bg    = "#FFFFFF" if i % 2 == 0 else "#FAFBFC"
         st_v  = op.get("status") or "—"
         sbg, sfg = STATUS_COLORS.get(st_v, ("#F1F5F9", "#374151"))

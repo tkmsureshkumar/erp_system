@@ -366,6 +366,25 @@ def render() -> None:
     if sel_make:
         filtered = [r for r in filtered if r["_make"] in sel_make]
 
+    # ── Sort controls ─────────────────────────────────────────────────────────
+    _FLEET_SORT_COLS  = ["Machine ID", "Make", "Model", "Status", "Customer",
+                         "Site", "Monthly Rental", "Deployment Date"]
+    _FLEET_SORT_NUM   = {"Monthly Rental"}
+    _fs1, _fs2, _      = st.columns([2, 1, 5])
+    with _fs1:
+        _fsc = st.selectbox("Sort by", _FLEET_SORT_COLS, key="fsr_sort_col")
+    with _fs2:
+        _fsd = st.selectbox("Order", ["↑ Asc", "↓ Desc"], key="fsr_sort_dir",
+                            label_visibility="collapsed")
+    def _fsk(r):
+        v = r.get(_fsc)
+        if v is None or v == "—":
+            return (1, 0, "")
+        if _fsc in _FLEET_SORT_NUM and isinstance(v, (int, float)):
+            return (0, v, "")
+        return (0, 0, str(v).lower())
+    filtered = sorted(filtered, key=_fsk, reverse=(_fsd == "↓ Desc"))
+
     # ── Table header row ──────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
     lbl_col, btn_col = st.columns([7, 1])

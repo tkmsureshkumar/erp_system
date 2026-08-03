@@ -460,6 +460,29 @@ def render() -> None:
         )
         return
 
+    # ── Sort controls ─────────────────────────────────────────────────────────
+    _MH_SORT_COLS = ["Date", "Customer", "Site", "Monthly Rental", "Duration"]
+    _mh1, _mh2, _ = st.columns([2, 1, 5])
+    with _mh1:
+        _mh_col = st.selectbox("Sort by", _MH_SORT_COLS, key="mh_sort_col")
+    with _mh2:
+        _mh_dir = st.selectbox("Order", ["↓ Desc", "↑ Asc"], key="mh_sort_dir",
+                               label_visibility="collapsed")
+    _mh_rev = (_mh_dir == "↓ Desc")
+    if _mh_col == "Date":
+        timeline.sort(key=lambda e: e["start"], reverse=_mh_rev)
+    elif _mh_col == "Customer":
+        timeline.sort(key=lambda e: (e.get("customer") or "").lower(), reverse=_mh_rev)
+    elif _mh_col == "Site":
+        timeline.sort(key=lambda e: (e.get("site") or "").lower(), reverse=_mh_rev)
+    elif _mh_col == "Monthly Rental":
+        timeline.sort(key=lambda e: e.get("rental") or 0, reverse=_mh_rev)
+    elif _mh_col == "Duration":
+        timeline.sort(
+            key=lambda e: (min(e.get("end") or today, today) - e["start"]).days,
+            reverse=_mh_rev,
+        )
+
     # Header + Export
     n_idle       = sum(1 for e in timeline if e["type"] == "idle")
     dep_label    = f"{n_deps} deployment{'s' if n_deps != 1 else ''}"
