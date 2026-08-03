@@ -293,7 +293,11 @@ def render() -> None:
             "Serial Number":   m.get("serial_number")     or "—",
             "Status":          status,
             "Customer":        cust_map.get((wo or {}).get("customer_id", ""), "—") if wo else "—",
-            "Site":            site_map.get((wo or {}).get("site_id",     ""), "—") if wo else "—",
+            "Site":            (
+                site_map.get((wo or {}).get("site_id", ""), "—")
+                if wo else
+                site_map.get(m.get("current_location") or "", "—")
+            ),
             "Monthly Rental":  rental,
             "Deployment Date": _deploy_date(dep, mid),
             # filter-only
