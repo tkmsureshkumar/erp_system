@@ -350,6 +350,7 @@ def _build_html(
     hsn_code: str,
     item_code_on: bool,
     notes: str,
+    blank_header: bool = False,
 ) -> str:
 
     # ── address blocks ─────────────────────────────────────────────────────────
@@ -484,6 +485,34 @@ def _build_html(
 
     inv_date_str = inv_date.strftime("%d-%B-%Y") if isinstance(inv_date, date) else str(inv_date)
 
+    if blank_header:
+        _hdr_inner = "  <div style='flex:1;min-height:68px;'></div>"
+    else:
+        _hdr_inner = (
+            "  <div class='hdr-logo'>\n"
+            "    <svg width='90' height='56' viewBox='0 0 90 56' xmlns='http://www.w3.org/2000/svg'>\n"
+            "      <rect x='0' y='1' width='40' height='54' fill='#1A6B1A'/>\n"
+            "      <text x='20' y='35' fill='white' font-size='18' font-weight='900'\n"
+            "            font-family='Arial,Helvetica,sans-serif' text-anchor='middle'>cto</text>\n"
+            "      <rect x='45' y='1'  width='43' height='9' fill='#1A6B1A'/>\n"
+            "      <rect x='45' y='13' width='43' height='9' fill='#1A6B1A'/>\n"
+            "      <rect x='45' y='25' width='43' height='9' fill='#1A6B1A'/>\n"
+            "      <rect x='45' y='37' width='43' height='9' fill='#1A6B1A'/>\n"
+            "      <rect x='45' y='47' width='43' height='8' fill='#1A6B1A'/>\n"
+            "    </svg>\n"
+            "  </div>\n"
+            "  <div class='hdr-center'>\n"
+            "    <div class='co-name'>CTO LOGISTICS &amp; INFRA</div>\n"
+            "    <div class='co-sub1'>(CTO GROUP)</div>\n"
+            "    <div class='co-sub2'>(LOGISTICS &amp; INFRA EQUIPMENTS)</div>\n"
+            "    <hr class='co-divider'/>\n"
+            "    <div class='co-addr'>\n"
+            f"      B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514, KALAMBOLI - 410 208, DIST. RAIGAD\n"
+            f"      &nbsp; Tel.: {_CO['tel']} &nbsp; E-mail: {_CO['email']}\n"
+            "    </div>\n"
+            "  </div>"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>Tax Invoice — {inv_no}</title>
@@ -495,28 +524,7 @@ def _build_html(
 
 <!-- ── Company header ── -->
 <div class="hdr">
-  <div class="hdr-logo">
-    <svg width="90" height="56" viewBox="0 0 90 56" xmlns="http://www.w3.org/2000/svg">
-      <rect x="0" y="1" width="40" height="54" fill="#1A6B1A"/>
-      <text x="20" y="35" fill="white" font-size="18" font-weight="900"
-            font-family="Arial,Helvetica,sans-serif" text-anchor="middle">cto</text>
-      <rect x="45" y="1"  width="43" height="9" fill="#1A6B1A"/>
-      <rect x="45" y="13" width="43" height="9" fill="#1A6B1A"/>
-      <rect x="45" y="25" width="43" height="9" fill="#1A6B1A"/>
-      <rect x="45" y="37" width="43" height="9" fill="#1A6B1A"/>
-      <rect x="45" y="47" width="43" height="8" fill="#1A6B1A"/>
-    </svg>
-  </div>
-  <div class="hdr-center">
-    <div class="co-name">CTO LOGISTICS &amp; INFRA</div>
-    <div class="co-sub1">(CTO GROUP)</div>
-    <div class="co-sub2">(LOGISTICS &amp; INFRA EQUIPMENTS)</div>
-    <hr class="co-divider"/>
-    <div class="co-addr">
-      B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514, KALAMBOLI - 410 208, DIST. RAIGAD
-      &nbsp; Tel.: {_CO['tel']} &nbsp; E-mail: {_CO['email']}
-    </div>
-  </div>
+{_hdr_inner}
   <div class="hdr-right"><div class="ti-box">TAX<br>INVOICE</div></div>
 </div>
 
@@ -635,6 +643,7 @@ def _build_docx(
     hsn_code: str,
     item_code_on: bool,
     notes: str,
+    blank_header: bool = False,
 ) -> bytes:
     """Return a .docx invoice as raw bytes. Mirrors _build_html structure."""
     from io import BytesIO
@@ -758,28 +767,34 @@ def _build_docx(
     t_hdr = _mktbl(1, 2, [148, 38])
 
     lc = t_hdr.cell(0, 0)
-    p  = lc.paragraphs[0]
-    r  = p.add_run("CTO LOGISTICS & INFRA")
-    r.bold = True
-    r.font.size  = Pt(16)
-    r.font.color.rgb = RGBColor(0x1A, 0x6B, 0x1A)
+    if blank_header:
+        # Leave left cell blank — space for pre-printed letterhead
+        p_blank = lc.paragraphs[0]
+        p_blank.paragraph_format.space_before = Pt(36)
+        p_blank.paragraph_format.space_after  = Pt(36)
+    else:
+        p  = lc.paragraphs[0]
+        r  = p.add_run("CTO LOGISTICS & INFRA")
+        r.bold = True
+        r.font.size  = Pt(16)
+        r.font.color.rgb = RGBColor(0x1A, 0x6B, 0x1A)
 
-    p2 = lc.add_paragraph("(CTO GROUP)")
-    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r2 = p2.runs[0]
-    r2.bold = True
-    r2.font.size = Pt(8)
-    r2.font.color.rgb = RGBColor(0x1A, 0x6B, 0x1A)
+        p2 = lc.add_paragraph("(CTO GROUP)")
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r2 = p2.runs[0]
+        r2.bold = True
+        r2.font.size = Pt(8)
+        r2.font.color.rgb = RGBColor(0x1A, 0x6B, 0x1A)
 
-    _cwrite(lc, "(LOGISTICS & INFRA EQUIPMENTS)", size=7.5, first=False)
-    addr_ln = (
-        f"B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514, KALAMBOLI - 410 208, "
-        f"DIST. RAIGAD  ·  Tel.: {_CO['tel']}  ·  {_CO['email']}"
-    )
-    p_addr = lc.add_paragraph(addr_ln)
-    p_addr.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_addr.runs[0].font.size = Pt(7.5)
-    p_addr.paragraph_format.space_before = Pt(2)
+        _cwrite(lc, "(LOGISTICS & INFRA EQUIPMENTS)", size=7.5, first=False)
+        addr_ln = (
+            f"B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514, KALAMBOLI - 410 208, "
+            f"DIST. RAIGAD  ·  Tel.: {_CO['tel']}  ·  {_CO['email']}"
+        )
+        p_addr = lc.add_paragraph(addr_ln)
+        p_addr.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_addr.runs[0].font.size = Pt(7.5)
+        p_addr.paragraph_format.space_before = Pt(2)
 
     rc = t_hdr.cell(0, 1)
     rc.vertical_alignment = 1  # CENTER
@@ -993,6 +1008,7 @@ def _build_pdf_bytes(
     hsn_code: str,
     item_code_on: bool,
     notes: str,
+    blank_header: bool = False,
 ) -> bytes:
     """Return a .pdf invoice as raw bytes using fpdf2 (no system-library deps)."""
     from fpdf import FPDF
@@ -1073,58 +1089,59 @@ def _build_pdf_bytes(
     ti_x    = LM + logo_w + co_w
     hdr_h   = 22              # total header height
 
-    # ── logo: green filled box with "cto" ────
-    box_w, box_h = 13, hdr_h
-    pdf.set_fill_color(*_GRN)
-    pdf.rect(logo_x, y0, box_w, box_h, "F")
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_xy(logo_x, y0 + box_h / 2 - 3)
-    pdf.cell(box_w, 6, "cto", align="C")
+    if not blank_header:
+        # ── logo: green filled box with "cto" ────
+        box_w, box_h = 13, hdr_h
+        pdf.set_fill_color(*_GRN)
+        pdf.rect(logo_x, y0, box_w, box_h, "F")
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_xy(logo_x, y0 + box_h / 2 - 3)
+        pdf.cell(box_w, 6, "cto", align="C")
 
-    # ── logo: 5 horizontal green bars ────
-    bar_x = logo_x + box_w + 1.5
-    bar_w = logo_w - box_w - 2.5
-    bar_h = 3.2
-    gap   = (hdr_h - 5 * bar_h) / 6
-    pdf.set_fill_color(*_GRN)
-    for i in range(5):
-        by = y0 + gap + i * (bar_h + gap)
-        pdf.rect(bar_x, by, bar_w, bar_h, "F")
+        # ── logo: 5 horizontal green bars ────
+        bar_x = logo_x + box_w + 1.5
+        bar_w = logo_w - box_w - 2.5
+        bar_h = 3.2
+        gap   = (hdr_h - 5 * bar_h) / 6
+        pdf.set_fill_color(*_GRN)
+        for i in range(5):
+            by = y0 + gap + i * (bar_h + gap)
+            pdf.rect(bar_x, by, bar_w, bar_h, "F")
 
-    # ── company name ────
-    pdf.set_xy(co_x, y0 + 1)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_text_color(*_GRN)
-    pdf.cell(co_w, 6, "CTO LOGISTICS & INFRA", align="C")
+        # ── company name ────
+        pdf.set_xy(co_x, y0 + 1)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_text_color(*_GRN)
+        pdf.cell(co_w, 6, "CTO LOGISTICS & INFRA", align="C")
 
-    pdf.set_xy(co_x, y0 + 7)
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_text_color(*_GRN)
-    pdf.cell(co_w, 4, "(CTO GROUP)", align="C")
+        pdf.set_xy(co_x, y0 + 7)
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_text_color(*_GRN)
+        pdf.cell(co_w, 4, "(CTO GROUP)", align="C")
 
-    pdf.set_xy(co_x, y0 + 11)
-    pdf.set_font("Helvetica", "", 6.5)
-    pdf.set_text_color(51, 51, 51)
-    pdf.cell(co_w, 3.5, "(LOGISTICS & INFRA EQUIPMENTS)", align="C")
+        pdf.set_xy(co_x, y0 + 11)
+        pdf.set_font("Helvetica", "", 6.5)
+        pdf.set_text_color(51, 51, 51)
+        pdf.cell(co_w, 3.5, "(LOGISTICS & INFRA EQUIPMENTS)", align="C")
 
-    pdf.set_draw_color(160, 160, 160)
-    pdf.line(co_x + 2, y0 + 15, co_x + co_w - 2, y0 + 15)
-    pdf.set_draw_color(0, 0, 0)
+        pdf.set_draw_color(160, 160, 160)
+        pdf.line(co_x + 2, y0 + 15, co_x + co_w - 2, y0 + 15)
+        pdf.set_draw_color(0, 0, 0)
 
-    pdf.set_xy(co_x, y0 + 15.5)
-    pdf.set_font("Helvetica", "B", 6)
-    pdf.set_text_color(51, 51, 51)
-    addr_str = (
-        "B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514,"
-        " KALAMBOLI - 410 208, DIST. RAIGAD"
-    )
-    pdf.multi_cell(co_w, 3, addr_str, align="C", new_x="LEFT", new_y="NEXT")
-    pdf.set_xy(co_x, pdf.get_y())
-    pdf.set_font("Helvetica", "", 6)
-    pdf.cell(co_w, 3, f"Tel.: {_CO['tel']}   E-mail: {_CO['email']}", align="C")
+        pdf.set_xy(co_x, y0 + 15.5)
+        pdf.set_font("Helvetica", "B", 6)
+        pdf.set_text_color(51, 51, 51)
+        addr_str = (
+            "B-202, STEEL CHAMBERS, STEEL MARKET ROAD, PLOT NO. 514,"
+            " KALAMBOLI - 410 208, DIST. RAIGAD"
+        )
+        pdf.multi_cell(co_w, 3, addr_str, align="C", new_x="LEFT", new_y="NEXT")
+        pdf.set_xy(co_x, pdf.get_y())
+        pdf.set_font("Helvetica", "", 6)
+        pdf.cell(co_w, 3, f"Tel.: {_CO['tel']}   E-mail: {_CO['email']}", align="C")
 
-    # ── TAX INVOICE box ────
+    # ── TAX INVOICE box (always shown) ────
     pdf.set_draw_color(51, 51, 51)
     pdf.rect(ti_x, y0, ti_w, hdr_h)
     pdf.set_font("Helvetica", "B", 11)
@@ -1627,6 +1644,13 @@ def render() -> None:
         hsn_on   = st.checkbox("Include HSN/SAC code", value=False, key="inv_hsn")
         hsn_code = st.text_input("HSN/SAC", placeholder="997319", key="inv_hsn_val") if hsn_on else ""
         ic_on    = st.checkbox("Include Item Codes", value=False, key="inv_ic")
+        inv_format = st.radio(
+            "Invoice Format",
+            ["Option 1: With Company Letterhead", "Option 2: Blank Header (Pre-printed Letterhead)"],
+            key="inv_format",
+            help="Option 2 leaves the top header blank so you can print on your own pre-printed letterhead paper.",
+        )
+        blank_header = inv_format.startswith("Option 2")
         notes    = st.text_area("Notes (optional)", key="inv_notes", height=60)
 
         # duplicate check
@@ -1768,6 +1792,7 @@ def render() -> None:
                 hsn_code=hsn_code,
                 item_code_on=ic_on,
                 notes=notes.strip() if notes else "",
+                blank_header=blank_header,
             )
 
             st.iframe(inv_html, height=960)
@@ -1782,6 +1807,7 @@ def render() -> None:
                 hsn_on=hsn_on, hsn_code=hsn_code,
                 item_code_on=ic_on,
                 notes=notes.strip() if notes else "",
+                blank_header=blank_header,
             )
             # Build file bytes once — shared by buttons and storage upload
             _docx_bytes: bytes | None = None
