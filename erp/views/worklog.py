@@ -147,7 +147,7 @@ def _recalc_df(
                 exp_ot  = round(raw_net, 2)
                 exp_bd  = 0.0
             elif shift_dur is not None:
-                exp_net = raw_net
+                exp_net = round(min(raw_net, shift_dur), 2)
                 exp_ot  = round(max(0.0, raw_net - shift_dur), 2)
                 exp_bd  = round(max(0.0, shift_dur - raw_net), 2)
             else:
