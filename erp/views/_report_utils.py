@@ -291,7 +291,7 @@ def render_drilldown_table(
     Sorting is built into st.dataframe — click any column header.
     """
     kwargs: dict = dict(
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",

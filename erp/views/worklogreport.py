@@ -572,7 +572,7 @@ def render() -> None:
             )
 
             # ── Selected row → navigate to detailed shift log ─────────────────
-            if selected_idx is not None:
+            if selected_idx is not None and selected_idx < len(billing_df):
                 row         = billing_df.iloc[selected_idx]
                 asset_val   = row.get("Asset Code", "") or ""
                 machine_val = row.get("Machine", "")
