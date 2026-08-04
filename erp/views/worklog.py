@@ -1411,7 +1411,13 @@ def render() -> None:
     _prev_df2: pd.DataFrame | None = st.session_state.get(f"_wl_prev2_{wl_sync_key}")
 
     shift_start_time = _parse_time(selected_machine.get("shift_start_time")) or time(8, 0)
-    shift_end_time   = _parse_time(selected_machine.get("shift_end_time"))   or time(20, 0)
+    _msh = selected_machine.get("machine_shift_hour")
+    if _msh:
+        _msh_min = round(float(_msh) * 60)
+        _end_min = shift_start_time.hour * 60 + shift_start_time.minute + _msh_min
+        shift_end_time = time(_end_min // 60 % 24, _end_min % 60)
+    else:
+        shift_end_time = _parse_time(selected_machine.get("shift_end_time")) or time(20, 0)
 
     _no_of_days_raw = selected_machine.get("no_of_days")
     _no_of_days     = int(_no_of_days_raw) if _no_of_days_raw else None
@@ -1629,7 +1635,12 @@ def render() -> None:
             unsafe_allow_html=True,
         )
         shift_start_time_s2 = _parse_time(selected_machine.get("shift_start_time")) or time(8, 0)
-        shift_end_time_s2   = _parse_time(selected_machine.get("shift_end_time"))   or time(20, 0)
+        if _msh:
+            _msh_min_s2 = round(float(_msh) * 60)
+            _end_min_s2 = shift_start_time_s2.hour * 60 + shift_start_time_s2.minute + _msh_min_s2
+            shift_end_time_s2 = time(_end_min_s2 // 60 % 24, _end_min_s2 % 60)
+        else:
+            shift_end_time_s2 = _parse_time(selected_machine.get("shift_end_time")) or time(20, 0)
 
         base_key_s2 = (
             f"wl_{selected_wo_id}_{machine_idx}"
