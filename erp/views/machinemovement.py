@@ -886,13 +886,16 @@ def render() -> None:
                 try:
                     _save_movement(sb, selected_machine, "Unload", from_loc or None, to_loc, unload_date, None)
                     try:
+                        _has_wo = sb.machine_has_active_wo(selected_machine["id"])
+                        _new_status = "Reserved" if _has_wo else "Available"
                         sb.update_machine(selected_machine["id"], {
                             "current_location": to_loc,
-                            "operational_status": "Reserved",
+                            "operational_status": _new_status,
                         })
                     except Exception:
                         pass
-                    st.toast(f"Unload recorded for {asset_code}. Status set to Reserved.", icon="✅")
+                    _status_msg = "Reserved (active Work Order exists)" if _has_wo else "Available"
+                    st.toast(f"Unload recorded for {asset_code}. Status set to {_status_msg}.", icon="✅")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save movement: {exc}")

@@ -399,6 +399,30 @@ class SupabaseClient:
             return data
         return []
 
+    def machine_has_active_wo(self, machine_id: str) -> bool:
+        """Return True if machine_id appears in any non-Closed work order's machine_config."""
+        import json as _json
+        try:
+            resp = (
+                self.client.table("work_orders")
+                .select("machine_config, status")
+                .neq("status", "Closed")
+                .execute()
+            )
+            rows = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else [])
+            for row in (rows or []):
+                mc_raw = row.get("machine_config")
+                if not mc_raw:
+                    continue
+                configs = _json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+                if isinstance(configs, list):
+                    for cfg in configs:
+                        if cfg.get("machine_id") == machine_id:
+                            return True
+        except Exception:
+            pass
+        return False
+
     def update_work_order(self, work_order_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         resp = self.client.table("work_orders").update(payload).eq("id", work_order_id).execute()
         data = None
