@@ -486,7 +486,7 @@ def _build_html(
     inv_date_str = inv_date.strftime("%d-%B-%Y") if isinstance(inv_date, date) else str(inv_date)
 
     if blank_header:
-        _hdr_inner = "  <div style='flex:1;min-height:68px;'></div>"
+        _hdr_inner = "  <div style='flex:1;min-height:158px;'></div>"
     else:
         _hdr_inner = (
             "  <div class='hdr-logo'>\n"
@@ -768,10 +768,10 @@ def _build_docx(
 
     lc = t_hdr.cell(0, 0)
     if blank_header:
-        # Leave left cell blank — space for pre-printed letterhead
+        # Leave left cell blank — space for pre-printed letterhead (~42mm from top)
         p_blank = lc.paragraphs[0]
-        p_blank.paragraph_format.space_before = Pt(36)
-        p_blank.paragraph_format.space_after  = Pt(36)
+        p_blank.paragraph_format.space_before = Pt(85)
+        p_blank.paragraph_format.space_after  = Pt(0)
     else:
         p  = lc.paragraphs[0]
         r  = p.add_run("CTO LOGISTICS & INFRA")
@@ -1087,7 +1087,7 @@ def _build_pdf_bytes(
     logo_x  = LM
     co_x    = LM + logo_w
     ti_x    = LM + logo_w + co_w
-    hdr_h   = 22              # total header height
+    hdr_h   = 32 if blank_header else 22   # blank: clear pre-printed letterhead (~42mm from page top)
 
     if not blank_header:
         # ── logo: green filled box with "cto" ────
