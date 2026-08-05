@@ -1739,16 +1739,45 @@ def render() -> None:
                 "for this work log entry."
             )
 
-    # ── Action buttons (hidden when locked) ────────────────────────────────────
+    # ── Shared action helpers (used by both locked and edit paths) ───────────────
+    _billing_month_str = f"{calendar.month_name[selected_month_num]} {selected_year}"
+    _wl_del_key = f"_wl_del_{selected_wo_id}_{_mkey}_{selected_month_num}_{selected_year}"
+
+    # ── Delete option (locked / submitted worklogs) ───────────────────────────
     if _is_locked:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+        if not st.session_state.get(_wl_del_key):
+            if st.button("🗑 Delete Work Log", key="del_locked_wl_btn"):
+                st.session_state[_wl_del_key] = True
+                st.rerun()
+        else:
+            st.warning(
+                f"⚠️  You are about to permanently delete the work log for "
+                f"**{_billing_month_str}** — **{selected_machine.get('machine_label', '')}**. "
+                f"This cannot be undone."
+            )
+            _dc1, _dc2, _ = st.columns([2, 2, 6])
+            with _dc1:
+                if st.button("✅ Yes, Delete", key="del_locked_wl_confirm", type="primary"):
+                    try:
+                        sb.delete_worklog(selected_wo_id, _mkey, _billing_month_str)
+                        for _sfx in ("_s1", "_s2", ""):
+                            st.session_state.pop(f"sched_data_{base_key}{_sfx}", None)
+                        st.session_state.pop(_wl_del_key, None)
+                        st.toast("Work log deleted.", icon="🗑")
+                        st.rerun()
+                    except Exception as _exc:
+                        st.error(f"Could not delete: {_exc}")
+            with _dc2:
+                if st.button("✗ Cancel", key="del_locked_wl_cancel"):
+                    st.session_state.pop(_wl_del_key, None)
+                    st.rerun()
         return
 
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
     _btn_save, _btn_draft, _btn_discard = st.columns([3, 3, 2])
 
-    _mlabel            = selected_machine.get("machine_label", f"Machine {machine_idx + 1}")
-    _billing_month_str = f"{calendar.month_name[selected_month_num]} {selected_year}"
+    _mlabel = selected_machine.get("machine_label", f"Machine {machine_idx + 1}")
 
     def _finalize_df(df: pd.DataFrame | None) -> pd.DataFrame | None:
         if df is None or df.empty:
@@ -1805,16 +1834,29 @@ def render() -> None:
                 except Exception as exc:
                     st.error(f"Could not save draft: {exc}")
 
-    # ── Discard Draft ──────────────────────────────────────────────────────────
+    # ── Delete Draft ───────────────────────────────────────────────────────────
     with _btn_discard:
         if _is_db_draft:
-            if st.button("Discard Draft", key="discard_draft_btn", use_container_width=True):
-                try:
-                    sb.delete_worklog(selected_wo_id, _mkey, _billing_month_str)
-                except Exception:
-                    pass
-                _clear_session()
-                st.rerun()
+            if not st.session_state.get(_wl_del_key):
+                if st.button("🗑 Delete Draft", key="discard_draft_btn", use_container_width=True):
+                    st.session_state[_wl_del_key] = True
+                    st.rerun()
+            else:
+                st.warning("⚠️ Delete this draft permanently?")
+                _dd1, _dd2 = st.columns(2)
+                with _dd1:
+                    if st.button("✅ Yes", key="del_draft_confirm", use_container_width=True, type="primary"):
+                        try:
+                            sb.delete_worklog(selected_wo_id, _mkey, _billing_month_str)
+                        except Exception:
+                            pass
+                        st.session_state.pop(_wl_del_key, None)
+                        _clear_session()
+                        st.rerun()
+                with _dd2:
+                    if st.button("✗ No", key="del_draft_cancel", use_container_width=True):
+                        st.session_state.pop(_wl_del_key, None)
+                        st.rerun()
 
     # ── Save Work Log ──────────────────────────────────────────────────────────
     with _btn_save:
