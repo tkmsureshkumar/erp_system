@@ -1,5 +1,6 @@
 streamlit>=1.60
 starlette>=0.41.0
+./starlette_fix
 pydantic>=2.6
 supabase>=1.0
 python-dotenv>=1.0

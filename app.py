@@ -12,27 +12,6 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# Starlette >=0.41 made thread_minimum_size a required kwarg in GZipResponder
-# but Streamlit's own gzip middleware doesn't pass it.  Patch the class so the
-# argument defaults to minimum_size when callers omit it.
-try:
-    import inspect as _inspect
-    import starlette.middleware.gzip as _sgzip
-    _p = _inspect.signature(_sgzip.GZipResponder.__init__).parameters
-    if "thread_minimum_size" in _p and _p["thread_minimum_size"].default is _inspect.Parameter.empty:
-        _orig_gz_init = _sgzip.GZipResponder.__init__
-        def _patched_gz_init(self, app, minimum_size, *, compresslevel=9, thread_minimum_size=None, **kw):
-            _orig_gz_init(
-                self, app, minimum_size,
-                compresslevel=compresslevel,
-                thread_minimum_size=minimum_size if thread_minimum_size is None else thread_minimum_size,
-                **kw,
-            )
-        _sgzip.GZipResponder.__init__ = _patched_gz_init
-    del _inspect, _sgzip, _p
-except Exception:
-    pass
-
 import streamlit as st
 from streamlit_cookies_controller import CookieController
 
