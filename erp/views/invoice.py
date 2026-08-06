@@ -307,6 +307,8 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:8.5pt;color:#111;
            border-left:1.5px solid #333;padding:8px;}
 .ti-box{font-size:11pt;font-weight:900;letter-spacing:2px;border:1.5px solid #333;
         padding:4px 10px;text-align:center;}
+.ti-centre-wrap{display:flex;justify-content:center;padding:8px 0;border-bottom:1px solid #888;}
+.ti-centre{font-size:13pt;font-weight:900;letter-spacing:3px;border:1.5px solid #333;padding:5px 28px;}
 /* two-col sections */
 .two-col{display:flex;border-bottom:1px solid #888;}
 .two-col .left{flex:1;padding:6px 10px;border-right:1px solid #888;font-size:8pt;}
@@ -486,8 +488,12 @@ def _build_html(
     inv_date_str = inv_date.strftime("%d-%B-%Y") if isinstance(inv_date, date) else str(inv_date)
 
     if blank_header:
-        _hdr_inner = "  <div style='flex:1;min-height:158px;'></div>"
+        _hdr_inner  = "  <div style='flex:1;min-height:158px;'></div>"
+        _ti_in_hdr  = ""
+        _ti_after   = '<div class="ti-centre-wrap"><div class="ti-centre">TAX INVOICE</div></div>'
     else:
+        _ti_in_hdr  = '  <div class="hdr-right"><div class="ti-box">TAX<br>INVOICE</div></div>'
+        _ti_after   = ""
         _hdr_inner = (
             "  <div class='hdr-logo'>\n"
             "    <svg width='90' height='56' viewBox='0 0 90 56' xmlns='http://www.w3.org/2000/svg'>\n"
@@ -525,9 +531,9 @@ def _build_html(
 <!-- ── Company header ── -->
 <div class="hdr">
 {_hdr_inner}
-  <div class="hdr-right"><div class="ti-box">TAX<br>INVOICE</div></div>
+{_ti_in_hdr}
 </div>
-
+{_ti_after}
 <!-- ── Company details | Invoice meta ── -->
 <div class="two-col">
   <div class="left">
@@ -797,12 +803,22 @@ def _build_docx(
         p_addr.paragraph_format.space_before = Pt(2)
 
     rc = t_hdr.cell(0, 1)
-    rc.vertical_alignment = 1  # CENTER
-    p_ti = rc.paragraphs[0]
-    p_ti.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r_ti = p_ti.add_run("TAX\nINVOICE")
-    r_ti.bold = True
-    r_ti.font.size = Pt(13)
+    if not blank_header:
+        rc.vertical_alignment = 1  # CENTER
+        p_ti = rc.paragraphs[0]
+        p_ti.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r_ti = p_ti.add_run("TAX\nINVOICE")
+        r_ti.bold = True
+        r_ti.font.size = Pt(13)
+
+    if blank_header:
+        p_ti_c = doc.add_paragraph()
+        p_ti_c.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_ti_c.paragraph_format.space_before = Pt(6)
+        p_ti_c.paragraph_format.space_after  = Pt(6)
+        r_ti_c = p_ti_c.add_run("TAX INVOICE")
+        r_ti_c.bold = True
+        r_ti_c.font.size = Pt(16)
 
     # ── 2. GSTIN / invoice meta ────────────────────────────────────────────────
     t_meta = _mktbl(1, 2, [93, 93])
@@ -1141,22 +1157,36 @@ def _build_pdf_bytes(
         pdf.set_font("Helvetica", "", 6)
         pdf.cell(co_w, 3, f"Tel.: {_CO['tel']}   E-mail: {_CO['email']}", align="C")
 
-    # ── TAX INVOICE box (always shown) ────
-    pdf.set_draw_color(51, 51, 51)
-    pdf.rect(ti_x, y0, ti_w, hdr_h)
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_xy(ti_x, y0 + 4)
-    pdf.cell(ti_w, 6, "TAX", align="C")
-    pdf.set_xy(ti_x, y0 + 11)
-    pdf.cell(ti_w, 6, "INVOICE", align="C")
+    if not blank_header:
+        # ── TAX INVOICE box (top-right, beside logo and company name) ────
+        pdf.set_draw_color(51, 51, 51)
+        pdf.rect(ti_x, y0, ti_w, hdr_h)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(ti_x, y0 + 4)
+        pdf.cell(ti_w, 6, "TAX", align="C")
+        pdf.set_xy(ti_x, y0 + 11)
+        pdf.cell(ti_w, 6, "INVOICE", align="C")
 
     hdr_end = y0 + hdr_h
     pdf.set_y(hdr_end)
     _hline(hdr_end, thick=True)
 
+    if blank_header:
+        # ── TAX INVOICE: centred title below the blank letterhead space ────
+        _ti_w, _ti_h = 64, 10
+        _ti_x = LM + (W - _ti_w) / 2
+        pdf.set_draw_color(51, 51, 51)
+        pdf.rect(_ti_x, hdr_end + 2, _ti_w, _ti_h)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(_ti_x, hdr_end + 4)
+        pdf.cell(_ti_w, 6, "TAX INVOICE", align="C")
+        s1y = hdr_end + _ti_h + 5
+    else:
+        s1y = hdr_end + 2
+
     # ── SECTION 1: company details | invoice meta ────────────────────────────────
-    s1y  = hdr_end + 2
     half = W / 2
 
     # left column — company GST details
