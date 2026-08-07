@@ -565,8 +565,8 @@ def render() -> None:
         filtered_map = {
             oid: op for oid, op in operator_map.items()
             if not q
-            or q in op.get("operator_name", "").lower()
-            or q in op.get("mobile_number", "").lower()
+            or q in (op.get("operator_name") or "").lower()
+            or q in (op.get("mobile_number") or "").lower()
             or q in (op.get("emp_code") or "").lower()
         }
 
