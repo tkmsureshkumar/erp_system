@@ -23,7 +23,6 @@ BILLING_TYPES  = ["Monthly Fixed Rental", "Daily Rental"]
 BILLING_CYCLES = ["Calendar Month", "Custom"]
 _HOUR_OPTS     = [""] + [str(h) for h in range(1, 25)]   # 1–24 hrs, blank = not set
 _DAYS_OPTS     = [""] + [str(d) for d in range(1, 31)]   # 1–30 days, blank = not set
-_YES_NO_OPTS   = ["No", "Yes"]
 
 _MC_COLS = [
     "Machine", "Make", "Model", "Serial Number",
@@ -403,13 +402,6 @@ def _init_dialog_state(row: dict, label_to_details: dict, ref_date) -> None:
         p + "shift_hour":   row.get("machine_shift_hour")   or "",
         p + "mob_cost":     float(row.get("mobilization_cost")   or 0),
         p + "demob_cost":   float(row.get("demobilization_cost") or 0),
-        p + "cross_rental": row.get("cross_rental") or _YES_NO_OPTS[0],
-        p + "vendor_name":    row.get("vendor_name")          or "",
-        p + "vendor_gst":     row.get("vendor_gst")           or "",
-        p + "vendor_contact": row.get("vendor_contact")       or "",
-        p + "vendor_rental":  float(row.get("vendor_rental_amount") or 0),
-        p + "vendor_mobile":  row.get("vendor_mobile_no")     or "",
-        p + "vendor_demob":   row.get("vendor_demob")         or "",
         p + "item_code":      row.get("item_code")            or "",
     })
 
@@ -529,62 +521,6 @@ def _machine_row_dialog(
             key=p + "demob_cost",
         )
 
-    # ── Operational Details ────────────────────────────────────────────────────
-    st.markdown(
-        "<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#E87722;margin:14px 0 8px;'>"
-        "Operational Details</div>",
-        unsafe_allow_html=True,
-    )
-    od1, _ = st.columns(2)
-    with od1:
-        cross_rental = st.selectbox(
-            "Cross Rental", _YES_NO_OPTS, key=p + "cross_rental",
-        )
-
-    # ── Vendor Details ─────────────────────────────────────────────────────────
-    _vendor_locked = (cross_rental != "Yes")
-    st.markdown(
-        "<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
-        "text-transform:uppercase;color:#E87722;margin:14px 0 8px;'>"
-        f"Vendor Details"
-        f"{'<span style=\"font-weight:400;font-size:10px;color:#9ca3af;margin-left:8px;\">'
-           '— set Cross Rental to Yes to enable</span>' if _vendor_locked else ''}"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    vd1, vd2 = st.columns(2)
-    with vd1:
-        vendor_name = st.text_input(
-            "Vendor Name", placeholder="Vendor / supplier name",
-            key=p + "vendor_name", disabled=_vendor_locked,
-        )
-    with vd2:
-        vendor_gst = st.text_input(
-            "Vendor GST", placeholder="GST number",
-            key=p + "vendor_gst", disabled=_vendor_locked,
-        )
-    vd3, vd4, vd5 = st.columns(3)
-    with vd3:
-        vendor_contact = st.text_input(
-            "Vendor Contact", placeholder="Contact person",
-            key=p + "vendor_contact", disabled=_vendor_locked,
-        )
-    with vd4:
-        vendor_mobile = st.text_input(
-            "Vendor Mobile No.", placeholder="+91 XXXXX XXXXX",
-            key=p + "vendor_mobile", disabled=_vendor_locked,
-        )
-    with vd5:
-        vendor_demob = st.text_input(
-            "Vendor Demob No.", placeholder="+91 XXXXX XXXXX",
-            key=p + "vendor_demob", disabled=_vendor_locked,
-        )
-    vendor_rental = st.number_input(
-        "Vendor Rental Amount", min_value=0.0, step=1000.0, format="%.0f",
-        key=p + "vendor_rental", disabled=_vendor_locked,
-    )
-
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     a1, a2 = st.columns(2)
     with a1:
@@ -607,13 +543,6 @@ def _machine_row_dialog(
                     "machine_shift_hour":       shift_hour   or None,
                     "mobilization_cost":        float(mob_cost   or 0),
                     "demobilization_cost":      float(demob_cost or 0),
-                    "cross_rental":             cross_rental,
-                    "vendor_name":              vendor_name    or None,
-                    "vendor_gst":               vendor_gst     or None,
-                    "vendor_contact":           vendor_contact or None,
-                    "vendor_rental_amount":     float(vendor_rental or 0),
-                    "vendor_mobile_no":         vendor_mobile  or None,
-                    "vendor_demob":             vendor_demob   or None,
                     "item_code":                item_code      or None,
                 }
                 rows = list(mc_rows)

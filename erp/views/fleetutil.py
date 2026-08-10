@@ -515,59 +515,63 @@ def render() -> None:
         all_categories = sorted({m.get("machine_type") or "" for m in machines if m.get("machine_type")})
         with f3:
             st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Category</p>', unsafe_allow_html=True)
-            sel_category = st.selectbox(
-                "Category", ["— All —"] + all_categories,
-                label_visibility="collapsed", key="fu_category",
+            sel_category = st.multiselect(
+                "Category", all_categories,
+                label_visibility="collapsed", key="fu_category", placeholder="All",
             )
 
         # Machine options (filtered by category if set)
-        _mach_pool = machines if sel_category == "— All —" else [
-            m for m in machines if m.get("machine_type") == sel_category
+        _mach_pool = machines if not sel_category else [
+            m for m in machines if m.get("machine_type") in sel_category
         ]
         mach_opts = sorted(
             {m.get("asset_code") or m.get("id", "") for m in _mach_pool if m.get("asset_code") or m.get("id")}
         )
         with f4:
             st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Machine</p>', unsafe_allow_html=True)
-            sel_machine = st.selectbox(
-                "Machine", ["— All —"] + mach_opts,
-                label_visibility="collapsed", key="fu_machine",
+            sel_machine = st.multiselect(
+                "Machine", mach_opts,
+                label_visibility="collapsed", key="fu_machine", placeholder="All",
             )
 
         # Customer options
-        cust_opts = [("— All —", "")] + sorted(
-            [(c.get("customer_name", "—"), c["id"]) for c in customers_list if c.get("id")],
-            key=lambda x: x[0],
+        cust_name_list = sorted(
+            [c.get("customer_name", "—") for c in customers_list if c.get("id")]
         )
+        cust_id_map = {
+            c.get("customer_name", "—"): c["id"]
+            for c in customers_list if c.get("id")
+        }
         with f5:
             st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Customer</p>', unsafe_allow_html=True)
-            sel_cust_label = st.selectbox(
-                "Customer",
-                [x[0] for x in cust_opts],
-                label_visibility="collapsed", key="fu_customer",
+            sel_cust_labels = st.multiselect(
+                "Customer", cust_name_list,
+                label_visibility="collapsed", key="fu_customer", placeholder="All",
             )
-        sel_cust_id = next((x[1] for x in cust_opts if x[0] == sel_cust_label), "")
+        sel_cust_ids = {cust_id_map[l] for l in sel_cust_labels if l in cust_id_map}
 
         # Site options
-        site_opts = [("— All —", "")] + sorted(
-            [(s.get("site_name", "—"), s["id"]) for s in sites_list if s.get("id")],
-            key=lambda x: x[0],
+        site_name_list = sorted(
+            [s.get("site_name", "—") for s in sites_list if s.get("id")]
         )
+        site_id_map = {
+            s.get("site_name", "—"): s["id"]
+            for s in sites_list if s.get("id")
+        }
         with f6:
             st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Site</p>', unsafe_allow_html=True)
-            sel_site_label = st.selectbox(
-                "Site",
-                [x[0] for x in site_opts],
-                label_visibility="collapsed", key="fu_site",
+            sel_site_labels = st.multiselect(
+                "Site", site_name_list,
+                label_visibility="collapsed", key="fu_site", placeholder="All",
             )
-        sel_site_id = next((x[1] for x in site_opts if x[0] == sel_site_label), "")
+        sel_site_ids = {site_id_map[l] for l in sel_site_labels if l in site_id_map}
 
         # Operational Status filter
         with f7:
             st.markdown('<p style="font-size:11px;font-weight:600;color:#6B7280;margin-bottom:4px;">Op. Status</p>', unsafe_allow_html=True)
-            sel_op_status = st.selectbox(
-                "Op. Status", ["— All —"] + _OP_STATUS_OPTIONS,
-                label_visibility="collapsed", key="fu_op_status",
+            sel_op_status = st.multiselect(
+                "Op. Status", _OP_STATUS_OPTIONS,
+                label_visibility="collapsed", key="fu_op_status", placeholder="All",
             )
 
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
@@ -606,24 +610,26 @@ def render() -> None:
 
         # ── Filter machines ───────────────────────────────────────────────────
         filtered = list(machines)
-        if sel_category != "— All —":
-            filtered = [m for m in filtered if m.get("machine_type") == sel_category]
-        if sel_machine != "— All —":
+        if sel_category:
+            filtered = [m for m in filtered if m.get("machine_type") in sel_category]
+        if sel_machine:
             filtered = [m for m in filtered
-                        if m.get("asset_code") == sel_machine or m.get("id") == sel_machine]
-        if sel_cust_id:
+                        if m.get("asset_code") in sel_machine or m.get("id") in sel_machine]
+        if sel_cust_ids:
             filtered = [m for m in filtered
-                        if sel_cust_id in machine_customers.get(m.get("id", ""), set())]
-        if sel_site_id:
+                        if machine_customers.get(m.get("id", ""), set()) & sel_cust_ids]
+        if sel_site_ids:
             filtered = [m for m in filtered
-                        if sel_site_id in machine_sites.get(m.get("id", ""), set())]
-        if sel_op_status != "— All —":
-            if sel_op_status == "In Transit":
-                filtered = [m for m in filtered
-                            if m.get("operational_status") in ("In Transit", "Mobilizing", "Demobilizing")]
-            else:
-                filtered = [m for m in filtered
-                            if m.get("operational_status") == sel_op_status]
+                        if machine_sites.get(m.get("id", ""), set()) & sel_site_ids]
+        if sel_op_status:
+            _expanded_statuses: set[str] = set()
+            for _s in sel_op_status:
+                if _s == "In Transit":
+                    _expanded_statuses.update({"In Transit", "Mobilizing", "Demobilizing"})
+                else:
+                    _expanded_statuses.add(_s)
+            filtered = [m for m in filtered
+                        if m.get("operational_status") in _expanded_statuses]
 
         # ── Build report rows ─────────────────────────────────────────────────
         rows: list[dict] = []

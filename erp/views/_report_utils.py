@@ -42,6 +42,7 @@ WL_STATUS: dict[str, tuple[str, str]] = {
     "Submitted":       ("#DCFCE7", "#166534"),
     "Draft":           ("#FEF3C7", "#92400E"),
     "Missing":         ("#FEE2E2", "#991B1B"),
+    "Invoiced":        ("#EDE9FE", "#5B21B6"),
     "Pending Billing": ("#FEF3C7", "#92400E"),
     "Pending":         ("#FEE2E2", "#991B1B"),
 }

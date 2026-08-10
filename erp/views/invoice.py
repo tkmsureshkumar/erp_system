@@ -125,8 +125,12 @@ def _parse_rows(raw) -> list[dict]:
         return []
     try:
         data = json.loads(raw) if isinstance(raw, str) else raw
-        if isinstance(data, dict) and data.get("shift_type") == "double":
-            return (data.get("shift1") or []) + (data.get("shift2") or [])
+        if isinstance(data, dict):
+            shift_type = data.get("shift_type")
+            if shift_type == "double":
+                return (data.get("shift1") or []) + (data.get("shift2") or [])
+            if shift_type == "single":
+                return data.get("rows") or []
         if isinstance(data, list):
             return data
     except Exception:
@@ -134,10 +138,21 @@ def _parse_rows(raw) -> list[dict]:
     return []
 
 
+def _read_billing_snapshot(wl: dict) -> dict | None:
+    """Return the frozen billing_snapshot embedded at save time, or None for old records."""
+    raw = wl.get("schedule_data")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, dict):
+            return data.get("billing_snapshot")
+    except Exception:
+        pass
+    return None
+
+
 def _compute_billing(wl: dict, mc: dict) -> dict:
-    rows      = _parse_rows(wl.get("schedule_data"))
-    shift_hr  = float(mc.get("machine_shift_hour") or 8)
-    no_days   = float(mc.get("no_of_days") or 26)
     rental    = float(mc.get("rental_per_month") or 0)
     ot_rate   = float(wl.get("ot_rate") or 0)
     deduction = float(wl.get("deduction") or 0)
@@ -149,12 +164,24 @@ def _compute_billing(wl: dict, mc: dict) -> dict:
     add_acc_rate = float(wl.get("add_accommodation_rate") or 0)
     add_acc_amt  = round(add_acc_qty * add_acc_rate, 2)
 
-    work_hrs   = no_days * shift_hr
-    actual_hrs = sum(float(r.get("net_time") or 0) for r in rows)
-    qty        = round(actual_hrs / work_hrs, 3) if work_hrs > 0 else 0.0
-    hiring     = round(rental * qty, 2)
-    ot_hrs     = round(sum(float(r.get("ot") or 0) for r in rows), 3)
-    ot_amt     = round(ot_hrs * ot_rate, 2)
+    snap = _read_billing_snapshot(wl)
+    if snap is not None:
+        # Use the values that were frozen at save time — immune to later
+        # changes in Work Order config (no_of_days, machine_shift_hour).
+        qty    = float(snap["qty"])
+        ot_hrs = float(snap.get("ot_hours") or 0)
+    else:
+        # Legacy path: recalculate for records saved before snapshot support.
+        rows      = _parse_rows(wl.get("schedule_data"))
+        shift_hr  = float(mc.get("machine_shift_hour") or 8)
+        no_days   = float(mc.get("no_of_days") or 26)
+        work_hrs  = no_days * shift_hr
+        actual_hrs = sum(float(r.get("net_time") or 0) for r in rows)
+        qty    = round(actual_hrs / work_hrs, 3) if work_hrs > 0 else 0.0
+        ot_hrs = round(sum(float(r.get("ot") or 0) for r in rows), 3)
+
+    hiring = round(rental * qty, 2)
+    ot_amt = round(ot_hrs * ot_rate, 2)
     return {
         "qty": qty, "rate": rental, "hiring": hiring,
         "ot_hrs": ot_hrs, "ot_rate": ot_rate, "ot_amt": ot_amt,
@@ -288,11 +315,17 @@ def _build_worklog_schedules_html(selected_items: list[dict]) -> str:
 _CSS = """
 <style>
 @page{size:A4;margin:12mm 10mm;}
-@media print{.no-print{display:none!important;}}
+@media print{
+  .no-print{display:none!important;}
+  body{background:none!important;padding:0!important;}
+  .wrapper{box-shadow:none!important;}
+  .wrapper.no-border{border:none!important;}
+}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:Arial,Helvetica,sans-serif;font-size:8.5pt;color:#111;
      background:#ddd;padding:16px;}
 .wrapper{width:190mm;margin:0 auto;background:#fff;border:1.5px solid #333;}
+.wrapper.no-border{border:none;}
 /* header */
 .hdr{display:flex;align-items:stretch;border-bottom:1.5px solid #333;}
 .hdr-logo{display:flex;align-items:center;justify-content:center;padding:6px 8px 6px 6px;}
@@ -488,12 +521,12 @@ def _build_html(
     inv_date_str = inv_date.strftime("%d-%B-%Y") if isinstance(inv_date, date) else str(inv_date)
 
     if blank_header:
-        _hdr_inner  = "  <div style='flex:1;min-height:158px;'></div>"
-        _ti_in_hdr  = ""
-        _ti_after   = '<div class="ti-centre-wrap"><div class="ti-centre">TAX INVOICE</div></div>'
+        # Plain spacer — no border, no flex container — leaves room for pre-printed letterhead.
+        # Height is calibrated to match the letterhead's bottom edge (~48 mm of printable content).
+        _hdr_block   = "<div style='height:48mm;'></div>"
+        _ti_block    = '<div class="ti-centre-wrap"><div class="ti-centre">TAX INVOICE</div></div>'
+        _wrapper_cls = "wrapper no-border"
     else:
-        _ti_in_hdr  = '  <div class="hdr-right"><div class="ti-box">TAX<br>INVOICE</div></div>'
-        _ti_after   = ""
         _hdr_inner = (
             "  <div class='hdr-logo'>\n"
             "    <svg width='90' height='56' viewBox='0 0 90 56' xmlns='http://www.w3.org/2000/svg'>\n"
@@ -518,6 +551,16 @@ def _build_html(
             "    </div>\n"
             "  </div>"
         )
+        _hdr_block   = f"<div class='hdr'>\n{_hdr_inner}\n  <div class='hdr-right'><div class='ti-box'>TAX<br>INVOICE</div></div>\n</div>"
+        _ti_block    = ""
+        _wrapper_cls = "wrapper"
+
+    _print_hint = (
+        "<p class='no-print' style='text-align:center;font-size:11px;color:#6b7280;"
+        "margin:6px 0 10px;'>"
+        "⚠ In the print dialog, uncheck <b>Headers and Footers</b> for a clean output."
+        "</p>"
+    ) if blank_header else ""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -526,14 +569,12 @@ def _build_html(
 </head>
 <body>
 <button class="pbtn no-print" onclick="window.print()">🖨 Print / Save PDF</button>
-<div class="wrapper">
+{_print_hint}
+<div class="{_wrapper_cls}">
 
-<!-- ── Company header ── -->
-<div class="hdr">
-{_hdr_inner}
-{_ti_in_hdr}
-</div>
-{_ti_after}
+<!-- ── Company header / letterhead spacer ── -->
+{_hdr_block}
+{_ti_block}
 <!-- ── Company details | Invoice meta ── -->
 <div class="two-col">
   <div class="left">

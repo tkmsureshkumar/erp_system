@@ -228,6 +228,14 @@ def _flatten_worklogs(
             sched = json.loads(sched_raw) if isinstance(sched_raw, str) else sched_raw
         except Exception:
             continue
+        if isinstance(sched, dict):
+            shift_type = sched.get("shift_type")
+            if shift_type == "double":
+                sched = list(sched.get("shift1") or []) + list(sched.get("shift2") or [])
+            elif shift_type == "single":
+                sched = sched.get("rows") or []
+            else:
+                continue
         if not isinstance(sched, list):
             continue
 
@@ -409,6 +417,38 @@ def render() -> None:
     customer_map = {c.get("id"): c for c in customers if c.get("id")}
     site_map     = {s.get("id"): s for s in sites     if s.get("id")}
     machine_map  = {m.get("id"): m for m in machines  if m.get("id")}
+    wo_map_nav   = {wo["id"]: wo for wo in work_orders if wo.get("id")}
+
+    # ── Status lookup: (serial_number, billing_month) → status label ───────────
+    _wl_status_map: dict[tuple[str, str], str] = {}
+    # ── Navigation map: (Machine display, billing_month, customer) → nav params ─
+    _nav_map: dict[tuple[str, str, str], dict] = {}
+    for _wl in work_logs:
+        _mid   = _wl.get("machine_id", "")
+        _mobj  = machine_map.get(_mid, {})
+        _sn    = _mobj.get("serial_number", "") or ""
+        _bm    = _wl.get("year", "")
+        _s = ("Invoiced"  if _wl.get("invoiced")
+              else "Submitted" if not _wl.get("is_draft", True)
+              else "Draft")
+        if _sn and _bm:
+            _wl_status_map[(_sn, _bm)] = _s
+        _wo    = wo_map_nav.get(_wl.get("work_order_id", ""), {})
+        if _wo:
+            _cid   = _wo.get("customer_id", "")
+            _cname = customer_map.get(_cid, {}).get("customer_name", "")
+            _ac    = _mobj.get("asset_code") or _wl.get("machine_label", "") or ""
+            _make  = _mobj.get("make",  "") or ""
+            _model = _mobj.get("model", "") or ""
+            _sfx   = " ".join(p for p in [_make, _model] if p)
+            _mdisp = f"{_ac} — {_sfx}" if _sfx else _ac
+            _bm_p  = _bm.split(" ")
+            _nav_map[(_mdisp, _bm, _cname)] = {
+                "customer_id": _cid,
+                "wo_id":       _wl.get("work_order_id", ""),
+                "month_name":  _bm_p[0] if _bm_p else "",
+                "year":        int(_bm_p[1]) if len(_bm_p) > 1 else date.today().year,
+            }
 
     df_all = _flatten_worklogs(work_logs, work_orders, customer_map, site_map, machine_map)
 
@@ -434,17 +474,17 @@ def render() -> None:
         fc1, fc2, fc3, fc4, fc5, fc6, fc7 = st.columns([2, 2, 2, 2, 2, 2, 1])
 
         with fc1:
-            month_opts = ["All"] + sorted(df_all["Billing Month"].dropna().unique().tolist())
-            sel_month  = st.selectbox("Billing Month", month_opts, key="rpt_month")
+            month_opts = sorted(df_all["Billing Month"].dropna().unique().tolist())
+            sel_month  = st.multiselect("Billing Month", month_opts, key="rpt_month", placeholder="All")
         with fc2:
-            cust_opts  = ["All"] + sorted(df_all["Customer"].dropna().unique().tolist())
-            sel_cust   = st.selectbox("Customer", cust_opts, key="rpt_cust")
+            cust_opts  = sorted(df_all["Customer"].dropna().unique().tolist())
+            sel_cust   = st.multiselect("Customer", cust_opts, key="rpt_cust", placeholder="All")
         with fc3:
-            mach_opts  = ["All"] + sorted(df_all["Asset Code"].dropna().unique().tolist())
-            sel_mach   = st.selectbox("Machine", mach_opts, key="rpt_mach")
+            mach_opts  = sorted(df_all["Asset Code"].dropna().unique().tolist())
+            sel_mach   = st.multiselect("Machine", mach_opts, key="rpt_mach", placeholder="All")
         with fc4:
-            sn_opts    = ["All"] + sorted(df_all["Serial Number"].dropna().unique().tolist())
-            sel_sn     = st.selectbox("Serial Number", sn_opts, key="rpt_sn")
+            sn_opts    = sorted(df_all["Serial Number"].dropna().unique().tolist())
+            sel_sn     = st.multiselect("Serial Number", sn_opts, key="rpt_sn", placeholder="All")
         with fc5:
             valid_dates = df_all["Date"].dropna()
             min_d = valid_dates.min() if not valid_dates.empty else date.today()
@@ -461,14 +501,14 @@ def render() -> None:
 
     # Apply filters
     df = df_all.copy()
-    if sel_month != "All":
-        df = df[df["Billing Month"] == sel_month]
-    if sel_cust != "All":
-        df = df[df["Customer"] == sel_cust]
-    if sel_mach != "All":
-        df = df[df["Asset Code"] == sel_mach]
-    if sel_sn != "All":
-        df = df[df["Serial Number"] == sel_sn]
+    if sel_month:
+        df = df[df["Billing Month"].isin(sel_month)]
+    if sel_cust:
+        df = df[df["Customer"].isin(sel_cust)]
+    if sel_mach:
+        df = df[df["Asset Code"].isin(sel_mach)]
+    if sel_sn:
+        df = df[df["Serial Number"].isin(sel_sn)]
     if sel_from and sel_to:
         df = df[(df["Date"] >= sel_from) & (df["Date"] <= sel_to)]
 
@@ -497,6 +537,13 @@ def render() -> None:
         + "</div>",
         unsafe_allow_html=True,
     )
+
+    # ── Inject Status into billing_df ─────────────────────────────────────────
+    if not billing_df.empty:
+        def _get_wl_status(r):
+            return _wl_status_map.get((r["Serial Number"], r["Billing Month"]), "—")
+        _ins_pos = billing_df.columns.tolist().index("Machine") + 1
+        billing_df.insert(_ins_pos, "Status", billing_df.apply(_get_wl_status, axis=1))
 
     # ── Billing Summary ────────────────────────────────────────────────────────
     with st.container(border=True):
@@ -536,6 +583,7 @@ def render() -> None:
                 "Customer":       st.column_config.TextColumn("Customer",     width="medium"),
                 "Site":           st.column_config.TextColumn("Site",         width="medium"),
                 "Machine":        st.column_config.TextColumn("Machine",      width="medium"),
+                "Status":         st.column_config.TextColumn("Status",       width="small"),
                 "Serial Number":  st.column_config.TextColumn("Serial No.",   width="small"),
                 "Rental/Month":   st.column_config.NumberColumn("Rate/Month", format="₹%,.0f"),
                 "Working Days":   st.column_config.NumberColumn("Work Days",  format="%d",   width="small"),
@@ -551,16 +599,18 @@ def render() -> None:
                 billing_df,
                 "wlr_billing_tbl",
                 column_config=billing_col_cfg,
-                style_fn=lambda s: s.apply(_style_billing, axis=0).format({
-                    "Rental/Month":  "{:,.0f}",
-                    "Working Hrs":   "{:.1f}",
-                    "Actual Hrs":    "{:.2f}",
-                    "Qty":           "{:.4f}",
-                    "Billing":       "{:,.0f}",
-                    "OT Hrs":        "{:.2f}",
-                    "OT Billing":    "{:,.0f}",
-                    "Breakdown Hrs": "{:.2f}",
-                }),
+                style_fn=lambda s: _wl_status_styler(
+                    s.apply(_style_billing, axis=0).format({
+                        "Rental/Month":  "{:,.0f}",
+                        "Working Hrs":   "{:.1f}",
+                        "Actual Hrs":    "{:.2f}",
+                        "Qty":           "{:.4f}",
+                        "Billing":       "{:,.0f}",
+                        "OT Hrs":        "{:.2f}",
+                        "OT Billing":    "{:,.0f}",
+                        "Breakdown Hrs": "{:.2f}",
+                    })
+                ),
             )
             render_print_export_buttons(
                 billing_df,
@@ -571,33 +621,64 @@ def render() -> None:
                 sheet_name="Worklog Summary",
             )
 
-            # ── Selected row → navigate to detailed shift log ─────────────────
+            # ── Selected row → navigate ────────────────────────────────────────
             if selected_idx is not None and selected_idx < len(billing_df):
                 row         = billing_df.iloc[selected_idx]
-                asset_val   = row.get("Asset Code", "") or ""
                 machine_val = row.get("Machine", "")
                 month_val   = row.get("Billing Month", "")
                 cust_val    = row.get("Customer", "")
+                status_val  = row.get("Status", "—")
+                # Asset code is the first token of the Machine display label
+                _ac = machine_val.split(" — ")[0].strip() if " — " in machine_val else machine_val
 
                 st.markdown(
                     f"<div style='margin-top:14px;padding:10px 16px;"
                     f"background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;"
                     f"font-size:13px;color:#1E40AF;'>"
                     f"Selected: <strong>{machine_val}</strong> &bull; "
-                    f"<strong>{month_val}</strong> &bull; {cust_val}</div>",
+                    f"<strong>{month_val}</strong> &bull; {cust_val}"
+                    f" &bull; <strong>{status_val}</strong></div>",
                     unsafe_allow_html=True,
                 )
-                if st.button(
-                    "📋 View Detailed Shift Log →",
-                    key="wlr_goto_detail",
-                    help="Opens the Detailed Worklog page pre-filtered for this machine and month",
-                ):
-                    if asset_val:
-                        st.session_state["wld_mach"]  = asset_val
-                    if month_val:
-                        st.session_state["wld_month"] = month_val
-                    st.query_params["page"] = "wldetailreport"
-                    st.rerun()
+
+                _nav = _nav_map.get((machine_val, month_val, cust_val), {})
+                _nb1, _nb2, _ = st.columns([1, 1, 5])
+                with _nb1:
+                    if st.button(
+                        "✏️ Open Worklog",
+                        key="wlr_goto_wl",
+                        type="primary",
+                        help="Open this worklog for viewing / editing",
+                        use_container_width=True,
+                    ):
+                        if _nav:
+                            _cid = _nav["customer_id"]
+                            _valid_yrs = [date.today().year - 1, date.today().year, date.today().year + 1]
+                            st.session_state["wl_selected_customer_id"] = _cid
+                            st.session_state["_wl_prev_customer"]        = _cid
+                            st.session_state["wl_selected_wo_id"]        = _nav["wo_id"]
+                            st.session_state.pop("wl_selected_machine", None)
+                            if _nav["month_name"]:
+                                st.session_state["wl_selected_month"] = _nav["month_name"]
+                            if _nav["year"] in _valid_yrs:
+                                st.session_state["wl_selected_year"] = _nav["year"]
+                            st.query_params["page"] = "worklog"
+                            st.rerun()
+                        else:
+                            st.warning("Could not resolve navigation info for this row.")
+                with _nb2:
+                    if st.button(
+                        "📋 View Detail Report",
+                        key="wlr_goto_detail",
+                        help="Opens the Detailed Worklog page pre-filtered for this machine and month",
+                        use_container_width=True,
+                    ):
+                        if _ac:
+                            st.session_state["wld_mach"]  = _ac
+                        if month_val:
+                            st.session_state["wld_month"] = month_val
+                        st.query_params["page"] = "wldetailreport"
+                        st.rerun()
 
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
     if st.button("Refresh Data", key="rpt_refresh"):

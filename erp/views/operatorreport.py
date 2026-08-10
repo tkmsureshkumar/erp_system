@@ -131,8 +131,14 @@ def _iter_schedule_rows(schedule_data) -> list[dict]:
         data = json.loads(schedule_data) if isinstance(schedule_data, str) else schedule_data
     except Exception:
         return []
-    if isinstance(data, dict) and data.get("shift_type") == "double":
-        rows = list(data.get("shift1") or []) + list(data.get("shift2") or [])
+    if isinstance(data, dict):
+        shift_type = data.get("shift_type")
+        if shift_type == "double":
+            rows = list(data.get("shift1") or []) + list(data.get("shift2") or [])
+        elif shift_type == "single":
+            rows = data.get("rows") or []
+        else:
+            return []
     elif isinstance(data, list):
         rows = data
     else:
@@ -462,17 +468,17 @@ def _render_salary_report(
         fc1, fc2, fc3, fc4, fc5, fc6, fc7 = st.columns([2, 2, 2, 2, 2, 2, 1])
 
         with fc1:
-            mo_opts = ["All"] + sorted(df_active["Billing Month"].dropna().unique().tolist())
-            sel_mo  = st.selectbox("Billing Month", mo_opts, key="sal_month")
+            mo_opts = sorted(df_active["Billing Month"].dropna().unique().tolist())
+            sel_mo  = st.multiselect("Billing Month", mo_opts, key="sal_month", placeholder="All")
         with fc2:
-            cu_opts = ["All"] + sorted(df_active["Customer"].dropna().unique().tolist())
-            sel_cu  = st.selectbox("Customer", cu_opts, key="sal_cust")
+            cu_opts = sorted(df_active["Customer"].dropna().unique().tolist())
+            sel_cu  = st.multiselect("Customer", cu_opts, key="sal_cust", placeholder="All")
         with fc3:
-            si_opts = ["All"] + sorted(df_active["Site"].dropna().unique().tolist())
-            sel_si  = st.selectbox("Site", si_opts, key="sal_site")
+            si_opts = sorted(df_active["Site"].dropna().unique().tolist())
+            sel_si  = st.multiselect("Site", si_opts, key="sal_site", placeholder="All")
         with fc4:
-            op_opts = ["All"] + sorted(df_active["Operator"].dropna().unique().tolist())
-            sel_op  = st.selectbox("Operator", op_opts, key="sal_op")
+            op_opts = sorted(df_active["Operator"].dropna().unique().tolist())
+            sel_op  = st.multiselect("Operator", op_opts, key="sal_op", placeholder="All")
         with fc5:
             valid_dates = df_active["Date"].dropna()
             f_min = valid_dates.min() if not valid_dates.empty else date.today()
@@ -489,14 +495,14 @@ def _render_salary_report(
 
     # Apply filters
     df = df_active.copy()
-    if sel_mo != "All":
-        df = df[df["Billing Month"] == sel_mo]
-    if sel_cu != "All":
-        df = df[df["Customer"] == sel_cu]
-    if sel_si != "All":
-        df = df[df["Site"] == sel_si]
-    if sel_op != "All":
-        df = df[df["Operator"] == sel_op]
+    if sel_mo:
+        df = df[df["Billing Month"].isin(sel_mo)]
+    if sel_cu:
+        df = df[df["Customer"].isin(sel_cu)]
+    if sel_si:
+        df = df[df["Site"].isin(sel_si)]
+    if sel_op:
+        df = df[df["Operator"].isin(sel_op)]
     if sal_from and sal_to:
         df = df[(df["Date"] >= sal_from) & (df["Date"] <= sal_to)]
 

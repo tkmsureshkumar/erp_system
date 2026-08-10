@@ -160,15 +160,21 @@ def render() -> None:
                 label_visibility="collapsed",
             )
         with fc2:
-            status_opts = ["All"] + sorted(full_df["Status"].dropna().unique().tolist())
-            sel_status = st.selectbox("Status", status_opts, key="ir_status",
-                                      label_visibility="collapsed")
-        with fc3:
-            cust_opts = ["All Customers"] + sorted(
-                full_df["Customer"].dropna().unique().tolist()
+            sel_status = st.multiselect(
+                "Status",
+                sorted(full_df["Status"].dropna().unique().tolist()),
+                key="ir_status",
+                placeholder="All",
+                label_visibility="collapsed",
             )
-            sel_cust = st.selectbox("Customer", cust_opts, key="ir_cust",
-                                    label_visibility="collapsed")
+        with fc3:
+            sel_cust = st.multiselect(
+                "Customer",
+                sorted(full_df["Customer"].dropna().unique().tolist()),
+                key="ir_cust",
+                placeholder="All",
+                label_visibility="collapsed",
+            )
         with fc4:
             date_from = st.date_input("From", value=None, key="ir_from",
                                       label_visibility="collapsed")
@@ -189,11 +195,11 @@ def render() -> None:
         )
         df = df[mask]
 
-    if sel_status != "All":
-        df = df[df["Status"] == sel_status]
+    if sel_status:
+        df = df[df["Status"].isin(sel_status)]
 
-    if sel_cust != "All Customers":
-        df = df[df["Customer"] == sel_cust]
+    if sel_cust:
+        df = df[df["Customer"].isin(sel_cust)]
 
     if date_from:
         df = df[df["_raw_date"] >= date_from.isoformat()]

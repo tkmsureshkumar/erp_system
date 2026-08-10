@@ -169,11 +169,22 @@ def _operator_from_schedule(schedule_raw) -> str:
     if not schedule_raw:
         return "—"
     try:
-        rows = json.loads(schedule_raw) if isinstance(schedule_raw, str) else schedule_raw
-        if isinstance(rows, list):
-            ops = [r.get("operator", "").strip() for r in rows if r.get("operator", "").strip()]
-            if ops:
-                return Counter(ops).most_common(1)[0][0]
+        data = json.loads(schedule_raw) if isinstance(schedule_raw, str) else schedule_raw
+        if isinstance(data, dict):
+            shift_type = data.get("shift_type")
+            if shift_type == "double":
+                rows = list(data.get("shift1") or []) + list(data.get("shift2") or [])
+            elif shift_type == "single":
+                rows = data.get("rows") or []
+            else:
+                rows = []
+        elif isinstance(data, list):
+            rows = data
+        else:
+            rows = []
+        ops = [r.get("operator", "").strip() for r in rows if r.get("operator", "").strip()]
+        if ops:
+            return Counter(ops).most_common(1)[0][0]
     except Exception:
         pass
     return "—"
@@ -355,28 +366,28 @@ def render() -> None:
 
         with ff1:
             st.markdown('<p class="filter-label">Customer</p>', unsafe_allow_html=True)
-            cust_opts = ["All"] + sorted(
+            cust_opts = sorted(
                 {r["Customer"] for r in rows if r["Customer"] != "—"}
             )
-            sel_cust = st.selectbox(
-                "Customer", cust_opts, label_visibility="collapsed", key="cd_customer"
+            sel_cust = st.multiselect(
+                "Customer", cust_opts, label_visibility="collapsed", key="cd_customer", placeholder="All"
             )
 
         with ff2:
             st.markdown('<p class="filter-label">Site</p>', unsafe_allow_html=True)
-            site_opts = ["All"] + sorted(
+            site_opts = sorted(
                 {r["Site"] for r in rows if r["Site"] != "—"}
             )
-            sel_site = st.selectbox(
-                "Site", site_opts, label_visibility="collapsed", key="cd_site"
+            sel_site = st.multiselect(
+                "Site", site_opts, label_visibility="collapsed", key="cd_site", placeholder="All"
             )
 
     # ── Apply filters & sort ──────────────────────────────────────────────────
     filtered = rows
-    if sel_cust != "All":
-        filtered = [r for r in filtered if r["Customer"] == sel_cust]
-    if sel_site != "All":
-        filtered = [r for r in filtered if r["Site"] == sel_site]
+    if sel_cust:
+        filtered = [r for r in filtered if r["Customer"] in sel_cust]
+    if sel_site:
+        filtered = [r for r in filtered if r["Site"] in sel_site]
 
     # ── Display ───────────────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)

@@ -61,7 +61,23 @@ def _mc_machine_ids(raw) -> set[str]:
     return set()
 
 
-def _rr_for_period(work_orders, period_start, period_end) -> float:
+
+def _mc_rental_for_ids(raw, ids: set[str]) -> float:
+    if not raw or not ids:
+        return 0.0
+    try:
+        records = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(records, list):
+            return sum(
+                float(r.get("rental_per_month") or 0)
+                for r in records if r.get("machine_id") in ids
+            )
+    except Exception:
+        pass
+    return 0.0
+
+
+def _rr_for_period_ids(work_orders, ids: set[str], period_start, period_end) -> float:
     total = 0.0
     for wo in work_orders:
         sd = _parse_date(wo.get("start_date"))
@@ -69,7 +85,7 @@ def _rr_for_period(work_orders, period_start, period_end) -> float:
         if sd is None:
             continue
         if sd <= period_end and (ed is None or ed >= period_start):
-            total += _mc_rental_total(wo.get("machine_config"))
+            total += _mc_rental_for_ids(wo.get("machine_config"), ids)
     return total
 
 
@@ -80,8 +96,6 @@ def _util_for_period(
         return 0.0
     on_rent: set[str] = set()
     for wo in work_orders:
-        if wo.get("cross_rental") == "Yes":
-            continue
         sd = _parse_date(wo.get("start_date"))
         ed = _parse_date(wo.get("end_date"))
         if sd is None:
@@ -97,6 +111,97 @@ def _fmt_inr(amount: float) -> str:
     if amount >= 1e5:
         return f"₹{amount / 1e5:.2f} L"
     return f"₹{amount:,.0f}"
+
+
+def _pending_worklog_count(
+    active_wos: list[dict],
+    work_logs: list[dict],
+    today: date,
+) -> int:
+    """Count (WO, machine, billing-period) triples where the period has already
+    closed (period_end < today) but no submitted worklog exists.
+
+    Periods are driven by each machine's billing_cycle setting:
+      - "Calendar Month": period is the full calendar month (1st → last day).
+      - "Custom" (e.g. 16th → 15th): period spans cycle_start_day of month M
+        to cycle_end_day of month M or M+1, depending on whether end < start.
+
+    The WO's start_date is used as a lower bound so we never flag periods
+    that pre-date the work order.
+    """
+    submitted: set[tuple[str, str, str]] = {
+        (wl["work_order_id"], wl["machine_id"], wl["year"])
+        for wl in work_logs
+        if wl.get("work_order_id")
+        and wl.get("machine_id")
+        and wl.get("year")
+        and not wl.get("is_draft")
+    }
+
+    count = 0
+    for wo in active_wos:
+        wo_id    = wo.get("id")
+        wo_start = _parse_date(wo.get("start_date"))
+        if not wo_id or not wo_start:
+            continue
+
+        mc_raw = wo.get("machine_config")
+        if not mc_raw:
+            continue
+        try:
+            mc_list = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+        except Exception:
+            continue
+        if not isinstance(mc_list, list):
+            continue
+
+        for mc in mc_list:
+            mid = mc.get("machine_id")
+            if not mid:
+                continue
+
+            billing_cycle = mc.get("billing_cycle", "Calendar Month")
+            start_day, end_day = 1, None  # end_day=None → last day of month
+
+            if billing_cycle != "Calendar Month":
+                _bsd = _parse_date(mc.get("billing_cycle_start_date"))
+                _bed = _parse_date(mc.get("billing_cycle_end_date"))
+                start_day = _bsd.day if _bsd else 1
+                end_day   = _bed.day if _bed else None
+
+            # Walk billing periods from wo_start forward, stopping when the
+            # period is still open (p_end >= today).
+            y, m = wo_start.year, wo_start.month
+            max_iter = max(
+                (today.year - wo_start.year) * 12
+                + (today.month - wo_start.month)
+                + 2,
+                1,
+            )
+
+            for _ in range(max_iter):
+                max_days = _cal.monthrange(y, m)[1]
+
+                if end_day is None:
+                    p_end = date(y, m, max_days)
+                elif end_day < start_day:
+                    ny, nm   = (y + 1, 1) if m == 12 else (y, m + 1)
+                    nm_max   = _cal.monthrange(ny, nm)[1]
+                    p_end    = date(ny, nm, min(end_day, nm_max))
+                else:
+                    p_end = date(y, m, min(end_day, max_days))
+
+                if p_end >= today:
+                    break  # this period (and all later ones) are not yet due
+
+                if p_end >= wo_start:
+                    month_label = f"{_cal.month_name[m]} {y}"
+                    if (wo_id, mid, month_label) not in submitted:
+                        count += 1
+
+                y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+
+    return count
 
 
 def _kpi_card(
@@ -272,6 +377,7 @@ def render() -> None:
     total_cross    = len(cross_machines)
     total_all      = len(machines)
     owned_ids      = {m["id"] for m in owned_machines if m.get("id")}
+    leased_ids     = {m["id"] for m in cross_machines if m.get("id")}
 
     owned_on_rent  = sum(1 for m in owned_machines if m.get("operational_status") == "On Rent")
     idle_cnt       = sum(1 for m in owned_machines if m.get("operational_status") == "Available")
@@ -296,33 +402,32 @@ def render() -> None:
     prev_label = prev_last.strftime("%b %Y")
     ytd_start  = date(today.year, 1, 1)
 
-    # ── WO splits (Own fleet vs Cross Rental WOs) ────────────────────────────
-    own_wos = [wo for wo in work_orders if wo.get("cross_rental") != "Yes"]
-    cr_wos  = [wo for wo in work_orders if wo.get("cross_rental") == "Yes"]
-
+    # ── Active WO set ─────────────────────────────────────────────────────────
     def _is_active(wo) -> bool:
         sd = _parse_date(wo.get("start_date"))
         ed = _parse_date(wo.get("end_date"))
         return sd is not None and sd <= today and (ed is None or ed >= today)
 
-    active_own = [wo for wo in own_wos if _is_active(wo)]
-    active_cr  = [wo for wo in cr_wos  if _is_active(wo)]
-    active_all = active_own + active_cr
+    active_all = [wo for wo in work_orders if _is_active(wo)]
 
-    # ── Revenue run rates ─────────────────────────────────────────────────────
-    rr_cur_own  = sum(_mc_rental_total(wo.get("machine_config")) for wo in active_own)
-    rr_prev_own = _rr_for_period(own_wos, prev_first, prev_last)
-    rr_cur_cr   = sum(_mc_rental_total(wo.get("machine_config")) for wo in active_cr)
+    # ── Revenue run rates (machine-ownership split) ────────────────────────────
+    rr_cur_own  = sum(_mc_rental_for_ids(wo.get("machine_config"), owned_ids)  for wo in active_all)
+    rr_prev_own = _rr_for_period_ids(work_orders, owned_ids, prev_first, prev_last)
+    rr_cur_cr   = sum(_mc_rental_for_ids(wo.get("machine_config"), leased_ids) for wo in active_all)
     rr_delta     = rr_cur_own - rr_prev_own
     rr_delta_pct = (rr_delta / rr_prev_own * 100) if rr_prev_own else 0.0
 
     # Fleet utilization trend delta
-    util_prev  = _util_for_period(own_wos, owned_ids, total_owned, prev_first, prev_last)
+    util_prev  = _util_for_period(work_orders, owned_ids, total_owned, prev_first, prev_last)
     util_delta = fleet_util - util_prev
 
     # ── Billed revenue from invoices ──────────────────────────────────────────
-    own_wo_ids = {wo.get("id") for wo in own_wos}
-    cr_wo_ids  = {wo.get("id") for wo in cr_wos}
+    # WOs with at least one leased machine → cross-rental bucket; rest → own bucket
+    cr_wo_ids  = {
+        wo["id"] for wo in work_orders
+        if wo.get("id") and (_mc_machine_ids(wo.get("machine_config")) & leased_ids)
+    }
+    own_wo_ids = {wo["id"] for wo in work_orders if wo.get("id") and wo["id"] not in cr_wo_ids}
 
     def _inv_total(inv_list, wo_id_set, start_d, end_d) -> float:
         total = 0.0
@@ -353,8 +458,8 @@ def render() -> None:
         and today <= _parse_date(cr.get("expiry_date")) <= today + timedelta(days=30)
     )
 
-    # ── Pending worklogs ──────────────────────────────────────────────────────
-    pending_wl = sum(1 for wl in work_logs if wl.get("is_draft") is True)
+    # ── Pending worklogs (closed billing periods without a submitted worklog) ──
+    pending_wl = _pending_worklog_count(active_all, work_logs, today)
 
     # ── WOs expiring within 7 days ────────────────────────────────────────────
     expiring_soon = [
@@ -389,14 +494,14 @@ def render() -> None:
         _first = date(_y, _m, 1)
         _last  = date(_y, _m, _cal.monthrange(_y, _m)[1])
         trend_labels.append(_first.strftime("%b"))
-        trend_rr.append(_rr_for_period(own_wos, _first, _last))
-        trend_util.append(_util_for_period(own_wos, owned_ids, total_owned, _first, _last))
+        trend_rr.append(_rr_for_period_ids(work_orders, owned_ids, _first, _last))
+        trend_util.append(_util_for_period(work_orders, owned_ids, total_owned, _first, _last))
 
     # ════════════════════════════════════════════════════════════════════════
     # SECTION A — FLEET KPIs
     # ════════════════════════════════════════════════════════════════════════
     st.markdown(
-        _section_hdr("A — Fleet KPIs", "Owned fleet · Cross Rental excluded from utilization"),
+        _section_hdr("A — Fleet KPIs", "Owned fleet · Leased machines excluded from utilization"),
         unsafe_allow_html=True,
     )
 
@@ -724,7 +829,7 @@ def render() -> None:
         st.markdown(
             _kpi_card(
                 "Pending Worklogs", str(pending_wl),
-                "drafts pending" if pending_wl else "all up to date",
+                "overdue periods" if pending_wl else "all up to date",
                 False if pending_wl else None,
                 "edit_note", "#F59E0B" if pending_wl else "#10B981",
             ),

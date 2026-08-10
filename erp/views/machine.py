@@ -565,6 +565,12 @@ def render() -> None:
         st.session_state["m_purchase_date"]             = _parse_date(m.get("purchase_date"))
         st.session_state["m_purchase_cost"]             = float(m.get("purchase_cost") or 0.0)
         st.session_state["m_ownership"]                 = m.get("ownership", OWNERSHIP_OPTIONS[0])
+        st.session_state["m_vendor_name"]               = m.get("vendor_name")           or ""
+        st.session_state["m_vendor_gst"]                = m.get("vendor_gst")            or ""
+        st.session_state["m_vendor_contact"]            = m.get("vendor_contact")        or ""
+        st.session_state["m_vendor_mobile"]             = m.get("vendor_mobile_no")      or ""
+        st.session_state["m_vendor_demob"]              = m.get("vendor_demob")          or ""
+        st.session_state["m_vendor_rental"]             = float(m.get("vendor_rental_amount") or 0)
         st.session_state["m_tpi_expiry"]                = _parse_date(m.get("TPI_expiry"))
         st.session_state["m_puc_expiry"]                = _parse_date(m.get("PUC_expiry"))
         st.session_state["m_form11_expiry"]             = _parse_date(m.get("Form_11_expiry"))
@@ -928,6 +934,29 @@ def render() -> None:
                     with o1:
                         st.selectbox("Ownership *", options=OWNERSHIP_OPTIONS, key="m_ownership")
 
+                    if st.session_state.get("m_ownership") == "Leased":
+                        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+                        vnd1, vnd2 = st.columns(2)
+                        with vnd1:
+                            st.text_input("Vendor Name", key="m_vendor_name",
+                                          placeholder="Vendor / supplier name")
+                        with vnd2:
+                            st.text_input("Vendor GST", key="m_vendor_gst",
+                                          placeholder="GST number")
+                        vnd3, vnd4, vnd5 = st.columns(3)
+                        with vnd3:
+                            st.text_input("Vendor Contact", key="m_vendor_contact",
+                                          placeholder="Contact person")
+                        with vnd4:
+                            st.text_input("Vendor Mobile No.", key="m_vendor_mobile",
+                                          placeholder="+91 XXXXX XXXXX")
+                        with vnd5:
+                            st.text_input("Vendor Demob No.", key="m_vendor_demob",
+                                          placeholder="+91 XXXXX XXXXX")
+                        st.number_input("Vendor Rental Amount (₹/month)",
+                                        min_value=0.0, step=1000.0, format="%.0f",
+                                        key="m_vendor_rental")
+
                 # Status
                 with st.container(border=True):
                     _section_hdr("sensors", "Condition Status")
@@ -1037,6 +1066,12 @@ def render() -> None:
                 purchase_date_val         = st.session_state.get("m_purchase_date")
                 purchase_cost_val         = st.session_state.get("m_purchase_cost", 0.0)
                 ownership_val             = st.session_state.get("m_ownership", OWNERSHIP_OPTIONS[0])
+                vendor_name_val           = (st.session_state.get("m_vendor_name",    "") or "").strip()
+                vendor_gst_val            = (st.session_state.get("m_vendor_gst",     "") or "").strip()
+                vendor_contact_val        = (st.session_state.get("m_vendor_contact", "") or "").strip()
+                vendor_mobile_val         = (st.session_state.get("m_vendor_mobile",  "") or "").strip()
+                vendor_demob_val          = (st.session_state.get("m_vendor_demob",   "") or "").strip()
+                vendor_rental_val         = st.session_state.get("m_vendor_rental",   0.0)
                 operational_status_val    = st.session_state.get(
                     "m_operational_status", OperationalStatus.AVAILABLE.value
                 )
@@ -1066,6 +1101,12 @@ def render() -> None:
                         purchase_date             = purchase_date_val.isoformat() if purchase_date_val else None,
                         purchase_cost             = float(purchase_cost_val) if purchase_cost_val else None,
                         ownership                 = ownership_val,
+                        vendor_name               = vendor_name_val    or None if ownership_val == "Leased" else None,
+                        vendor_gst                = vendor_gst_val     or None if ownership_val == "Leased" else None,
+                        vendor_contact            = vendor_contact_val or None if ownership_val == "Leased" else None,
+                        vendor_mobile_no          = vendor_mobile_val  or None if ownership_val == "Leased" else None,
+                        vendor_demob              = vendor_demob_val   or None if ownership_val == "Leased" else None,
+                        vendor_rental_amount      = float(vendor_rental_val) if ownership_val == "Leased" else None,
                         operational_status        = operational_status_val,
                         condition_status          = condition_status_val,
                     )

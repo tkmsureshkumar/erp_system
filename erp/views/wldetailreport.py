@@ -110,17 +110,17 @@ def render() -> None:
         fc1, fc2, fc3, fc4, fc5, fc6, fc7 = st.columns([2, 2, 2, 2, 2, 2, 1])
 
         with fc1:
-            month_opts = ["All"] + sorted(df_all["Billing Month"].dropna().unique().tolist())
-            sel_month  = st.selectbox("Billing Month", month_opts, key="wld_fmonth")
+            month_opts = sorted(df_all["Billing Month"].dropna().unique().tolist())
+            sel_month  = st.multiselect("Billing Month", month_opts, key="wld_fmonth", placeholder="All")
         with fc2:
-            cust_opts  = ["All"] + sorted(df_all["Customer"].dropna().unique().tolist())
-            sel_cust   = st.selectbox("Customer", cust_opts, key="wld_fcust")
+            cust_opts  = sorted(df_all["Customer"].dropna().unique().tolist())
+            sel_cust   = st.multiselect("Customer", cust_opts, key="wld_fcust", placeholder="All")
         with fc3:
-            mach_opts  = ["All"] + sorted(df_all["Asset Code"].dropna().unique().tolist())
-            sel_mach   = st.selectbox("Machine", mach_opts, key="wld_fmach")
+            mach_opts  = sorted(df_all["Asset Code"].dropna().unique().tolist())
+            sel_mach   = st.multiselect("Machine", mach_opts, key="wld_fmach", placeholder="All")
         with fc4:
-            sn_opts    = ["All"] + sorted(df_all["Serial Number"].dropna().unique().tolist())
-            sel_sn     = st.selectbox("Serial No.", sn_opts, key="wld_fsn")
+            sn_opts    = sorted(df_all["Serial Number"].dropna().unique().tolist())
+            sel_sn     = st.multiselect("Serial No.", sn_opts, key="wld_fsn", placeholder="All")
         with fc5:
             valid_dates = df_all["Date"].dropna()
             min_d = valid_dates.min() if not valid_dates.empty else date.today()
@@ -138,14 +138,14 @@ def render() -> None:
 
     # Apply filters
     df = df_all.copy()
-    if sel_month != "All":
-        df = df[df["Billing Month"] == sel_month]
-    if sel_cust != "All":
-        df = df[df["Customer"] == sel_cust]
-    if sel_mach != "All":
-        df = df[df["Asset Code"] == sel_mach]
-    if sel_sn != "All":
-        df = df[df["Serial Number"] == sel_sn]
+    if sel_month:
+        df = df[df["Billing Month"].isin(sel_month)]
+    if sel_cust:
+        df = df[df["Customer"].isin(sel_cust)]
+    if sel_mach:
+        df = df[df["Asset Code"].isin(sel_mach)]
+    if sel_sn:
+        df = df[df["Serial Number"].isin(sel_sn)]
     if sel_from and sel_to:
         df = df[(df["Date"] >= sel_from) & (df["Date"] <= sel_to)]
 

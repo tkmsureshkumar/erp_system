@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from ..supabase_client import SupabaseClient
-from ._report_utils import render_export_buttons
+from ._report_utils import render_export_buttons, render_drilldown_table
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -280,6 +280,7 @@ def render() -> None:
                         "Invoice No.":     wl.get("invoice_number", "") if wl else "",
                         "_wo_id":          wo_id,
                         "_machine_id":     mid,
+                        "_customer_id":    wo.get("customer_id", ""),
                         "_yr":             yr,
                         "_mo":             mo,
                     }
@@ -341,11 +342,11 @@ def render() -> None:
         fc1, fc2, fc3, fc4, fc5, fc6, fc7 = st.columns([2, 2, 2, 2, 2, 2, 1])
 
         with fc1:
-            sel_cust  = st.selectbox("Customer",    ["All"] + all_custs,  key="wlr_cust")
+            sel_cust  = st.multiselect("Customer", all_custs,  key="wlr_cust",  placeholder="All")
         with fc2:
-            sel_site  = st.selectbox("Site",        ["All"] + all_sites,  key="wlr_site")
+            sel_site  = st.multiselect("Site",      all_sites,  key="wlr_site",  placeholder="All")
         with fc3:
-            sel_mach  = st.selectbox("Machine",     ["All"] + all_assets, key="wlr_mach")
+            sel_mach  = st.multiselect("Machine",   all_assets, key="wlr_mach",  placeholder="All")
         with fc4:
             all_dates = [r["_date"] for r in pending_rows + completed_rows + mob_rows + demob_rows if r.get("_date")]
             min_d = min(all_dates) if all_dates else date.today()
@@ -364,12 +365,12 @@ def render() -> None:
 
     def _apply_filters(rows: list[dict]) -> list[dict]:
         out = rows
-        if sel_cust != "All":
-            out = [r for r in out if r["Customer"] == sel_cust]
-        if sel_site != "All":
-            out = [r for r in out if r["Site"] == sel_site]
-        if sel_mach != "All":
-            out = [r for r in out if r["Asset Code"] == sel_mach]
+        if sel_cust:
+            out = [r for r in out if r["Customer"] in sel_cust]
+        if sel_site:
+            out = [r for r in out if r["Site"] in sel_site]
+        if sel_mach:
+            out = [r for r in out if r["Asset Code"] in sel_mach]
         if sel_from and sel_to and sel_from <= sel_to:
             out = [r for r in out if r.get("_date") and sel_from <= r["_date"] <= sel_to]
         return out
@@ -449,23 +450,56 @@ def render() -> None:
                 _WL_COLS = ["Customer", "Site", "Machine", "Serial No.", "Month", "Status"]
                 pdf = pd.DataFrame([{k: r[k] for k in _WL_COLS} for r in display], columns=_WL_COLS)
 
-                def _pstyle(val: str) -> str:
-                    if val == "Missing": return "color:#ef4444;font-weight:700;"
-                    if val == "Draft":   return "color:#E87722;font-weight:700;"
-                    return ""
+                def _pstyle(col):
+                    if col.name != "Status":
+                        return [""] * len(col)
+                    return [
+                        ("color:#ef4444;font-weight:700;" if v == "Missing"
+                         else "color:#E87722;font-weight:700;" if v == "Draft"
+                         else "")
+                        for v in col
+                    ]
 
                 with st.container(border=True):
-                    st.dataframe(
-                        pdf.style.map(_pstyle, subset=["Status"]),
-                        use_container_width=True,
-                        hide_index=True,
+                    _pend_idx = render_drilldown_table(
+                        pdf,
+                        "wlr_pend_tbl",
                         column_config={
                             "Machine":    st.column_config.TextColumn("Machine",    width="medium"),
                             "Serial No.": st.column_config.TextColumn("Serial No.", width="small"),
                             "Month":      st.column_config.TextColumn("Month",      width="small"),
                             "Status":     st.column_config.TextColumn("Status",     width="small"),
                         },
+                        style_fn=lambda s: s.apply(_pstyle, axis=0),
                     )
+
+                if _pend_idx is not None and _pend_idx < len(display):
+                    _pr = display[_pend_idx]
+                    st.markdown(
+                        f"<div style='margin-top:10px;padding:9px 14px;"
+                        f"background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;"
+                        f"font-size:13px;color:#1E40AF;'>"
+                        f"Selected: <strong>{_pr['Machine']}</strong> &bull; "
+                        f"<strong>{_pr['Month']}</strong> &bull; {_pr['Status']}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if st.button(
+                        "✏️ Open Worklog →",
+                        key="wlr_pend_open_wl",
+                        type="primary",
+                        help="Open this worklog for entry / editing",
+                    ):
+                        _cid = _pr["_customer_id"]
+                        _valid_yrs = [today.year - 1, today.year, today.year + 1]
+                        st.session_state["wl_selected_customer_id"] = _cid
+                        st.session_state["_wl_prev_customer"]        = _cid
+                        st.session_state["wl_selected_wo_id"]        = _pr["_wo_id"]
+                        st.session_state.pop("wl_selected_machine", None)
+                        st.session_state["wl_selected_month"]        = _cal.month_name[_pr["_mo"]]
+                        if _pr["_yr"] in _valid_yrs:
+                            st.session_state["wl_selected_year"] = _pr["_yr"]
+                        st.query_params["page"] = "worklog"
+                        st.rerun()
 
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Missing",  sum(1 for r in display if r["Status"] == "Missing"))
@@ -579,15 +613,16 @@ def render() -> None:
                 _section_hdr("tune", "Month Filter")
                 fp1, _ = st.columns([2, 6])
                 with fp1:
-                    sel_month = st.selectbox(
-                        "Month", ["All"] + available_months,
+                    sel_month = st.multiselect(
+                        "Month", available_months,
                         label_visibility="collapsed",
                         key="wlr_comp_month",
+                        placeholder="All",
                     )
 
             display = (
-                f_completed if sel_month == "All"
-                else [r for r in f_completed if r["Month"] == sel_month]
+                f_completed if not sel_month
+                else [r for r in f_completed if r["Month"] in sel_month]
             )
 
             _COMP_COLS = ["Customer", "Site", "Machine", "Serial No.", "Month", "Status"]
@@ -595,17 +630,51 @@ def render() -> None:
 
             with st.container(border=True):
                 _section_hdr("task_alt", "Completed Worklogs")
-                st.dataframe(
-                    cdf.style.map(lambda v: "color:#16a34a;font-weight:700;", subset=["Status"]),
-                    use_container_width=True,
-                    hide_index=True,
+                _comp_idx = render_drilldown_table(
+                    cdf,
+                    "wlr_comp_tbl",
                     column_config={
                         "Machine":    st.column_config.TextColumn("Machine",    width="medium"),
                         "Serial No.": st.column_config.TextColumn("Serial No.", width="small"),
                         "Month":      st.column_config.TextColumn("Month",      width="small"),
                         "Status":     st.column_config.TextColumn("Status",     width="small"),
                     },
+                    style_fn=lambda s: s.apply(
+                        lambda col: (
+                            ["color:#16a34a;font-weight:700;"] * len(col)
+                            if col.name == "Status" else [""] * len(col)
+                        ),
+                        axis=0,
+                    ),
                 )
+
+            if _comp_idx is not None and _comp_idx < len(display):
+                _cr = display[_comp_idx]
+                st.markdown(
+                    f"<div style='margin-top:10px;padding:9px 14px;"
+                    f"background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;"
+                    f"font-size:13px;color:#166534;'>"
+                    f"Selected: <strong>{_cr['Machine']}</strong> &bull; "
+                    f"<strong>{_cr['Month']}</strong> &bull; {_cr['Status']}</div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "✏️ Open Worklog →",
+                    key="wlr_comp_open_wl",
+                    type="primary",
+                    help="Open this worklog for viewing",
+                ):
+                    _cid = _cr["_customer_id"]
+                    _valid_yrs = [today.year - 1, today.year, today.year + 1]
+                    st.session_state["wl_selected_customer_id"] = _cid
+                    st.session_state["_wl_prev_customer"]        = _cid
+                    st.session_state["wl_selected_wo_id"]        = _cr["_wo_id"]
+                    st.session_state.pop("wl_selected_machine", None)
+                    st.session_state["wl_selected_month"]        = _cal.month_name[_cr["_mo"]]
+                    if _cr["_yr"] in _valid_yrs:
+                        st.session_state["wl_selected_year"] = _cr["_yr"]
+                    st.query_params["page"] = "worklog"
+                    st.rerun()
 
             render_export_buttons(
                 cdf, "completed_worklogs",
@@ -647,15 +716,16 @@ def render() -> None:
                 _section_hdr("tune", "Month Filter")
                 fp2, _ = st.columns([2, 6])
                 with fp2:
-                    sel_b = st.selectbox(
-                        "Month", ["All"] + avail_b,
+                    sel_b = st.multiselect(
+                        "Month", avail_b,
                         label_visibility="collapsed",
                         key="wlr_bill_month",
+                        placeholder="All",
                     )
 
             billing_display = (
-                f_completed if sel_b == "All"
-                else [r for r in f_completed if r["Month"] == sel_b]
+                f_completed if not sel_b
+                else [r for r in f_completed if r["Month"] in sel_b]
             )
 
             _BILL_COLS = ["Customer", "Site", "Machine", "Serial No.", "Month", "Status"]

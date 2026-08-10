@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 from datetime import date, timedelta
 
 import pandas as pd
@@ -222,7 +223,11 @@ def _section_hdr(icon: str, label: str) -> None:
 
 # ── Overview tab ───────────────────────────────────────────────────────────────
 
-def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
+def _render_overview(
+    machines: list[dict],
+    all_records: list[dict],
+    machine_deploy: dict[str, tuple[str, str]],
+) -> None:
     today = date.today()
 
     # Build per-machine latest map
@@ -271,13 +276,13 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
     # Filters
     fc1, fc2, _ = st.columns([2, 2, 4])
     with fc1:
-        filter_status = st.selectbox(
-            "Compliance Status", ["All", "Overdue", "Expiring Soon", "Valid", "Not Set"],
-            key="ov_filter_status",
+        filter_status = st.multiselect(
+            "Compliance Status", ["Overdue", "Expiring Soon", "Valid", "Not Set"],
+            key="ov_filter_status", placeholder="All",
         )
     with fc2:
         machine_types = sorted({m.get("machine_type", "") for m in machines if m.get("machine_type")})
-        filter_type = st.selectbox("Machine Type", ["All"] + machine_types, key="ov_filter_type")
+        filter_type = st.multiselect("Machine Type", machine_types, key="ov_filter_type", placeholder="All")
 
     _TYPES_OVERVIEW = ["TPI", "PUC", "Form 11", "Insurance"]
 
@@ -286,10 +291,10 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
         return _worst_status(exps)
 
     filtered = [m for m in machines if m.get("is_active", True)]
-    if filter_status != "All":
-        filtered = [m for m in filtered if _row_worst(m)[0] == filter_status]
-    if filter_type != "All":
-        filtered = [m for m in filtered if m.get("machine_type") == filter_type]
+    if filter_status:
+        filtered = [m for m in filtered if _row_worst(m)[0] in filter_status]
+    if filter_type:
+        filtered = [m for m in filtered if m.get("machine_type") in filter_type]
     _order = {"Overdue": 0, "Expiring Soon": 1, "Valid": 2, "Not Set": 3}
     filtered.sort(key=lambda m: _order.get(_row_worst(m)[0], 4))
 
@@ -373,6 +378,7 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
         wlbl, wbg, wfg = _row_worst(m)
         serial_no  = m.get("serial_number") or "—"
         make_model = f"{m.get('make','') or ''} {m.get('model','') or ''}".strip() or "—"
+        client_name, site_name = machine_deploy.get(str(m.get("id") or ""), ("—", "—"))
         rows_html += (
             f"<tr style='background:{bg_row};border-bottom:1px solid #F1F5F9;'>"
             f"<td style='padding:8px 12px;'>"
@@ -381,6 +387,9 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
             f"<td style='padding:8px 12px;'>"
             f"<div style='font-size:12px;color:#374151;'>{make_model}</div>"
             f"<div style='font-size:11px;color:#9CA3AF;margin-top:1px;'>S/N: {serial_no}</div></td>"
+            f"<td style='padding:8px 12px;'>"
+            f"<div style='font-size:12px;color:#374151;'>{client_name}</div>"
+            f"<div style='font-size:11px;color:#9CA3AF;margin-top:1px;'>{site_name}</div></td>"
             f"<td style='padding:8px 12px;'>{_status_chip(wlbl,wbg,wfg)}</td>"
             + "".join(_exp_cell(_get_exp(m, ct)) for ct in _TYPES_OVERVIEW)
             + "</tr>"
@@ -393,6 +402,7 @@ def _render_overview(machines: list[dict], all_records: list[dict]) -> None:
         "<thead><tr>"
         f"<th style='{hs}border-radius:10px 0 0 0;'>Asset / Type</th>"
         f"<th style='{hs}'>Make / Model / S/N</th>"
+        f"<th style='{hs}'>Client / Site</th>"
         f"<th style='{hs}'>Overall</th>"
         + "".join(f"<th style='{hs}'>{ct}</th>" for ct in _TYPES_OVERVIEW)
         + "</tr></thead>"
@@ -449,14 +459,18 @@ def _render_records(sb: SupabaseClient, machines: list[dict]) -> None:
 
         with st.container(height=520):
             for m in sorted(filtered_machines, key=lambda x: x.get("asset_code") or ""):
-                mid       = m.get("id", "")
-                code      = m.get("asset_code", "—")
-                mtype     = m.get("machine_type", "")
+                mid        = m.get("id", "")
+                code       = m.get("asset_code", "—")
+                mtype      = m.get("machine_type", "")
+                make_val   = (m.get("make")          or "").strip()
+                model_val  = (m.get("model")         or "").strip()
+                serial_val = m.get("serial_number")  or "—"
+                make_model = f"{make_val} {model_val}".strip() or "—"
                 is_sel    = mid == sel_machine_id
                 bg        = "#EFF6FF" if is_sel else "#FFFFFF"
                 border    = "2px solid #2563EB" if is_sel else "1px solid #E2E8F0"
                 if st.button(
-                    f"**{code}** — {mtype}",
+                    f"**{code}** — {mtype}  \n{make_model}  ·  S/N: {serial_val}",
                     key=f"comp_msel_{mid}",
                     use_container_width=True,
                 ):
@@ -716,6 +730,67 @@ def render() -> None:
     except Exception:
         all_records = []
 
+    # Build machine_id → (customer_name, site_name) from active work orders
+    try:
+        work_orders    = sb.list_work_orders()
+        customers_list = sb.list_customers()
+        sites_list     = sb.list_sites()
+    except Exception:
+        work_orders, customers_list, sites_list = [], [], []
+
+    cust_map = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
+    site_map = {s["id"]: s.get("site_name",     "—") for s in sites_list     if s.get("id")}
+
+    today = date.today()
+
+    def _sd(wo):
+        try:
+            return date.fromisoformat(str(wo["start_date"])[:10]) if wo.get("start_date") else None
+        except Exception:
+            return None
+
+    def _ed(wo):
+        try:
+            return date.fromisoformat(str(wo["end_date"])[:10]) if wo.get("end_date") else None
+        except Exception:
+            return None
+
+    def _add_wo_machines(wo, deploy: dict) -> None:
+        cname  = cust_map.get(wo.get("customer_id", ""), "—")
+        sname  = site_map.get(wo.get("site_id",     ""), "—")
+        mc_raw = wo.get("machine_config")
+        if not mc_raw:
+            return
+        try:
+            recs = json.loads(mc_raw) if isinstance(mc_raw, str) else mc_raw
+            if isinstance(recs, list):
+                for r in recs:
+                    mid = str(r.get("machine_id") or "")
+                    if mid and mid not in deploy:
+                        deploy[mid] = (cname, sname)
+        except Exception:
+            pass
+
+    machine_deploy: dict[str, tuple[str, str]] = {}
+
+    # Pass 1 — currently active WOs (preferred)
+    for wo in work_orders:
+        sd, ed = _sd(wo), _ed(wo)
+        if sd is None or sd > today:
+            continue
+        if ed is not None and ed < today:
+            continue
+        _add_wo_machines(wo, machine_deploy)
+
+    # Pass 2 — most-recent WO for machines not yet found (handles ended/idle machines)
+    sorted_wos = sorted(
+        work_orders,
+        key=lambda w: _sd(w) or date.min,
+        reverse=True,
+    )
+    for wo in sorted_wos:
+        _add_wo_machines(wo, machine_deploy)
+
     tab_overview, tab_records, tab_docs = st.tabs([
         "📊 Compliance Overview",
         "📋 Manage Records",
@@ -723,7 +798,7 @@ def render() -> None:
     ])
 
     with tab_overview:
-        _render_overview(machines, all_records)
+        _render_overview(machines, all_records, machine_deploy)
 
     with tab_records:
         _render_records(sb, machines)

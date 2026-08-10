@@ -515,19 +515,19 @@ def render() -> None:
             col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
             with col1:
                 MODULE_OPTIONS = [
-                    "All", "Auth", "Admin", "Customers", "Sites", "Operators",
+                    "Auth", "Admin", "Customers", "Sites", "Operators",
                     "Machines", "Assets", "Work Orders", "Deployments", "Worklog",
                 ]
-                filter_module = st.selectbox(
-                    "Module", MODULE_OPTIONS, key="log_filter_module"
+                filter_module = st.multiselect(
+                    "Module", MODULE_OPTIONS, key="log_filter_module", placeholder="All"
                 )
             with col2:
                 ACTION_OPTIONS = [
-                    "All", "LOGIN", "LOGOUT", "CREATE_USER", "UPDATE_USER",
+                    "LOGIN", "LOGOUT", "CREATE_USER", "UPDATE_USER",
                     "VIEW", "CREATE", "UPDATE", "DELETE",
                 ]
-                filter_action = st.selectbox(
-                    "Action", ACTION_OPTIONS, key="log_filter_action"
+                filter_action = st.multiselect(
+                    "Action", ACTION_OPTIONS, key="log_filter_action", placeholder="All"
                 )
             with col3:
                 filter_date_from = st.date_input(
@@ -547,8 +547,8 @@ def render() -> None:
         # ── Data fetch ─────────────────────────────────────────────────────────
         try:
             logs = sb.list_activity_logs(
-                module=None if filter_module == "All" else filter_module,
-                action=None if filter_action == "All" else filter_action,
+                module=None,
+                action=None,
                 user_name=filter_user_name.strip() or None,
                 date_from=filter_date_from or None,
                 date_to=filter_date_to or None,
@@ -556,6 +556,12 @@ def render() -> None:
         except Exception as exc:
             st.error(f"Failed to load activity logs: {exc}")
             logs = []
+
+        # ── Client-side filtering ──────────────────────────────────────────────
+        if filter_module:
+            logs = [l for l in logs if l.get("module") in filter_module]
+        if filter_action:
+            logs = [l for l in logs if l.get("action") in filter_action]
 
         # ── Log table ──────────────────────────────────────────────────────────
         with st.container(border=True):
@@ -607,22 +613,22 @@ def render() -> None:
         # ── Filter ─────────────────────────────────────────────────────────────
         rq_col1, rq_col2, _ = st.columns([2, 2, 4])
         with rq_col1:
-            rq_status = st.selectbox(
-                "Status", ["Pending", "Approved", "Rejected", "All"],
-                key="rq_filter_status",
+            rq_status = st.multiselect(
+                "Status", ["Pending", "Approved", "Rejected"],
+                key="rq_filter_status", placeholder="All",
             )
         with rq_col2:
-            rq_type = st.selectbox(
+            rq_type = st.multiselect(
                 "Record Type",
-                ["All", "Work Order", "Movement", "Work Log"],
-                key="rq_filter_type",
+                ["Work Order", "Movement", "Work Log"],
+                key="rq_filter_type", placeholder="All",
             )
 
         # ── Load requests ──────────────────────────────────────────────────────
         try:
             reqs = sb.list_edit_requests(
-                status=None if rq_status == "All" else rq_status,
-                record_type=None if rq_type == "All" else rq_type,
+                status=None,
+                record_type=None,
             )
         except Exception as exc:
             _err = str(exc)
@@ -634,6 +640,12 @@ def render() -> None:
             else:
                 st.error(f"Failed to load requests: {exc}")
             reqs = []
+
+        # ── Client-side filtering ──────────────────────────────────────────────
+        if rq_status:
+            reqs = [r for r in reqs if r.get("status") in rq_status]
+        if rq_type:
+            reqs = [r for r in reqs if r.get("record_type") in rq_type]
 
         if not reqs:
             st.info("No requests found for the selected filters.")

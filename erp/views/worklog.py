@@ -175,6 +175,18 @@ def _recalc_df(
             if cur_bd_na or abs(float(cur_bd if not cur_bd_na else 0) - exp_bd) > 0.001:
                 out.at[idx, "Breakdown Hours"] = exp_bd
                 changed = True
+        else:
+            # One or both times are absent/cleared — reset stale derived values.
+            cur_net = out.at[idx, "Net Time"]
+            if cur_net is not None and not _safe_isnan(cur_net):
+                out.at[idx, "Net Time"] = None
+                changed = True
+            for _col in ("OT", "Breakdown Hours"):
+                _cur   = out.at[idx, _col]
+                _cur_f = 0.0 if (_cur is None or _safe_isnan(_cur)) else float(_cur)
+                if abs(_cur_f) > 0.001:
+                    out.at[idx, _col] = 0.0
+                    changed = True
 
         # Net HMR = End HMR − Start HMR
         s_hmr = row.get("Start HMR")
@@ -261,6 +273,8 @@ def _json_to_schedule_df(raw) -> pd.DataFrame | None:
         return None
     try:
         records = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(records, dict) and records.get("shift_type") == "single":
+            records = records.get("rows") or []
         if not isinstance(records, list):
             return None
         rows = [
@@ -1500,9 +1514,25 @@ def render() -> None:
         _wl_rec = {}
     _is_db_draft = bool(_wl_rec.get("is_draft", False))
     _is_locked   = bool(_wl_rec.get("id")) and not _is_db_draft
+    _wl_edit_key = f"_wl_edit_{selected_wo_id}_{_mkey}_{selected_month_num}_{selected_year}"
+    _is_editing  = _is_locked and st.session_state.get(_wl_edit_key, False)
 
     # ── Status banners ─────────────────────────────────────────────────────────
-    if _is_locked:
+    if _is_editing:
+        st.markdown(
+            "<div style='background:#fff7ed;border:1px solid #f97316;border-radius:6px;"
+            "padding:10px 16px;margin:8px 0 12px;display:flex;align-items:center;gap:12px;'>"
+            "<span style='font-size:20px;flex-shrink:0;'>✏️</span>"
+            "<div>"
+            "<div style='font-size:13px;font-weight:700;color:#9a3412;'>"
+            "Edit Mode — changes not saved yet</div>"
+            "<div style='font-size:12px;color:#c2410c;margin-top:2px;'>"
+            "Modify the schedule below and click Save Work Log to commit. "
+            "Click Cancel Edit to discard all changes.</div>"
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
+    elif _is_locked:
         st.markdown(
             "<div style='background:#f0fdf4;border:1px solid #86efac;border-radius:6px;"
             "padding:10px 16px;margin:8px 0 12px;display:flex;align-items:center;gap:12px;'>"
@@ -1511,7 +1541,7 @@ def render() -> None:
             "<div style='font-size:13px;font-weight:700;color:#166534;'>"
             "Work Log Locked — submitted and permanent</div>"
             "<div style='font-size:12px;color:#15803d;margin-top:2px;'>"
-            "This record cannot be edited. Use the print buttons below to share with the client.</div>"
+            "Use Edit to make corrections, or print buttons below to share with the client.</div>"
             "</div></div>",
             unsafe_allow_html=True,
         )
@@ -1617,7 +1647,7 @@ def render() -> None:
         f"{base_key}_s1",
         _get_initial("_s1", _db_df1),
         shift_start_time, shift_end_time, operator_names,
-        locked=_is_locked,
+        locked=_is_locked and not _is_editing,
     )
     if edited_s1 is not None and not edited_s1.empty:
         _show_totals(edited_s1, "REGULAR SHIFT" if is_double else "TOTAL")
@@ -1664,7 +1694,7 @@ def render() -> None:
             base_key_s2,
             _initial_s2,
             shift_start_time_s2, shift_end_time_s2, operator_names,
-            locked=_is_locked,
+            locked=_is_locked and not _is_editing,
         )
         if edited_s2 is not None and not edited_s2.empty:
             _show_totals(edited_s2, "NIGHT SHIFT")
@@ -1743,13 +1773,21 @@ def render() -> None:
     _billing_month_str = f"{calendar.month_name[selected_month_num]} {selected_year}"
     _wl_del_key = f"_wl_del_{selected_wo_id}_{_mkey}_{selected_month_num}_{selected_year}"
 
-    # ── Delete option (locked / submitted worklogs) ───────────────────────────
-    if _is_locked:
+    # ── Actions for locked (submitted) worklogs ───────────────────────────────
+    if _is_locked and not _is_editing:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
         if not st.session_state.get(_wl_del_key):
-            if st.button("🗑 Delete Work Log", key="del_locked_wl_btn"):
-                st.session_state[_wl_del_key] = True
-                st.rerun()
+            _act1, _act2, _ = st.columns([2, 2, 6])
+            with _act1:
+                if st.button("✏️ Edit Work Log", key="edit_locked_wl_btn",
+                             use_container_width=True):
+                    st.session_state[_wl_edit_key] = True
+                    st.rerun()
+            with _act2:
+                if st.button("🗑 Delete Work Log", key="del_locked_wl_btn",
+                             use_container_width=True):
+                    st.session_state[_wl_del_key] = True
+                    st.rerun()
         else:
             st.warning(
                 f"⚠️  You are about to permanently delete the work log for "
@@ -1773,6 +1811,7 @@ def render() -> None:
                     st.session_state.pop(_wl_del_key, None)
                     st.rerun()
         return
+    # When _is_editing: fall through to the save/draft/cancel buttons below
 
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
     _btn_save, _btn_draft, _btn_discard = st.columns([3, 3, 2])
@@ -1834,9 +1873,14 @@ def render() -> None:
                 except Exception as exc:
                     st.error(f"Could not save draft: {exc}")
 
-    # ── Delete Draft ───────────────────────────────────────────────────────────
+    # ── Cancel Edit / Delete Draft ─────────────────────────────────────────────
     with _btn_discard:
-        if _is_db_draft:
+        if _is_editing:
+            if st.button("✗ Cancel Edit", key="cancel_edit_btn", use_container_width=True):
+                st.session_state.pop(_wl_edit_key, None)
+                _clear_session()
+                st.rerun()
+        elif _is_db_draft:
             if not st.session_state.get(_wl_del_key):
                 if st.button("🗑 Delete Draft", key="discard_draft_btn", use_container_width=True):
                     st.session_state[_wl_del_key] = True
@@ -1862,6 +1906,25 @@ def render() -> None:
     with _btn_save:
         if st.button("💾 Save Work Log", type="primary", key="save_worklog",
                      use_container_width=True):
+            # Embed a frozen billing snapshot so invoice recalculation is
+            # never affected by later changes to the Work Order config.
+            _sjson = _make_schedule_json()
+            if _sjson and _summary:
+                try:
+                    _sdata = json.loads(_sjson)
+                    if isinstance(_sdata, list):
+                        _sdata = {"shift_type": "single", "rows": _sdata}
+                    _sdata["billing_snapshot"] = {
+                        "no_of_days":   _summary["working_days"],
+                        "shift_hours":  _summary["std_hours"],
+                        "actual_hours": _summary["actual"],
+                        "qty":          round(_summary["qty"], 6),
+                        "ot_hours":     _summary["ot_hours"],
+                        "bd_hours":     _summary["breakdown_hours"],
+                    }
+                    _sjson = json.dumps(_sdata)
+                except Exception:
+                    pass  # keep original json if anything unexpected happens
             wl_payload = dict(
                 work_order_id=selected_wo_id,
                 machine_id=_mkey,
@@ -1873,7 +1936,7 @@ def render() -> None:
                 add_operator_rate=add_operator_rate if _add_op_on else 0.0,
                 add_accommodation_qty=add_accommodation_qty if _add_acc_on else 0.0,
                 add_accommodation_rate=add_accommodation_rate if _add_acc_on else 0.0,
-                schedule_data=_make_schedule_json(),
+                schedule_data=_sjson,
                 is_draft=False,
             )
             updated_configs = [dict(m) for m in machine_configs]
@@ -1890,6 +1953,7 @@ def render() -> None:
                     "machine_config": json.dumps(updated_configs),
                 })
                 _clear_session()
+                st.session_state.pop(_wl_edit_key, None)
                 st.success(f"✅ Work log for {selected_month_label} saved to database.")
             except Exception as exc:
                 st.error(f"Could not save work log: {exc}")
