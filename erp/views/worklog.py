@@ -1382,6 +1382,21 @@ def render() -> None:
         if _wl_rec_sync:
             st.session_state["wl_ot_rate"]        = float(_wl_rec_sync.get("ot_rate") or 0.0)
             st.session_state["wl_deduction"]      = float(_wl_rec_sync.get("deduction") or 0.0)
+            # Restore user-edited working days from draft schedule_data
+            _saved_wd: int | None = None
+            _sdr = _wl_rec_sync.get("schedule_data")
+            if _sdr:
+                try:
+                    _sdd = json.loads(_sdr) if isinstance(_sdr, str) else _sdr
+                    if isinstance(_sdd, dict):
+                        if _sdd.get("user_no_of_days"):
+                            _saved_wd = int(_sdd["user_no_of_days"])
+                        elif (_sdd.get("billing_snapshot") or {}).get("no_of_days"):
+                            _saved_wd = int(_sdd["billing_snapshot"]["no_of_days"])
+                except Exception:
+                    pass
+            _wo_days = int(selected_machine.get("no_of_days") or 26)
+            st.session_state["wl_working_days"] = _saved_wd if _saved_wd else _wo_days
             _aop_q = float(_wl_rec_sync.get("add_operator_qty") or 0.0)
             _aop_r = float(_wl_rec_sync.get("add_operator_rate") or 0.0)
             _aac_q = float(_wl_rec_sync.get("add_accommodation_qty") or 0.0)
@@ -1395,6 +1410,7 @@ def render() -> None:
         else:
             st.session_state["wl_ot_rate"]         = float(selected_machine.get("ot_rate") or 0.0)
             st.session_state["wl_deduction"]       = 0.0
+            st.session_state["wl_working_days"]    = int(selected_machine.get("no_of_days") or 26)
             st.session_state["wl_add_op_on"]       = False
             st.session_state["wl_add_op_qty"]      = 0.0
             st.session_state["wl_add_op_rate"]     = 0.0
@@ -1852,6 +1868,15 @@ def render() -> None:
         if st.button("📝 Save Draft", key="save_draft_btn", use_container_width=True):
             _sjson = _make_schedule_json()
             if _sjson:
+                # Embed user-edited working days so it survives re-open
+                try:
+                    _draft_sdata = json.loads(_sjson) if isinstance(_sjson, str) else _sjson
+                    if isinstance(_draft_sdata, list):
+                        _draft_sdata = {"shift_type": "single", "rows": _draft_sdata}
+                    _draft_sdata["user_no_of_days"] = int(working_days_input)
+                    _sjson = json.dumps(_draft_sdata)
+                except Exception:
+                    pass
                 try:
                     sb.upsert_worklog(dict(
                         work_order_id=selected_wo_id,
