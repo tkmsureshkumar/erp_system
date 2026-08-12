@@ -369,6 +369,123 @@ def _wl_status_styler(styler):
     return styler.apply(_row_status, axis=0)
 
 
+# ── Detail popup dialog ───────────────────────────────────────────────────────
+
+@st.dialog("Worklog Detail Report", width="large")
+def _show_detail_popup(summary_row, detail_df: pd.DataFrame) -> None:
+    machine_val = str(summary_row.get("Machine", "")       or "—")
+    month_val   = str(summary_row.get("Billing Month", "") or "—")
+    customer    = str(summary_row.get("Customer", "")      or "—")
+    site        = str(summary_row.get("Site", "")          or "—")
+    status_val  = str(summary_row.get("Status", "")        or "—")
+    billing_val = float(summary_row.get("Billing",    0)   or 0)
+    ot_bill     = float(summary_row.get("OT Billing", 0)   or 0)
+
+    _SC = {
+        "Submitted":       ("#DCFCE7", "#166534"),
+        "Draft":           ("#FEF3C7", "#92400E"),
+        "Invoiced":        ("#EDE9FE", "#5B21B6"),
+        "Pending Billing": ("#FEF3C7", "#92400E"),
+    }
+    s_bg, s_fg = _SC.get(status_val, ("#F1F5F9", "#374151"))
+
+    # ── Machine / period banner ───────────────────────────────────────────────
+    st.markdown(
+        f"<div style='background:linear-gradient(135deg,#1E3A5F,#2563EB);"
+        f"border-radius:10px;padding:14px 20px;margin-bottom:14px;"
+        f"display:flex;justify-content:space-between;align-items:center;'>"
+        f"<div>"
+        f"<div style='font-size:17px;font-weight:800;color:#fff;'>{machine_val}</div>"
+        f"<div style='font-size:12px;color:rgba(255,255,255,.75);margin-top:2px;'>{month_val}</div>"
+        f"</div>"
+        f"<span style='background:{s_bg};color:{s_fg};padding:4px 14px;"
+        f"border-radius:20px;font-size:12px;font-weight:700;'>{status_val}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Deployment + billing summary ──────────────────────────────────────────
+    d1, d2, d3, d4 = st.columns(4)
+    for col, lbl, val, color in [
+        (d1, "Customer",       customer,              "#111827"),
+        (d2, "Site",           site,                  "#111827"),
+        (d3, "Rental Billing", f"₹{billing_val:,.0f}", "#E87722"),
+        (d4, "OT Billing",     f"₹{ot_bill:,.0f}",    "#EF4444"),
+    ]:
+        with col:
+            st.markdown(
+                f"<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
+                f"text-transform:uppercase;color:#9CA3AF;margin-bottom:4px;'>{lbl}</div>"
+                f"<div style='font-size:13px;font-weight:700;color:{color};'>{val}</div>",
+                unsafe_allow_html=True,
+            )
+
+    st.divider()
+
+    if detail_df.empty:
+        st.info("No shift entries found for this machine and month.", icon="ℹ️")
+        return
+
+    working_df = detail_df[detail_df["Start Time"].notna() & (detail_df["Start Time"] != "")]
+
+    # ── KPI strip ─────────────────────────────────────────────────────────────
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Working Days", len(working_df))
+    k2.metric("Net Hours",    f"{working_df['Net Time'].sum():.1f} h")
+    k3.metric("OT Hours",     f"{working_df['OT'].sum():.1f} h")
+    k4.metric("Breakdown",    f"{working_df['Breakdown Hrs'].sum():.1f} h")
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    # ── Shift log table ───────────────────────────────────────────────────────
+    _display = [
+        "Date", "Weekday", "Start Time", "End Time",
+        "Net Time", "Start HMR", "End HMR",
+        "Breakdown Hrs", "OT", "HSD in Ltr", "Operator", "Remarks",
+    ]
+    _display = [c for c in _display if c in detail_df.columns]
+    show_df  = detail_df[_display].copy()
+
+    def _sun(row):
+        if str(row.get("Weekday", "")) == "Sunday":
+            return ["background-color:#fef08a;color:#713f12"] * len(row)
+        return [""] * len(row)
+
+    st.markdown(
+        f"<div style='font-size:12px;color:#6B7280;margin-bottom:6px;'>"
+        f"<b>{len(show_df)}</b> entries &nbsp;·&nbsp; "
+        f"<b>{len(working_df)}</b> working days &nbsp;·&nbsp; "
+        f"Sundays highlighted in yellow</div>",
+        unsafe_allow_html=True,
+    )
+    st.dataframe(
+        show_df.style
+        .apply(_sun, axis=1)
+        .format(
+            {"Net Time": "{:.2f}", "OT": "{:.1f}",
+             "Breakdown Hrs": "{:.2f}", "HSD in Ltr": "{:.1f}"},
+            na_rep="—",
+        ),
+        use_container_width=True,
+        hide_index=True,
+        height=min(38 + len(show_df) * 35 + 4, 500),
+        column_config={
+            "Date":          st.column_config.DateColumn("Date",      width="small", format="DD-MM-YYYY"),
+            "Weekday":       st.column_config.TextColumn("Day",       width="small"),
+            "Start Time":    st.column_config.TextColumn("Start",     width="small"),
+            "End Time":      st.column_config.TextColumn("End",       width="small"),
+            "Net Time":      st.column_config.NumberColumn("Net Hrs", format="%.2f", width="small"),
+            "Start HMR":     st.column_config.NumberColumn("HMR In",  format="%.1f", width="small"),
+            "End HMR":       st.column_config.NumberColumn("HMR Out", format="%.1f", width="small"),
+            "Breakdown Hrs": st.column_config.NumberColumn("B/D Hrs", format="%.2f", width="small"),
+            "OT":            st.column_config.NumberColumn("OT Hrs",  format="%.1f", width="small"),
+            "HSD in Ltr":    st.column_config.NumberColumn("HSD (L)", format="%.1f", width="small"),
+            "Operator":      st.column_config.TextColumn("Operator",  width="medium"),
+            "Remarks":       st.column_config.TextColumn("Remarks",   width="medium"),
+        },
+    )
+
+
 # ── View ──────────────────────────────────────────────────────────────────────
 
 def render() -> None:
@@ -621,64 +738,29 @@ def render() -> None:
                 sheet_name="Worklog Summary",
             )
 
-            # ── Selected row → navigate ────────────────────────────────────────
+            # ── Selected row → popup detail report ────────────────────────────
+            _prev_billing_idx = st.session_state.get("_wlr_prev_billing_idx")
             if selected_idx is not None and selected_idx < len(billing_df):
                 row         = billing_df.iloc[selected_idx]
                 machine_val = row.get("Machine", "")
                 month_val   = row.get("Billing Month", "")
-                cust_val    = row.get("Customer", "")
-                status_val  = row.get("Status", "—")
-                # Asset code is the first token of the Machine display label
                 _ac = machine_val.split(" — ")[0].strip() if " — " in machine_val else machine_val
+                _detail_df  = df[
+                    (df["Asset Code"] == _ac) & (df["Billing Month"] == month_val)
+                ].sort_values("Date").reset_index(drop=True)
 
-                st.markdown(
-                    f"<div style='margin-top:14px;padding:10px 16px;"
-                    f"background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;"
-                    f"font-size:13px;color:#1E40AF;'>"
-                    f"Selected: <strong>{machine_val}</strong> &bull; "
-                    f"<strong>{month_val}</strong> &bull; {cust_val}"
-                    f" &bull; <strong>{status_val}</strong></div>",
-                    unsafe_allow_html=True,
-                )
-
-                _nav = _nav_map.get((machine_val, month_val, cust_val), {})
-                _nb1, _nb2, _ = st.columns([1, 1, 5])
-                with _nb1:
-                    if st.button(
-                        "✏️ Open Worklog",
-                        key="wlr_goto_wl",
-                        type="primary",
-                        help="Open this worklog for viewing / editing",
-                        use_container_width=True,
-                    ):
-                        if _nav:
-                            _cid = _nav["customer_id"]
-                            _valid_yrs = [date.today().year - 1, date.today().year, date.today().year + 1]
-                            st.session_state["wl_selected_customer_id"] = _cid
-                            st.session_state["_wl_prev_customer"]        = _cid
-                            st.session_state["wl_selected_wo_id"]        = _nav["wo_id"]
-                            st.session_state.pop("wl_selected_machine", None)
-                            if _nav["month_name"]:
-                                st.session_state["wl_selected_month"] = _nav["month_name"]
-                            if _nav["year"] in _valid_yrs:
-                                st.session_state["wl_selected_year"] = _nav["year"]
-                            st.query_params["page"] = "worklog"
-                            st.rerun()
-                        else:
-                            st.warning("Could not resolve navigation info for this row.")
-                with _nb2:
+                if selected_idx != _prev_billing_idx:
+                    st.session_state["_wlr_prev_billing_idx"] = selected_idx
+                    _show_detail_popup(row, _detail_df)
+                else:
                     if st.button(
                         "📋 View Detail Report",
                         key="wlr_goto_detail",
-                        help="Opens the Detailed Worklog page pre-filtered for this machine and month",
-                        use_container_width=True,
+                        help="Re-open the shift log for the selected row",
                     ):
-                        if _ac:
-                            st.session_state["wld_mach"]  = _ac
-                        if month_val:
-                            st.session_state["wld_month"] = month_val
-                        st.query_params["page"] = "wldetailreport"
-                        st.rerun()
+                        _show_detail_popup(row, _detail_df)
+            elif selected_idx is None:
+                st.session_state["_wlr_prev_billing_idx"] = None
 
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
     if st.button("Refresh Data", key="rpt_refresh"):
