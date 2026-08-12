@@ -172,6 +172,243 @@ def _month_to_date(bm_str: str) -> date | None:
         return None
 
 
+# ── Worklog schedule parser ───────────────────────────────────────────────────
+
+def _parse_wl_schedule(raw) -> list[dict]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, dict):
+            if data.get("shift_type") == "double":
+                return (data.get("shift1") or []) + (data.get("shift2") or [])
+            return data.get("rows") or []
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def _billing_snap_from_wl(wl: dict) -> dict | None:
+    raw = wl.get("schedule_data")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, dict):
+            return data.get("billing_snapshot")
+    except Exception:
+        pass
+    return None
+
+
+# ── WL Summary popup dialog ───────────────────────────────────────────────────
+
+@st.dialog("Worklog Summary", width="large")
+def _show_wl_summary(pr: dict, wl: dict | None, mach: dict) -> None:
+    mc         = pr.get("_mc_row", {})
+    asset_code = mach.get("asset_code") or mc.get("machine_label") or "—"
+    make_val   = (mach.get("make")  or "").strip()
+    model_val  = (mach.get("model") or "").strip()
+    make_model = f"{make_val} {model_val}".strip() or "—"
+    serial     = mach.get("serial_number") or "—"
+    status     = pr.get("Status", "—")
+
+    _SC = {
+        "Submitted":       ("#DCFCE7", "#166534"),
+        "Draft":           ("#FEF3C7", "#92400E"),
+        "Missing":         ("#FEE2E2", "#991B1B"),
+        "Invoiced":        ("#EDE9FE", "#5B21B6"),
+        "Pending Billing": ("#FEF3C7", "#92400E"),
+    }
+    s_bg, s_fg = _SC.get(status, ("#F1F5F9", "#374151"))
+
+    # ── Machine banner ────────────────────────────────────────────────────────
+    st.markdown(
+        f"<div style='background:linear-gradient(135deg,#1E3A5F,#2563EB);"
+        f"border-radius:10px;padding:14px 20px;margin-bottom:16px;"
+        f"display:flex;justify-content:space-between;align-items:center;'>"
+        f"<div>"
+        f"<div style='font-size:18px;font-weight:800;color:#fff;'>{asset_code}</div>"
+        f"<div style='font-size:12px;color:rgba(255,255,255,.75);margin-top:3px;'>"
+        f"{make_model} &nbsp;·&nbsp; S/N: {serial}</div>"
+        f"</div>"
+        f"<span style='background:{s_bg};color:{s_fg};padding:4px 14px;"
+        f"border-radius:20px;font-size:12px;font-weight:700;'>{status}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Deployment info ───────────────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            "<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
+            "text-transform:uppercase;color:#9CA3AF;margin-bottom:4px;'>Customer</div>"
+            f"<div style='font-size:14px;font-weight:600;color:#111827;'>{pr['Customer']}</div>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            "<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
+            "text-transform:uppercase;color:#9CA3AF;margin-bottom:4px;'>Site</div>"
+            f"<div style='font-size:14px;font-weight:600;color:#111827;'>{pr['Site']}</div>",
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            "<div style='font-size:10px;font-weight:700;letter-spacing:.1em;"
+            "text-transform:uppercase;color:#9CA3AF;margin-bottom:4px;'>Billing Period</div>"
+            f"<div style='font-size:14px;font-weight:700;color:#2563EB;'>{pr['Month']}</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
+    if wl is None:
+        st.info("No worklog recorded for this period.", icon="ℹ️")
+        return
+
+    # ── Work summary ──────────────────────────────────────────────────────────
+    sched_rows = _parse_wl_schedule(wl.get("schedule_data"))
+    snap       = _billing_snap_from_wl(wl)
+
+    net_hrs  = sum(float(r.get("net_time")          or 0) for r in sched_rows)
+    ot_hrs   = sum(float(r.get("ot")                or 0) for r in sched_rows)
+    bd_hrs   = sum(float(r.get("breakdown_hours")   or 0) for r in sched_rows)
+    days_cnt = sum(1 for r in sched_rows if float(r.get("net_time") or 0) > 0)
+
+    # Billing amounts
+    rental    = float(mc.get("rental_per_month") or 0)
+    ot_rate   = float(wl.get("ot_rate")          or 0)
+    deduction = float(wl.get("deduction")         or 0)
+
+    if snap:
+        qty      = float(snap.get("qty")      or 0)
+        ot_hrs_b = float(snap.get("ot_hours") or ot_hrs)
+    else:
+        shift_hr = float(mc.get("machine_shift_hour") or 8)
+        no_days  = float(mc.get("no_of_days")         or 26)
+        work_hrs = no_days * shift_hr
+        qty      = round(net_hrs / work_hrs, 3) if work_hrs > 0 else 0.0
+        ot_hrs_b = ot_hrs
+
+    hiring       = round(rental * qty, 2)
+    ot_amt       = round(ot_hrs_b * ot_rate, 2)
+    add_op_qty   = float(wl.get("add_operator_qty")       or 0)
+    add_op_rate  = float(wl.get("add_operator_rate")      or 0)
+    add_op_amt   = round(add_op_qty * add_op_rate,   2)
+    add_acc_qty  = float(wl.get("add_accommodation_qty")  or 0)
+    add_acc_rate = float(wl.get("add_accommodation_rate") or 0)
+    add_acc_amt  = round(add_acc_qty * add_acc_rate, 2)
+    net_pay      = max(0.0, hiring + ot_amt + add_op_amt + add_acc_amt - deduction)
+
+    st.markdown(
+        "<div style='font-size:10px;font-weight:700;letter-spacing:.12em;"
+        "text-transform:uppercase;color:#6B7280;margin-bottom:10px;'>Work Summary</div>",
+        unsafe_allow_html=True,
+    )
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Net Work Hrs",  f"{net_hrs:.1f} h")
+    m2.metric("OT Hours",      f"{ot_hrs:.1f} h")
+    m3.metric("Breakdown Hrs", f"{bd_hrs:.1f} h")
+    m4.metric("Days Logged",   days_cnt)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # ── Billing breakdown table ───────────────────────────────────────────────
+    st.markdown(
+        "<div style='font-size:10px;font-weight:700;letter-spacing:.12em;"
+        "text-transform:uppercase;color:#6B7280;margin-bottom:10px;'>Billing Breakdown</div>",
+        unsafe_allow_html=True,
+    )
+
+    def _trow(label: str, rate_str: str, qty_str: str, amount: float,
+              bold: bool = False, negative: bool = False) -> str:
+        fw  = "800" if bold else "500"
+        bg  = "#DFE8F4" if bold else "transparent"
+        fg  = "#991B1B" if negative else ("#111827" if not bold else "#1E3A5F")
+        bd_top = "border-top:2px solid #E2EBF0;" if bold else ""
+        a_str  = f"(₹{abs(amount):,.2f})" if negative else f"₹{amount:,.2f}"
+        return (
+            f"<tr style='background:{bg};{bd_top}'>"
+            f"<td style='padding:8px 12px;font-weight:{fw};color:{fg};'>{label}</td>"
+            f"<td style='padding:8px 12px;text-align:right;color:#6B7280;font-size:12px;'>{rate_str}</td>"
+            f"<td style='padding:8px 12px;text-align:center;color:#6B7280;font-size:12px;'>{qty_str}</td>"
+            f"<td style='padding:8px 12px;text-align:right;font-weight:{fw};color:{fg};'>{a_str}</td>"
+            f"</tr>"
+        )
+
+    trows = _trow(
+        "Hiring Charges",
+        f"₹{rental:,.2f} / mo",
+        f"{qty:.3f} mo",
+        hiring,
+    )
+    if ot_amt > 0 or ot_rate > 0:
+        trows += _trow(
+            "OT Charges",
+            f"₹{ot_rate:,.2f} / hr",
+            f"{ot_hrs_b:.1f} h",
+            ot_amt,
+        )
+    if add_op_amt > 0:
+        trows += _trow(
+            "Additional Operator",
+            f"₹{add_op_rate:,.2f}",
+            f"{add_op_qty:.0f}",
+            add_op_amt,
+        )
+    if add_acc_amt > 0:
+        trows += _trow(
+            "Accommodation",
+            f"₹{add_acc_rate:,.2f}",
+            f"{add_acc_qty:.0f}",
+            add_acc_amt,
+        )
+    if deduction > 0:
+        trows += _trow("Deduction", "—", "—", deduction, negative=True)
+    trows += _trow("Net Payable", "", "", net_pay, bold=True)
+
+    hs = (
+        "padding:9px 12px;background:#1E3A5F;color:#fff;"
+        "font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;"
+    )
+    st.markdown(
+        "<div style='border:1px solid #E2EBF0;border-radius:10px;overflow:hidden;'>"
+        "<table style='width:100%;border-collapse:collapse;font-family:inherit;font-size:13px;'>"
+        "<thead><tr>"
+        f"<th style='{hs}text-align:left;border-radius:10px 0 0 0;'>Description</th>"
+        f"<th style='{hs}text-align:right;'>Rate</th>"
+        f"<th style='{hs}text-align:center;'>Qty / Hrs</th>"
+        f"<th style='{hs}text-align:right;border-radius:0 10px 0 0;'>Amount</th>"
+        "</tr></thead>"
+        f"<tbody>{trows}</tbody>"
+        "</table></div>",
+        unsafe_allow_html=True,
+    )
+
+    # GST note
+    billing_type = mc.get("billing_type", "")
+    if billing_type:
+        gst_note = {
+            "IGST":      "IGST @ 18% applicable",
+            "CGST/SGST": "CGST 9% + SGST 9% applicable",
+        }.get(billing_type, f"GST: {billing_type}")
+        st.markdown(
+            f"<div style='margin-top:6px;font-size:11px;color:#9CA3AF;text-align:right;'>"
+            f"{gst_note} (not included above)</div>",
+            unsafe_allow_html=True,
+        )
+
+    # Remarks
+    remarks = (wl.get("remarks") or "").strip()
+    if remarks:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.info(f"**Remarks:** {remarks}", icon="📝")
+
+
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
@@ -283,6 +520,7 @@ def render() -> None:
                         "_customer_id":    wo.get("customer_id", ""),
                         "_yr":             yr,
                         "_mo":             mo,
+                        "_mc_row":         mc_row,
                     }
 
                     if status in ("Missing", "Draft"):
@@ -734,17 +972,40 @@ def render() -> None:
 
             with st.container(border=True):
                 _section_hdr("receipt_long", "Pending for Billing")
-                st.dataframe(
-                    bdf.style.map(lambda v: "color:#E87722;font-weight:700;", subset=["Status"]),
-                    use_container_width=True,
-                    hide_index=True,
+                st.caption("Click any row to view its Worklog Summary")
+                _bill_idx = render_drilldown_table(
+                    bdf,
+                    "wlr_bill_tbl",
                     column_config={
                         "Machine":    st.column_config.TextColumn("Machine",    width="medium"),
                         "Serial No.": st.column_config.TextColumn("Serial No.", width="small"),
                         "Month":      st.column_config.TextColumn("Month",      width="small"),
                         "Status":     st.column_config.TextColumn("Status",     width="small"),
                     },
+                    style_fn=lambda s: s.apply(
+                        lambda col: (
+                            ["color:#E87722;font-weight:700;"] * len(col)
+                            if col.name == "Status" else [""] * len(col)
+                        ),
+                        axis=0,
+                    ),
                 )
+
+            # Popup on row click — opens on first click; "Re-open" button after dismiss
+            _prev_bill_idx = st.session_state.get("_wlr_prev_bill_idx")
+            if _bill_idx is not None and _bill_idx < len(billing_display):
+                _br   = billing_display[_bill_idx]
+                _wl   = wl_lookup.get((_br["_wo_id"], _br["_machine_id"], _br["Month"]))
+                _mach = mach_map.get(_br["_machine_id"], {})
+                if _bill_idx != _prev_bill_idx:
+                    st.session_state["_wlr_prev_bill_idx"] = _bill_idx
+                    _show_wl_summary(_br, _wl, _mach)
+                else:
+                    if st.button("📋 View WL Summary", key="wlr_bill_reopen",
+                                 help="Re-open the summary for the selected row"):
+                        _show_wl_summary(_br, _wl, _mach)
+            elif _bill_idx is None:
+                st.session_state["_wlr_prev_bill_idx"] = None
 
             b1, b2 = st.columns(2)
             b1.metric("Worklogs Pending Billing", len(billing_display))
