@@ -314,7 +314,7 @@ def _build_worklog_schedules_html(selected_items: list[dict]) -> str:
 
 _CSS = """
 <style>
-@page{size:A4;margin:12mm 10mm;}
+@page{size:A4;margin:12mm 12mm;}
 @media print{
   .no-print{display:none!important;}
   body{background:none!important;padding:0!important;}
@@ -324,7 +324,7 @@ _CSS = """
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:Arial,Helvetica,sans-serif;font-size:8.5pt;color:#111;
      background:#ddd;padding:16px;}
-.wrapper{width:190mm;margin:0 auto;background:#fff;border:1.5px solid #333;}
+.wrapper{width:186mm;margin:0 auto;background:#fff;border:1.5px solid #333;}
 .wrapper.no-border{border:none;}
 /* header */
 .hdr{display:flex;align-items:stretch;border-bottom:1.5px solid #333;}
