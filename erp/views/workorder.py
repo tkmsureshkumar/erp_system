@@ -1268,12 +1268,14 @@ def render() -> None:
                                     st.session_state["_wo_mode"]       = "edit"
                                     st.session_state["_wo_sel_id"]     = new_id
                                     st.session_state["_editing_wo_id"] = None
-                            # Mark every allocated machine as Reserved
+                            # Mark allocated machines as Reserved, but never downgrade On Rent
                             for row in valid_rows:
                                 mid = row.get("machine_id") or label_to_id.get(row.get("machine_label", ""))
                                 if mid:
                                     try:
-                                        sb.update_machine(mid, {"operational_status": "Reserved"})
+                                        _cur_status = machines_by_id.get(mid, {}).get("operational_status", "")
+                                        if _cur_status != "On Rent":
+                                            sb.update_machine(mid, {"operational_status": "Reserved"})
                                     except Exception:
                                         pass
                             work_orders = fetch_work_orders()
