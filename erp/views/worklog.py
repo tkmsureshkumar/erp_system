@@ -124,7 +124,19 @@ def _recalc_df(
         st_ = _parse_time(row.get("Start Time"))
         et_ = _parse_time(row.get("End Time"))
         raw_net   = _net_hours(st_, et_)
-        is_sunday = str(row.get("Weekday", "")) == "Sunday"
+        _weekday_str = str(row.get("Weekday") or "")
+        is_sunday    = _weekday_str == "Sunday"
+        if not is_sunday:
+            # Fallback: derive from Date — survives Arrow/Styler round-trips intact
+            _dv = row.get("Date")
+            if _dv is not None and not _safe_isnan(_dv):
+                try:
+                    if isinstance(_dv, str):
+                        is_sunday = date.fromisoformat(_dv).strftime("%A") == "Sunday"
+                    elif hasattr(_dv, "strftime"):
+                        is_sunday = _dv.strftime("%A") == "Sunday"
+                except Exception:
+                    pass
 
         # 00:00 / 00:00 means "no entry" — clear derived columns and skip.
         _zero = time(0, 0)
