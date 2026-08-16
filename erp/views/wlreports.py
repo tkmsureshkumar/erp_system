@@ -128,6 +128,25 @@ def _months_range(start: date, end: date, max_months: int = 24):
         cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
 
 
+def _billing_due_date(yr: int, mo: int, mc_row: dict) -> date:
+    """Return the first day on which a billing-month worklog becomes past-due.
+
+    Calendar Month  → 1st of the following month  (Aug → Sep 1)
+    Custom cycle    → cycle_start_day of the following month (16th–15th: Jul → Aug 16)
+    """
+    billing_cycle = (mc_row.get("billing_cycle") or "Calendar Month")
+    start_day = 1
+    if billing_cycle == "Custom":
+        _raw = mc_row.get("billing_cycle_start_date")
+        if _raw:
+            try:
+                start_day = int(str(_raw).split("-")[2])
+            except Exception:
+                start_day = 1
+    next_yr, next_mo = (yr + 1, 1) if mo == 12 else (yr, mo + 1)
+    return date(next_yr, next_mo, start_day)
+
+
 def _kpi_card(icon: str, label: str, value: int | str,
               sub: str = "", accent: str = "#2563EB") -> str:
     return (
@@ -524,7 +543,9 @@ def render() -> None:
                     }
 
                     if status in ("Missing", "Draft"):
-                        pending_rows.append(row)
+                        _due = _billing_due_date(yr, mo, mc_row)
+                        if today >= _due:
+                            pending_rows.append(row)
                     elif status == "Invoiced":
                         pass  # exclude from all lists — already billed
                     else:
