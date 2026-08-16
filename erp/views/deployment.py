@@ -327,7 +327,11 @@ def render() -> None:
             return True
         return machine_site_id == _wo_site_id
 
-    filtered_mc_rows = [mr for mr in mc_rows if _location_matches_site(mr.get("machine_id", ""))]
+    filtered_mc_rows = [
+        mr for mr in mc_rows
+        if _location_matches_site(mr.get("machine_id", ""))
+        and machine_status_map.get(str(mr.get("machine_id") or ""), "") != "Sold"
+    ]
     excluded_mc_rows = [mr for mr in mc_rows if not _location_matches_site(mr.get("machine_id", ""))]
 
     # Parse saved deployment machine rows (used by both modes)

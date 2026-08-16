@@ -736,6 +736,8 @@ def render() -> None:
                     unsafe_allow_html=True,
                 )
 
+            _edit_locked = False  # overridden inside tab_edit for Sold machines
+
             # ── TABS ──────────────────────────────────────────────────────────
             tab_overview, tab_edit, tab_hist, tab_docs = st.tabs([
                 "📋 Overview",
@@ -844,6 +846,25 @@ def render() -> None:
 
             # ── Tab 2: Edit Details ───────────────────────────────────────────
             with tab_edit:
+                # Sold machines are read-only unless the user is an Admin
+                _is_sold_machine = (
+                    mode == "edit"
+                    and selected_machine is not None
+                    and selected_machine.get("operational_status") == "Sold"
+                )
+                try:
+                    from .. import auth as _auth
+                    _user_is_admin = _auth.is_admin()
+                except Exception:
+                    _user_is_admin = False
+
+                _edit_locked = _is_sold_machine and not _user_is_admin
+                if _edit_locked:
+                    st.warning(
+                        "⚠️ This machine has been **Sold**. Machine details are read-only. "
+                        "Contact an Admin to make corrections.",
+                        icon="🔒",
+                    )
 
                 # Machine Type DDL — drives asset code preview
                 machine_type = st.selectbox(
@@ -998,6 +1019,7 @@ def render() -> None:
                     type="primary",
                     use_container_width=True,
                     key="mach_save_btn",
+                    disabled=_edit_locked,
                 )
             with sv2:
                 if st.button("Cancel", use_container_width=True, key="mach_cancel_btn"):

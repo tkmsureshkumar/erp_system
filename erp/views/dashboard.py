@@ -371,11 +371,11 @@ def render() -> None:
     cust_map = {c["id"]: c.get("customer_name", "—") for c in customers_list if c.get("id")}
 
     # ── Fleet splits (Owned vs Cross Rental / Leased) ────────────────────────
-    owned_machines = [m for m in machines if m.get("ownership", "Owned") != "Leased"]
-    cross_machines = [m for m in machines if m.get("ownership") == "Leased"]
+    owned_machines = [m for m in machines if m.get("ownership", "Owned") != "Leased" and m.get("operational_status") != "Sold"]
+    cross_machines = [m for m in machines if m.get("ownership") == "Leased"           and m.get("operational_status") != "Sold"]
     total_owned    = len(owned_machines)
     total_cross    = len(cross_machines)
-    total_all      = len(machines)
+    total_all      = len([m for m in machines if m.get("operational_status") != "Sold"])
     owned_ids      = {m["id"] for m in owned_machines if m.get("id")}
     leased_ids     = {m["id"] for m in cross_machines if m.get("id")}
 

@@ -773,7 +773,7 @@ def render() -> None:
             pass
     machine_opts = [""] + sorted([
         lbl for mid, lbl in id_to_label.items()
-        if machines_by_id.get(mid, {}).get("operational_status") != "Reserved"
+        if machines_by_id.get(mid, {}).get("operational_status") not in ("Reserved", "Sold")
         or mid in current_wo_machine_ids
     ])
 

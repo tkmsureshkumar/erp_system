@@ -31,6 +31,7 @@ from erp.views import (
     login,
     machinecompliance,
     machinemovement,
+    machinesale,
     machinehistory,
     wlreports,
     wldetailreport,
@@ -754,6 +755,7 @@ _SIDEBAR_ITEMS = [
     ("workorders",        "assignment",              "Create Work Order", "WORK ORDERS",  None),
     ("deployments",       "local_shipping",          "Start Billing",     "WORK ORDERS",  None),
     ("closeworkorder",    "lock",                    "Close Billing",     "WORK ORDERS",  None),
+    ("machinesale",       "sell",                    "Machine Sale",      "WORK ORDERS",  None),
     # ── Operations ────────────────────────────────────────────────────────────
     ("machinemovement",   "move_up",                 "Machine Move",      "OPERATIONS",   None),
     ("worklog",           "edit_note",               "Work Log",          "OPERATIONS",   None),
@@ -978,6 +980,12 @@ elif page == "deployments":
 elif page == "machinecompliance":
     if auth.has_page_access("machinecompliance"):
         machinecompliance.render()
+    else:
+        _access_denied()
+
+elif page == "machinesale":
+    if auth.has_page_access("machinesale"):
+        machinesale.render()
     else:
         _access_denied()
 

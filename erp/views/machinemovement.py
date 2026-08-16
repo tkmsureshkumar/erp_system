@@ -750,6 +750,10 @@ def render() -> None:
     # ── Business rule enforcement ─────────────────────────────────────────────
     op_status = selected_machine.get("operational_status", "")
 
+    if op_status == "Sold":
+        st.error("This machine has been **Sold** and cannot be moved.", icon="🚫")
+        return
+
     if op_status == "On Rent":
         st.error("This machine is currently **On Rent** and cannot be moved.", icon="🚫")
         return

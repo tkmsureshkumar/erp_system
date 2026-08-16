@@ -23,4 +23,5 @@ __all__ = [
     "workorder",
     "invoice",
     "machinecompliance",
+    "machinesale",
 ]

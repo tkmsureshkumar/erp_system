@@ -368,12 +368,13 @@ def render() -> None:
     prev_first = prev_last.replace(day=1)
     ytd_first  = today.replace(month=1, day=1)
 
-    # ── Live fleet status counts ──────────────────────────────────────────────
-    n_total     = len(machines)
-    n_on_rent   = sum(1 for m in machines if m.get("operational_status") == "On Rent")
-    n_available = sum(1 for m in machines if m.get("operational_status") == "Available")
-    n_reserved  = sum(1 for m in machines if m.get("operational_status") == "Reserved")
-    n_transit   = sum(1 for m in machines
+    # ── Live fleet status counts (active fleet only — excludes Sold) ─────────
+    active_machines = [m for m in machines if m.get("operational_status") != "Sold"]
+    n_total     = len(active_machines)
+    n_on_rent   = sum(1 for m in active_machines if m.get("operational_status") == "On Rent")
+    n_available = sum(1 for m in active_machines if m.get("operational_status") == "Available")
+    n_reserved  = sum(1 for m in active_machines if m.get("operational_status") == "Reserved")
+    n_transit   = sum(1 for m in active_machines
                       if m.get("operational_status") in ("In Transit", "Mobilizing", "Demobilizing"))
     n_sold      = sum(1 for m in machines if m.get("operational_status") == "Sold")
 

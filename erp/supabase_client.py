@@ -1123,6 +1123,57 @@ class SupabaseClient:
         except Exception:
             return 0
 
+    # ── Machine Sales ─────────────────────────────────────────────────────────
+
+    def list_machine_sales(self) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("machine_sales")
+            .select("*")
+            .order("sale_date", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        return data if isinstance(data, list) else []
+
+    def get_machine_sale(self, machine_id: str) -> Dict[str, Any] | None:
+        resp = (
+            self.client.table("machine_sales")
+            .select("*")
+            .eq("machine_id", machine_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (
+            resp.get("data") if isinstance(resp, dict) else None
+        )
+        if isinstance(data, list) and data:
+            return data[0]
+        return None
+
+    def insert_machine_sale(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.admin_client.table("machine_sales").insert(payload).execute()
+        data  = resp.data  if hasattr(resp, "data")  else (resp.get("data")  if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return (data[0] if isinstance(data, list) and data else data) or {}
+
+    def update_machine_sale(self, sale_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = (
+            self.admin_client.table("machine_sales")
+            .update(payload)
+            .eq("id", sale_id)
+            .execute()
+        )
+        data  = resp.data  if hasattr(resp, "data")  else (resp.get("data")  if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return (data[0] if isinstance(data, list) and data else data) or {}
+
     # ── Document attachments ───────────────────────────────────────────────────
 
     _DOCUMENTS_BUCKET = "erp-documents"

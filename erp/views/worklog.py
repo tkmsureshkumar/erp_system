@@ -1132,10 +1132,21 @@ def render() -> None:
             st.warning(f"Could not load operators: {exc}")
             return []
 
-    work_orders = fetch_work_orders()
-    customers   = fetch_customers()
-    sites       = fetch_sites()
-    operators   = fetch_operators()
+    def fetch_machines() -> list[dict]:
+        try:
+            return sb.list_machines()
+        except Exception:
+            return []
+
+    work_orders  = fetch_work_orders()
+    customers    = fetch_customers()
+    sites        = fetch_sites()
+    operators    = fetch_operators()
+    _all_machines = fetch_machines()
+    _machine_status_by_id = {
+        str(m.get("id") or ""): m.get("operational_status", "")
+        for m in _all_machines if m.get("id")
+    }
 
     customer_map   = {c.get("id"): c for c in customers if c.get("id")}
     site_map       = {s.get("id"): s for s in sites     if s.get("id")}
@@ -1874,6 +1885,12 @@ def render() -> None:
             st.session_state.pop(f"sched_data_{base_key}{sfx}", None)
         if base_key_s2:
             st.session_state.pop(f"sched_data_{base_key_s2}", None)
+
+    # ── Sold machine guard ─────────────────────────────────────────────────────
+    _sel_mid_str = str(selected_machine.get("machine_id") or machine_idx)
+    if _machine_status_by_id.get(_sel_mid_str) == "Sold":
+        st.error("This machine has been **Sold** and no new worklogs can be created or modified.", icon="🚫")
+        return
 
     # ── Save Draft ─────────────────────────────────────────────────────────────
     with _btn_draft:
