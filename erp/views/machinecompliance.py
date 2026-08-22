@@ -24,6 +24,28 @@ _LEGACY_COL = {
 }
 
 
+# ── Operational status badge ───────────────────────────────────────────────────
+
+_OP_STATUS_COLORS: dict[str, tuple[str, str]] = {
+    "On Rent":    ("#DCFCE7", "#166534"),
+    "Available":  ("#DBEAFE", "#1E40AF"),
+    "Reserved":   ("#FEF3C7", "#92400E"),
+    "Breakdown":  ("#FEE2E2", "#991B1B"),
+    "Idle":       ("#F1F5F9", "#6B7280"),
+    "In Transit": ("#FFEDD5", "#C2410C"),
+    "Sold":       ("#F3F4F6", "#374151"),
+}
+
+
+def _op_status_chip(status: str | None) -> str:
+    label = status or "Unknown"
+    bg, fg = _OP_STATUS_COLORS.get(label, ("#F1F5F9", "#6B7280"))
+    return (
+        f"<span style='background:{bg};color:{fg};padding:2px 10px;border-radius:12px;"
+        f"font-size:11px;font-weight:700;white-space:nowrap;'>{label}</span>"
+    )
+
+
 # ── Status helpers ─────────────────────────────────────────────────────────────
 
 def _status(expiry_val) -> tuple[str, str, str]:
@@ -111,20 +133,21 @@ def _build_export_df(machines: list[dict], records_by_machine: dict) -> pd.DataF
 
         exps = [_machine_expiry(m, latest, ct) for ct in _TYPES_EXPORT]
         rows.append({
-            "Asset Code":       m.get("asset_code", ""),
-            "Machine Type":     m.get("machine_type", ""),
-            "Make":             m.get("make", ""),
-            "Model":            m.get("model", ""),
-            "Serial Number":    m.get("serial_number", ""),
-            "TPI Expiry":       _exp("TPI"),
-            "TPI Status":       _st("TPI"),
-            "PUC Expiry":       _exp("PUC"),
-            "PUC Status":       _st("PUC"),
-            "Form 11 Expiry":   _exp("Form 11"),
-            "Form 11 Status":   _st("Form 11"),
-            "Insurance Expiry": _exp("Insurance"),
-            "Insurance Status": _st("Insurance"),
-            "Overall Status":   _worst_status(exps)[0],
+            "Asset Code":         m.get("asset_code", ""),
+            "Machine Type":       m.get("machine_type", ""),
+            "Make":               m.get("make", ""),
+            "Model":              m.get("model", ""),
+            "Serial Number":      m.get("serial_number", ""),
+            "Operational Status": m.get("operational_status", ""),
+            "TPI Expiry":         _exp("TPI"),
+            "TPI Status":         _st("TPI"),
+            "PUC Expiry":         _exp("PUC"),
+            "PUC Status":         _st("PUC"),
+            "Form 11 Expiry":     _exp("Form 11"),
+            "Form 11 Status":     _st("Form 11"),
+            "Insurance Expiry":   _exp("Insurance"),
+            "Insurance Status":   _st("Insurance"),
+            "Overall Status":     _worst_status(exps)[0],
         })
     return pd.DataFrame(rows)
 
@@ -161,12 +184,16 @@ def _build_pdf_html(machines: list[dict], records_by_machine: dict, today: date)
                 f"font-size:11px;font-weight:600;'>{_fmt(v)}</td>"
             )
 
+        op_status  = m.get("operational_status") or "—"
+        opbg, opfg = _OP_STATUS_COLORS.get(op_status, ("#F1F5F9", "#6B7280"))
         rows_html += (
             f"<tr>"
             f"<td><strong>{m.get('asset_code','—')}</strong>"
             f"<br><span style='color:#666;font-size:11px;'>{m.get('machine_type','')}</span></td>"
             f"<td>{make_model}"
             f"<br><span style='color:#666;font-size:11px;'>S/N: {serial}</span></td>"
+            f"<td style='background:{opbg};color:{opfg};text-align:center;"
+            f"font-size:11px;font-weight:600;'>{op_status}</td>"
             f"<td style='background:{wbg};color:{wfg};text-align:center;"
             f"font-size:11px;font-weight:700;'>{wlbl}</td>"
             f"{cells}</tr>"
@@ -199,6 +226,7 @@ def _build_pdf_html(machines: list[dict], records_by_machine: dict, today: date)
 <thead><tr>
   <th>Asset / Type</th>
   <th>Make / Model / S/N</th>
+  <th>Op. Status</th>
   <th>Overall</th>
   {"".join(f"<th>{ct}</th>" for ct in _TYPES_EXPORT)}
 </tr></thead>
@@ -274,7 +302,7 @@ def _render_overview(
     st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
     # Filters
-    fc1, fc2, _ = st.columns([2, 2, 4])
+    fc1, fc2, fc3, _ = st.columns([2, 2, 2, 2])
     with fc1:
         filter_status = st.multiselect(
             "Compliance Status", ["Overdue", "Expiring Soon", "Valid", "Not Set"],
@@ -283,6 +311,9 @@ def _render_overview(
     with fc2:
         machine_types = sorted({m.get("machine_type", "") for m in machines if m.get("machine_type")})
         filter_type = st.multiselect("Machine Type", machine_types, key="ov_filter_type", placeholder="All")
+    with fc3:
+        op_statuses = sorted({m.get("operational_status", "") for m in machines if m.get("operational_status")})
+        filter_op_status = st.multiselect("Op. Status", op_statuses, key="ov_filter_op_status", placeholder="All")
 
     _TYPES_OVERVIEW = ["TPI", "PUC", "Form 11", "Insurance"]
 
@@ -295,6 +326,8 @@ def _render_overview(
         filtered = [m for m in filtered if _row_worst(m)[0] in filter_status]
     if filter_type:
         filtered = [m for m in filtered if m.get("machine_type") in filter_type]
+    if filter_op_status:
+        filtered = [m for m in filtered if m.get("operational_status") in filter_op_status]
     _order = {"Overdue": 0, "Expiring Soon": 1, "Valid": 2, "Not Set": 3}
     filtered.sort(key=lambda m: _order.get(_row_worst(m)[0], 4))
 
@@ -379,6 +412,7 @@ def _render_overview(
         serial_no  = m.get("serial_number") or "—"
         make_model = f"{m.get('make','') or ''} {m.get('model','') or ''}".strip() or "—"
         client_name, site_name = machine_deploy.get(str(m.get("id") or ""), ("—", "—"))
+        op_status  = m.get("operational_status") or "—"
         rows_html += (
             f"<tr style='background:{bg_row};border-bottom:1px solid #F1F5F9;'>"
             f"<td style='padding:8px 12px;'>"
@@ -390,6 +424,7 @@ def _render_overview(
             f"<td style='padding:8px 12px;'>"
             f"<div style='font-size:12px;color:#374151;'>{client_name}</div>"
             f"<div style='font-size:11px;color:#9CA3AF;margin-top:1px;'>{site_name}</div></td>"
+            f"<td style='padding:8px 12px;'>{_op_status_chip(op_status)}</td>"
             f"<td style='padding:8px 12px;'>{_status_chip(wlbl,wbg,wfg)}</td>"
             + "".join(_exp_cell(_get_exp(m, ct)) for ct in _TYPES_OVERVIEW)
             + "</tr>"
@@ -403,6 +438,7 @@ def _render_overview(
         f"<th style='{hs}border-radius:10px 0 0 0;'>Asset / Type</th>"
         f"<th style='{hs}'>Make / Model / S/N</th>"
         f"<th style='{hs}'>Client / Site</th>"
+        f"<th style='{hs}'>Op. Status</th>"
         f"<th style='{hs}'>Overall</th>"
         + "".join(f"<th style='{hs}'>{ct}</th>" for ct in _TYPES_OVERVIEW)
         + "</tr></thead>"

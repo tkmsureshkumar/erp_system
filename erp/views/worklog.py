@@ -1175,19 +1175,44 @@ def render() -> None:
         key="wl_selected_customer_id",
     )
 
-    # Reset WO selection whenever the customer changes.
+    # Reset site + WO whenever the customer changes.
     if st.session_state.get("_wl_prev_customer") != selected_customer_id:
         st.session_state["_wl_prev_customer"] = selected_customer_id
-        st.session_state["wl_selected_wo_id"] = ""
+        st.session_state["wl_selected_site_id"] = ""
+        st.session_state["wl_selected_wo_id"]  = ""
 
     if not selected_customer_id:
         st.info("Select a customer above to continue.")
         return
 
-    # ── Work order selector (filtered by selected customer) ────────────────────
+    # ── Site selector (filtered by selected customer) ──────────────────────────
+    _sids_for_customer = sorted(
+        {wo.get("site_id") for wo in work_orders
+         if wo.get("customer_id") == selected_customer_id and wo.get("site_id")},
+        key=lambda sid: site_map.get(sid, {}).get("site_name", ""),
+    )
+    selected_site_id = st.selectbox(
+        "Select Site",
+        options=[""] + _sids_for_customer,
+        format_func=lambda sid: "Select a site" if not sid
+            else site_map.get(sid, {}).get("site_name", sid),
+        key="wl_selected_site_id",
+    )
+
+    # Reset WO whenever the site changes.
+    if st.session_state.get("_wl_prev_site") != selected_site_id:
+        st.session_state["_wl_prev_site"]      = selected_site_id
+        st.session_state["wl_selected_wo_id"]  = ""
+
+    if not selected_site_id:
+        st.info("Select a site above to continue.")
+        return
+
+    # ── Work order selector (filtered by customer + site) ──────────────────────
     _filtered_wo_ids = sorted(
         [wid for wid, wo in wo_map.items()
-         if wo.get("customer_id") == selected_customer_id],
+         if wo.get("customer_id") == selected_customer_id
+         and wo.get("site_id") == selected_site_id],
         key=lambda wid: wo_map[wid].get("wo_number", ""),
     )
     selected_wo_id = st.selectbox(

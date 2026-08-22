@@ -7,12 +7,14 @@ Supports:
   • Multiple file uploads in one go
   • PDF merge: combine 2+ PDFs into a single file before uploading
     (useful for 30 daily logsheets → one combined PDF)
+  • Inline document viewer (PDF embedded, images displayed, Word opened in browser)
 """
 from __future__ import annotations
 
 import io
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 _ALLOWED_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "webp", "doc", "docx"]
 
@@ -87,6 +89,64 @@ def _merge_pdfs(files) -> bytes:
     return buf.getvalue()
 
 
+# ── Inline document viewer dialog ─────────────────────────────────────────────
+
+@st.dialog("Document Preview", width="large")
+def _doc_preview_dialog() -> None:
+    info = st.session_state.get("_doc_preview_info", {})
+    signed_url: str = info.get("url", "")
+    fname: str      = info.get("fname", "Document")
+    ftype: str      = info.get("ftype", "")
+
+    if not signed_url:
+        st.error("Preview URL is unavailable.")
+        return
+
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:600;color:#111827;"
+        f"margin-bottom:12px;word-break:break-all;'>{fname}</div>",
+        unsafe_allow_html=True,
+    )
+
+    if ftype == "image":
+        st.image(signed_url, use_container_width=True)
+
+    elif ftype == "pdf":
+        # Embed PDF via iframe — works in all modern browsers
+        components.html(
+            f"""
+            <iframe
+              src="{signed_url}"
+              width="100%"
+              height="750"
+              style="border:none;border-radius:6px;"
+              title="{fname}">
+              <p>Your browser does not support inline PDF viewing.
+                 <a href="{signed_url}" target="_blank">Open PDF</a>
+              </p>
+            </iframe>
+            """,
+            height=760,
+            scrolling=False,
+        )
+
+    else:
+        # Word / unknown — can't embed natively; open in new tab
+        st.info(
+            "This file type cannot be previewed inline. "
+            "Click the button below to open it in your browser.",
+            icon="ℹ️",
+        )
+
+    st.link_button(
+        "Open in new tab",
+        signed_url,
+        use_container_width=True,
+    )
+
+
+# ── Panel render ───────────────────────────────────────────────────────────────
+
 def render_document_panel(
     sb,
     record_type: str,
@@ -96,7 +156,7 @@ def render_document_panel(
 ) -> None:
     """Render upload widget + document list for any record.
 
-    Supports multiple file selection and optional PDF merge.
+    Supports multiple file selection, optional PDF merge, and inline preview.
     """
     _inject_css()
 
@@ -185,7 +245,6 @@ def render_document_panel(
         # ── Handle upload ──────────────────────────────────────────────────────
         if attach and up_files:
             if do_merge and _multi_pdf:
-                # Merge all PDFs into one, upload as single file
                 try:
                     merged_bytes = _merge_pdfs(up_files)
                     sb.upload_document(
@@ -205,7 +264,6 @@ def render_document_panel(
                 except Exception as exc:
                     st.error(f"Merge failed: {exc}")
             else:
-                # Upload each file individually
                 errors: list[str] = []
                 for f in up_files:
                     try:
@@ -262,7 +320,7 @@ def _render_row(sb, doc: dict, key_prefix: str) -> None:
     ftype   = doc.get("file_type", "")
     size_kb = doc.get("file_size_kb") or 0
     remarks = doc.get("remarks") or ""
-    date    = (doc.get("uploaded_at") or "")[:10]
+    uploaded_at = (doc.get("uploaded_at") or "")[:10]
     spath   = doc.get("storage_path", "")
 
     icon  = _TYPE_ICON.get(ftype, "insert_drive_file")
@@ -270,10 +328,18 @@ def _render_row(sb, doc: dict, key_prefix: str) -> None:
     meta  = " · ".join(filter(None, [
         ftype.upper() if ftype else "",
         f"{size_kb} KB" if size_kb else "",
-        date,
+        uploaded_at,
     ]))
 
-    info_col, dl_col, del_col = st.columns([6, 2, 1])
+    # Fetch signed URL once — used for both View and Download
+    signed: str = ""
+    if spath:
+        try:
+            signed = sb.get_signed_url(spath) or ""
+        except Exception:
+            signed = ""
+
+    info_col, act_col, del_col = st.columns([6, 3, 1])
 
     with info_col:
         st.markdown(
@@ -288,14 +354,28 @@ def _render_row(sb, doc: dict, key_prefix: str) -> None:
             unsafe_allow_html=True,
         )
 
-    with dl_col:
-        if spath:
-            try:
-                signed = sb.get_signed_url(spath)
-                if signed:
-                    st.link_button("Download", signed, use_container_width=True)
-            except Exception:
-                st.caption("URL unavailable")
+    with act_col:
+        if signed:
+            v_col, d_col = st.columns(2)
+            with v_col:
+                if st.button(
+                    "View",
+                    key=f"_doc_view_{key_prefix}_{doc_id}",
+                    use_container_width=True,
+                    help="Preview document inside the app",
+                ):
+                    st.session_state["_doc_preview_info"] = {
+                        "url":   signed,
+                        "fname": fname,
+                        "ftype": ftype,
+                    }
+                    _doc_preview_dialog()
+            with d_col:
+                st.link_button(
+                    "Download",
+                    signed,
+                    use_container_width=True,
+                )
 
     with del_col:
         if st.button(
