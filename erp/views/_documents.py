@@ -2,8 +2,15 @@
 erp/views/_documents.py
 Reusable document-attachment panel.
 Drop into any module: render_document_panel(sb, record_type, record_id).
+
+Supports:
+  • Multiple file uploads in one go
+  • PDF merge: combine 2+ PDFs into a single file before uploading
+    (useful for 30 daily logsheets → one combined PDF)
 """
 from __future__ import annotations
+
+import io
 
 import streamlit as st
 
@@ -41,6 +48,11 @@ _CSS = """
     text-align: center; padding: 22px 0;
     color: #9CA3AF; font-size: 12px;
 }
+.doc-merge-hint {
+    font-size: 11px; color: #6B7280;
+    background: #FFF7ED; border: 1px solid #FED7AA;
+    border-radius: 6px; padding: 7px 11px; margin-top: 6px;
+}
 </style>
 """
 
@@ -53,6 +65,28 @@ def _inject_css(key: str = "doc_css") -> None:
         _CSS_INJECTED.add(key)
 
 
+def _merge_pdfs(files) -> bytes:
+    """Merge a list of UploadedFile PDF objects into a single PDF bytes object."""
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        raise RuntimeError(
+            "pypdf is not installed. Run: pip install pypdf>=4.0"
+        )
+
+    writer = PdfWriter()
+    for f in files:
+        raw = f.read()
+        reader = PdfReader(io.BytesIO(raw))
+        for page in reader.pages:
+            writer.add_page(page)
+        f.seek(0)  # reset so callers can re-read if needed
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
 def render_document_panel(
     sb,
     record_type: str,
@@ -60,28 +94,71 @@ def render_document_panel(
     key_prefix: str = "",
     uploaded_by: str = "",
 ) -> None:
-    """Render upload widget + document list for any record."""
+    """Render upload widget + document list for any record.
+
+    Supports multiple file selection and optional PDF merge.
+    """
     _inject_css()
 
     if not record_id:
         st.info("Save this record first to attach documents.", icon="ℹ️")
         return
 
-    # ── Upload ─────────────────────────────────────────────────────────────────
+    # ── Upload section ─────────────────────────────────────────────────────────
     with st.container(border=True):
         st.markdown(
             "<div class='doc-sec-hdr'>"
             "<span class='msr' style='font-size:14px;color:#E87722;'>attach_file</span>"
-            "Attach Document</div>",
+            "Attach Documents</div>",
             unsafe_allow_html=True,
         )
-        up_file = st.file_uploader(
-            "File",
+
+        up_files = st.file_uploader(
+            "Files",
             type=_ALLOWED_EXTENSIONS,
+            accept_multiple_files=True,
             key=f"_doc_up_{key_prefix}_{record_id}",
-            help="Accepted: PDF · Images (JPG, PNG, WebP) · Word (DOC, DOCX)",
+            help="Select one or more files. PDFs can be merged before uploading.",
             label_visibility="collapsed",
         )
+
+        # ── PDF merge option (shown only when 2+ PDFs are selected) ───────────
+        _all_pdfs  = bool(up_files) and all(
+            f.name.lower().endswith(".pdf") for f in up_files
+        )
+        _multi_pdf = _all_pdfs and len(up_files) >= 2
+
+        do_merge    = False
+        merged_name = "combined.pdf"
+
+        if _multi_pdf:
+            st.markdown(
+                "<div class='doc-merge-hint'>"
+                "📎 Multiple PDFs selected — you can combine them into one file "
+                "(e.g. 30 daily logsheets → one combined PDF)."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            merge_col, name_col = st.columns([1, 2])
+            with merge_col:
+                do_merge = st.checkbox(
+                    "Combine into one PDF",
+                    value=True,
+                    key=f"_doc_merge_{key_prefix}_{record_id}",
+                )
+            if do_merge:
+                with name_col:
+                    merged_name = st.text_input(
+                        "Merged filename",
+                        value="combined_logsheets.pdf",
+                        key=f"_doc_mname_{key_prefix}_{record_id}",
+                        label_visibility="collapsed",
+                        placeholder="combined_logsheets.pdf",
+                    )
+                    if merged_name and not merged_name.lower().endswith(".pdf"):
+                        merged_name += ".pdf"
+
+        # ── Remarks + Attach button ────────────────────────────────────────────
         rem_col, btn_col = st.columns([5, 1])
         with rem_col:
             remarks = st.text_input(
@@ -91,30 +168,69 @@ def render_document_panel(
                 label_visibility="collapsed",
             )
         with btn_col:
+            n_files  = len(up_files) if up_files else 0
+            btn_label = (
+                "Merge & Upload"  if (do_merge and _multi_pdf) else
+                f"Upload {n_files}" if n_files > 1 else
+                "Attach"
+            )
             attach = st.button(
-                "Attach",
+                btn_label,
                 key=f"_doc_attach_{key_prefix}_{record_id}",
                 use_container_width=True,
                 type="primary",
-                disabled=(up_file is None),
+                disabled=(n_files == 0),
             )
 
-        if attach and up_file:
-            try:
-                raw   = up_file.read()
-                sb.upload_document(
-                    record_type  = record_type,
-                    record_id    = record_id,
-                    file_bytes   = raw,
-                    file_name    = up_file.name,
-                    file_size_kb = max(1, len(raw) // 1024),
-                    remarks      = remarks.strip(),
-                    uploaded_by  = uploaded_by,
-                )
-                st.toast(f"'{up_file.name}' attached.", icon="✅")
+        # ── Handle upload ──────────────────────────────────────────────────────
+        if attach and up_files:
+            if do_merge and _multi_pdf:
+                # Merge all PDFs into one, upload as single file
+                try:
+                    merged_bytes = _merge_pdfs(up_files)
+                    sb.upload_document(
+                        record_type  = record_type,
+                        record_id    = record_id,
+                        file_bytes   = merged_bytes,
+                        file_name    = merged_name or "combined.pdf",
+                        file_size_kb = max(1, len(merged_bytes) // 1024),
+                        remarks      = remarks.strip() or f"Merged from {len(up_files)} PDFs",
+                        uploaded_by  = uploaded_by,
+                    )
+                    st.toast(
+                        f"{len(up_files)} PDFs merged into '{merged_name}' and uploaded.",
+                        icon="✅",
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Merge failed: {exc}")
+            else:
+                # Upload each file individually
+                errors: list[str] = []
+                for f in up_files:
+                    try:
+                        raw = f.read()
+                        sb.upload_document(
+                            record_type  = record_type,
+                            record_id    = record_id,
+                            file_bytes   = raw,
+                            file_name    = f.name,
+                            file_size_kb = max(1, len(raw) // 1024),
+                            remarks      = remarks.strip(),
+                            uploaded_by  = uploaded_by,
+                        )
+                    except Exception as exc:
+                        errors.append(f"{f.name}: {exc}")
+
+                if errors:
+                    st.error("Some uploads failed:\n" + "\n".join(errors))
+                else:
+                    count = len(up_files)
+                    st.toast(
+                        f"{count} file{'s' if count > 1 else ''} uploaded.",
+                        icon="✅",
+                    )
                 st.rerun()
-            except Exception as exc:
-                st.error(f"Upload failed: {exc}")
 
     # ── Document list ──────────────────────────────────────────────────────────
     try:
