@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import io
 
+import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 _ALLOWED_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "webp", "doc", "docx"]
 
@@ -89,6 +89,52 @@ def _merge_pdfs(files) -> bytes:
     return buf.getvalue()
 
 
+_MAX_PREVIEW_PAGES = 30
+
+
+def _render_pdf_pages(url: str) -> None:
+    """Fetch PDF and render each page as a PNG via PyMuPDF.
+
+    Renders entirely server-side — no iframe, no browser PDF engine — so
+    Edge's cross-origin iframe blocking cannot interfere.
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        st.warning(
+            "PDF preview requires PyMuPDF. Run: `pip install pymupdf>=1.24`",
+            icon="⚠️",
+        )
+        return
+
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+    except Exception as exc:
+        st.error(f"Could not download PDF for preview: {exc}")
+        return
+
+    try:
+        doc = pymupdf.Document(stream=resp.content, filetype="pdf")
+    except Exception as exc:
+        st.error(f"Could not open PDF: {exc}")
+        return
+
+    total = len(doc)
+    if total > _MAX_PREVIEW_PAGES:
+        st.info(
+            f"Showing first {_MAX_PREVIEW_PAGES} of {total} pages.",
+            icon="ℹ️",
+        )
+
+    for page_num in range(min(total, _MAX_PREVIEW_PAGES)):
+        page = doc[page_num]
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(1.8, 1.8))
+        st.image(pix.tobytes("png"), use_container_width=True)
+
+    doc.close()
+
+
 # ── Inline document viewer dialog ─────────────────────────────────────────────
 
 @st.dialog("Document Preview", width="large")
@@ -112,23 +158,9 @@ def _doc_preview_dialog() -> None:
         st.image(signed_url, use_container_width=True)
 
     elif ftype == "pdf":
-        # Embed PDF via iframe — works in all modern browsers
-        components.html(
-            f"""
-            <iframe
-              src="{signed_url}"
-              width="100%"
-              height="750"
-              style="border:none;border-radius:6px;"
-              title="{fname}">
-              <p>Your browser does not support inline PDF viewing.
-                 <a href="{signed_url}" target="_blank">Open PDF</a>
-              </p>
-            </iframe>
-            """,
-            height=760,
-            scrolling=False,
-        )
+        # Render pages server-side as images — no iframe, no browser PDF engine,
+        # so Edge's cross-origin iframe blocking cannot interfere.
+        _render_pdf_pages(signed_url)
 
     else:
         # Word / unknown — can't embed natively; open in new tab
