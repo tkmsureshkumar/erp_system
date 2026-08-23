@@ -13,9 +13,12 @@ from erp.supabase_client import SupabaseClient
 
 
 _LOGIN_CSS = """<style>
-/* ── Full-page dark gradient background ─────────────────────────────────── */
-.stApp {
-    background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%) !important;
+/* ── Full-page premium dark navy background ──────────────────────────────── */
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stAppViewBlockContainer"] {
+    background:
+        radial-gradient(ellipse 70% 55% at 15% 35%, rgba(37,99,235,.13) 0%, transparent 55%),
+        radial-gradient(ellipse 55% 40% at 85% 65%, rgba(232,119,34,.08) 0%, transparent 50%),
+        linear-gradient(160deg, #05090F 0%, #0B1526 45%, #081220 100%) !important;
     min-height: 100vh;
 }
 
@@ -28,78 +31,83 @@ header                     { visibility: hidden !important; }
 
 /* ── Page layout ─────────────────────────────────────────────────────────── */
 .block-container {
-    padding-top: 8vh !important;
+    padding-top   : 9vh !important;
     padding-bottom: 6vh !important;
-    max-width: 100% !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
+    max-width     : 100% !important;
+    padding-left  : 1rem !important;
+    padding-right : 1rem !important;
 }
 
-/* ── Login card: style the center column's vertical block ────────────────── */
-/* Covers both data-testid variants used across Streamlit versions.          */
+/* ── Login card ──────────────────────────────────────────────────────────── */
 [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"],
 [data-testid="stColumns"]         > [data-testid="column"]:nth-child(2) > [data-testid="stVerticalBlock"] {
-    background    : #ffffff;
-    border-radius : 16px;
-    padding       : 40px 36px 32px !important;
-    box-shadow    : 0 24px 64px rgba(0,0,0,.45), 0 4px 20px rgba(0,0,0,.22);
-    animation     : cs-fadeup .40s ease;
+    background    : #FFFFFF;
+    border-radius : 18px;
+    border-top    : 3px solid #E87722;
+    padding       : 38px 36px 32px !important;
+    box-shadow    : 0 40px 100px rgba(0,0,0,.60),
+                    0  8px  30px rgba(0,0,0,.35),
+                    0  0    0 1px rgba(255,255,255,.04);
+    animation     : cs-fadeup .45s cubic-bezier(.22,.68,0,1.2);
     max-width     : 420px;
     margin        : 0 auto;
 }
 
 /* ── Brand block ─────────────────────────────────────────────────────────── */
 .login-brand {
-    display     : flex;
-    align-items : center;
-    gap         : 14px;
-    margin-bottom: 28px;
+    display      : flex;
+    align-items  : center;
+    gap          : 14px;
+    margin-bottom: 26px;
 }
 .login-brand-icon {
     display         : inline-flex;
     align-items     : center;
     justify-content : center;
-    width           : 48px;
-    height          : 48px;
-    background      : linear-gradient(135deg, #E87722 0%, #f09040 100%);
+    width           : 46px;
+    height          : 46px;
+    background      : linear-gradient(145deg, #0D1B33 0%, #162440 100%);
     border-radius   : 12px;
-    font-size       : 26px;
-    color           : #fff;
+    font-size       : 24px;
+    color           : #E87722;
     flex-shrink     : 0;
-    box-shadow      : 0 4px 14px rgba(232,119,34,.40);
+    box-shadow      : 0 4px 16px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.07);
+    border          : 1px solid rgba(232,119,34,.25);
 }
 .login-brand-name {
-    font-size     : 17px;
+    font-size     : 16px;
     font-weight   : 800;
-    color         : #111827;
-    letter-spacing: 0.03em;
+    color         : #0D1B33;
+    letter-spacing: 0.02em;
     line-height   : 1.2;
 }
 .login-brand-sub {
-    font-size     : 11px;
-    color         : #9CA3AF;
-    letter-spacing: 0.10em;
+    font-size     : 10px;
+    color         : #94A3B8;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     margin-top    : 3px;
+    font-weight   : 600;
 }
 
 /* ── Heading + subtitle ──────────────────────────────────────────────────── */
 .login-heading {
-    font-size  : 22px;
+    font-size  : 21px;
     font-weight: 700;
-    color      : #111827;
-    margin     : 0 0 6px 0;
+    color      : #0D1B33;
+    margin     : 0 0 5px 0;
     line-height: 1.25;
+    letter-spacing: -0.01em;
 }
 .login-sub {
     font-size: 13px;
-    color    : #6B7280;
-    margin   : 0 0 22px 0;
+    color    : #64748B;
+    margin   : 0 0 20px 0;
 }
 .login-divider {
     border    : none;
-    border-top: 1px solid #E2EBF0;
-    margin    : 0 0 24px 0;
+    border-top: 1px solid #E8EDF5;
+    margin    : 0 0 22px 0;
 }
 
 /* ── Styled error card ───────────────────────────────────────────────────── */
@@ -119,45 +127,53 @@ header                     { visibility: hidden !important; }
 }
 .login-error-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
 
-/* ── Form submit button — orange brand ───────────────────────────────────── */
+/* ── Form submit button ──────────────────────────────────────────────────── */
 [data-testid="stFormSubmitButton"] > button {
-    background    : linear-gradient(135deg, #E87722 0%, #d4651a 100%) !important;
+    background    : linear-gradient(135deg, #E87722 0%, #C9611A 100%) !important;
     border        : none !important;
     color         : #fff !important;
     font-weight   : 700 !important;
-    font-size     : 15px !important;
-    letter-spacing: .02em !important;
+    font-size     : 14px !important;
+    letter-spacing: .04em !important;
+    text-transform: uppercase !important;
     border-radius : 10px !important;
     height        : 46px !important;
-    box-shadow    : 0 4px 14px rgba(232,119,34,.40) !important;
-    transition    : opacity .18s, transform .15s !important;
+    box-shadow    : 0 4px 18px rgba(232,119,34,.45), 0 1px 3px rgba(0,0,0,.20) !important;
+    transition    : opacity .18s, transform .15s, box-shadow .18s !important;
 }
-[data-testid="stFormSubmitButton"] > button:hover  { opacity: .90 !important; transform: translateY(-1px) !important; }
+[data-testid="stFormSubmitButton"] > button:hover {
+    opacity   : .92 !important;
+    transform : translateY(-1px) !important;
+    box-shadow: 0 8px 24px rgba(232,119,34,.50), 0 2px 6px rgba(0,0,0,.25) !important;
+}
 [data-testid="stFormSubmitButton"] > button:active { transform: translateY(0) !important; }
 
-/* ── Input focus ring in brand orange ────────────────────────────────────── */
+/* ── Input label styling ─────────────────────────────────────────────────── */
+[data-testid="stForm"] label p {
+    font-size  : 12px !important;
+    font-weight: 600 !important;
+    color      : #374151 !important;
+    letter-spacing: .04em !important;
+    text-transform: uppercase !important;
+}
+
+/* ── Input field styling ─────────────────────────────────────────────────── */
+[data-testid="stForm"] input {
+    background  : #F8FAFC !important;
+    border      : 1px solid #E2E8F0 !important;
+    border-radius: 9px !important;
+    font-size   : 14px !important;
+    color       : #0D1B33 !important;
+    transition  : border-color .15s, box-shadow .15s !important;
+}
 [data-testid="stForm"] input:focus {
+    background  : #FFFFFF !important;
     border-color: #E87722 !important;
-    box-shadow  : 0 0 0 3px rgba(232,119,34,.15) !important;
+    box-shadow  : 0 0 0 3px rgba(232,119,34,.18) !important;
     outline     : none !important;
 }
 
-/* ── Forgot-password link ────────────────────────────────────────────────── */
-.forgot-link {
-    text-align : right;
-    margin-top : -10px;
-    margin-bottom: 6px;
-    font-size  : 12px;
-}
-.forgot-link a {
-    color          : #E87722;
-    text-decoration: none;
-    font-weight    : 600;
-    cursor         : pointer;
-}
-.forgot-link a:hover { text-decoration: underline; }
-
-/* ── Style the Forgot/Back buttons as plain text links ───────────────────── */
+/* ── Forgot / Back buttons as text links ─────────────────────────────────── */
 [data-testid="stBaseButton-secondary"][kind="secondary"]:has(> p) {
     background : transparent !important;
     border     : none !important;
@@ -173,7 +189,6 @@ button[kind="secondary"][data-testid="stBaseButton-secondary"] {
     border     : none !important;
     box-shadow : none !important;
 }
-/* Specifically target the forgot / back buttons by key */
 div[data-testid="element-container"]:has(button#goto_reset),
 div[data-testid="element-container"]:has(button#back_to_login) {
     text-align: right;
@@ -198,22 +213,23 @@ div[data-testid="element-container"]:has(button#back_to_login) {
 /* ── Password hint ───────────────────────────────────────────────────────── */
 .pw-hint {
     font-size  : 11px;
-    color      : #9CA3AF;
+    color      : #94A3B8;
     margin-top : 4px;
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .login-footer {
     text-align    : center;
-    margin-top    : 28px;
+    margin-top    : 32px;
     font-size     : 11px;
-    color         : rgba(255,255,255,.30);
-    letter-spacing: .05em;
+    color         : rgba(255,255,255,.22);
+    letter-spacing: .08em;
+    text-transform: uppercase;
 }
 
-/* ── Fade-up animation (shared with rest of the design system) ───────────── */
+/* ── Fade-up animation ───────────────────────────────────────────────────── */
 @keyframes cs-fadeup {
-    from { opacity: 0; transform: translateY(14px); }
+    from { opacity: 0; transform: translateY(18px); }
     to   { opacity: 1; transform: translateY(0);    }
 }
 </style>"""
@@ -260,9 +276,17 @@ def render() -> None:
         st.markdown(
             """
             <div class="login-brand">
-              <div class="login-brand-icon">&#8679;</div>
+              <div class="login-brand-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                     xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 3L4 9v12h5v-7h6v7h5V9L12 3z"
+                        fill="#E87722" opacity=".9"/>
+                  <path d="M9 14h6M12 3v4" stroke="#E87722"
+                        stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+              </div>
               <div>
-                <div class="login-brand-name">ERP Platform</div>
+                <div class="login-brand-name">IRONLINE ACCESS</div>
                 <div class="login-brand-sub">Fleet Operations ERP</div>
               </div>
             </div>
