@@ -694,11 +694,40 @@ def render() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            cur_bm  = _billing_month_str(today.year, today.month)
-            display = [r for r in f_pending if r["Month"] == cur_bm]
+            # Show the most recently completed billing cycle.
+            # All rows in f_pending already satisfy today >= cycle_end + 1.
+            # The latest _date (date(yr, mo, 1)) identifies the just-closed period.
+            latest_date = max(r["_date"] for r in f_pending)
+            latest_bm   = _billing_month_str(latest_date.year, latest_date.month)
+            display     = [r for r in f_pending if r["Month"] == latest_bm]
+
+            # Compute cycle end date for the caption (cycle_end = due_date − 1 day)
+            _sample_mc  = display[0]["_mc_row"] if display else {}
+            _due        = _billing_due_date(latest_date.year, latest_date.month, _sample_mc)
+            _cycle_end  = _due - timedelta(days=1)
+            _cycle_start_day = int(
+                str(_sample_mc.get("billing_cycle_start_date") or "").split("-")[-1] or "1"
+            ) if (_sample_mc.get("billing_cycle") or "") == "Custom" else 1
+            # Reconstruct cycle start date for display
+            if _cycle_start_day > 1:
+                _cs_mo = latest_date.month
+                _cs_yr = latest_date.year
+                _cycle_start_disp = date(_cs_yr, _cs_mo, _cycle_start_day).strftime("%d %b %Y")
+            else:
+                _cycle_start_disp = latest_date.replace(day=1).strftime("%d %b %Y")
+            _cycle_end_disp = _cycle_end.strftime("%d %b %Y")
+
+            st.markdown(
+                f"<div style='font-size:12px;color:#6B7280;margin-bottom:8px;'>"
+                f"Showing pending worklogs for billing cycle: "
+                f"<strong>{_cycle_start_disp} → {_cycle_end_disp}</strong> "
+                f"(due from <strong>{_due.strftime('%d %b %Y')}</strong>)"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
             if not display:
-                st.info(f"No pending worklogs for {cur_bm}.")
+                st.info("No pending worklogs for the most recently completed billing cycle.")
             else:
                 _WL_COLS = ["Customer", "Site", "Machine", "Serial No.", "Month", "Status"]
                 pdf = pd.DataFrame([{k: r[k] for k in _WL_COLS} for r in display], columns=_WL_COLS)
