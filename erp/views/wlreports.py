@@ -694,17 +694,11 @@ def render() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            # Sub-filter: current month only toggle
-            show_all = st.checkbox(
-                "Show all months (including prior)",
-                value=False,
-                key="wlr_show_all",
-            )
             cur_bm  = _billing_month_str(today.year, today.month)
-            display = f_pending if show_all else [r for r in f_pending if r["Month"] == cur_bm]
+            display = [r for r in f_pending if r["Month"] == cur_bm]
 
-            if not display and not show_all:
-                st.info(f"No pending worklogs for {cur_bm}. Enable 'Show all months' to see prior months.")
+            if not display:
+                st.info(f"No pending worklogs for {cur_bm}.")
             else:
                 _WL_COLS = ["Customer", "Site", "Machine", "Serial No.", "Month", "Status"]
                 pdf = pd.DataFrame([{k: r[k] for k in _WL_COLS} for r in display], columns=_WL_COLS)
