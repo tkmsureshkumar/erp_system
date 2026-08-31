@@ -843,6 +843,13 @@ def render() -> None:
                     )
 
                     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+
+                    if any_releasable and not selected_mids:
+                        st.error(
+                            "Please select at least one machine to release before closing the Work Order.",
+                            icon="🚫",
+                        )
+
                     cl1, cl2, _ = st.columns([3, 2, 3])
 
                     _btn_disabled = any_releasable and not selected_mids
@@ -850,7 +857,7 @@ def render() -> None:
                         f"Release {len(selected_mids)} Machine"
                         f"{'s' if len(selected_mids) != 1 else ''}"
                         if selected_mids
-                        else ("Close Work Order" if not any_releasable else "Select machines above")
+                        else ("Close Work Order" if not any_releasable else "Select Machines to Release")
                     )
                     with cl1:
                         release_clicked = st.button(
@@ -908,6 +915,17 @@ def render() -> None:
                             )
 
                             if all_released or not any_releasable:
+                                # Ensure ALL machines in the WO are set to Available on close,
+                                # including those released via Deployment (billing_end_date set
+                                # there) whose operational_status was never updated.
+                                for mc in mc_list:
+                                    _mid = str(mc.get("machine_id") or "")
+                                    if _mid and _mid not in selected_mids:
+                                        try:
+                                            sb.update_machine(_mid, {"operational_status": "Available"})
+                                        except Exception:
+                                            pass
+
                                 wo_payload: dict = {"status": "Closed"}
                                 if closing_remarks and closing_remarks.strip():
                                     wo_payload["closing_remarks"] = closing_remarks.strip()
