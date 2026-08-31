@@ -1579,13 +1579,32 @@ def render() -> None:
         )
     except Exception:
         _wl_rec = {}
-    _is_db_draft = bool(_wl_rec.get("is_draft", False))
-    _is_locked   = bool(_wl_rec.get("id")) and not _is_db_draft
-    _wl_edit_key = f"_wl_edit_{selected_wo_id}_{_mkey}_{selected_month_num}_{selected_year}"
-    _is_editing  = _is_locked and st.session_state.get(_wl_edit_key, False)
+    _is_db_draft  = bool(_wl_rec.get("is_draft", False))
+    _is_locked    = bool(_wl_rec.get("id")) and not _is_db_draft
+    _is_invoiced  = bool(_wl_rec.get("invoiced", False))
+    _invoice_number = _wl_rec.get("invoice_number") or ""
+    _wl_edit_key  = f"_wl_edit_{selected_wo_id}_{_mkey}_{selected_month_num}_{selected_year}"
+    # Invoiced worklogs are permanently frozen — editing is not allowed even if
+    # the session state has the edit flag set from a prior navigation.
+    _is_editing   = _is_locked and not _is_invoiced and st.session_state.get(_wl_edit_key, False)
 
     # ── Status banners ─────────────────────────────────────────────────────────
-    if _is_editing:
+    if _is_invoiced:
+        st.markdown(
+            "<div style='background:#fdf2f8;border:1px solid #d946a8;border-radius:6px;"
+            "padding:10px 16px;margin:8px 0 12px;display:flex;align-items:center;gap:12px;'>"
+            "<span style='font-size:20px;flex-shrink:0;'>🧾</span>"
+            "<div>"
+            "<div style='font-size:13px;font-weight:700;color:#86198f;'>"
+            f"Invoice Generated — Work Log is Frozen</div>"
+            "<div style='font-size:12px;color:#a21caf;margin-top:2px;'>"
+            f"This work log has been invoiced"
+            + (f" under <strong>{_invoice_number}</strong>" if _invoice_number else "")
+            + ". It cannot be edited or deleted.</div>"
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
+    elif _is_editing:
         st.markdown(
             "<div style='background:#fff7ed;border:1px solid #f97316;border-radius:6px;"
             "padding:10px 16px;margin:8px 0 12px;display:flex;align-items:center;gap:12px;'>"
@@ -1843,6 +1862,14 @@ def render() -> None:
     # ── Actions for locked (submitted) worklogs ───────────────────────────────
     if _is_locked and not _is_editing:
         st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+        if _is_invoiced:
+            # Invoice has been raised — no edits or deletes permitted.
+            st.info(
+                f"This work log is linked to invoice **{_invoice_number or '(generated)'}** "
+                "and cannot be modified or deleted. Contact your accounts team if a correction is needed.",
+                icon="🔐",
+            )
+            return
         if not st.session_state.get(_wl_del_key):
             _act1, _act2, _ = st.columns([2, 2, 6])
             with _act1:
