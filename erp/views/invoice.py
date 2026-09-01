@@ -192,11 +192,34 @@ def _compute_billing(wl: dict, mc: dict) -> dict:
     }
 
 
-def _period_str(billing_month: str) -> str:
+def _period_str(billing_month: str, mc: dict | None = None) -> str:
     try:
         dt = datetime.strptime(billing_month.strip(), "%B %Y")
+        billing_cycle = (mc or {}).get("billing_cycle") or "Calendar Month"
+
+        if billing_cycle == "Custom":
+            _raw = (mc or {}).get("billing_cycle_start_date")
+            start_day = 1
+            if _raw:
+                try:
+                    start_day = int(str(_raw).split("-")[2])
+                except Exception:
+                    start_day = 1
+            if start_day > 1:
+                from datetime import date as _date, timedelta as _td
+                cycle_start = _date(dt.year, dt.month, start_day)
+                ny, nm = (dt.year + 1, 1) if dt.month == 12 else (dt.year, dt.month + 1)
+                max_next = calendar.monthrange(ny, nm)[1]
+                next_cycle_start = _date(ny, nm, min(start_day, max_next))
+                cycle_end = next_cycle_start - _td(days=1)
+                return (
+                    f"{cycle_start.day} {cycle_start.strftime('%b %Y')} to "
+                    f"{cycle_end.day} {cycle_end.strftime('%b %Y')}"
+                )
+
+        # Calendar Month (default)
         _, last = calendar.monthrange(dt.year, dt.month)
-        return f"{dt.day} {dt.strftime('%b %Y')} to {last} {dt.strftime('%b %Y')}"
+        return f"1 {dt.strftime('%b %Y')} to {last} {dt.strftime('%b %Y')}"
     except Exception:
         return billing_month
 
@@ -1623,7 +1646,7 @@ def render() -> None:
                     for wl in pending_wls:
                         bm      = wl.get("year", "—")
                         billing = _compute_billing(wl, mc)
-                        period  = _period_str(bm)
+                        period  = _period_str(bm, mc)
                         wl_key  = f"inv_wl_{sel_wo_id}_{mid}_{bm}"
                         if st.checkbox(
                             f"{bm} — ₹ {_fmt_inr(billing['net'])}", key=wl_key, value=True
