@@ -282,6 +282,8 @@ def _billing_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     # Compute OT Billing per row before aggregating (avoids needing OT Rate in groupby)
     working["_ot_bill_row"] = working["OT"] * working["OT Rate"]
+    # A day counts only if Net Time > 0
+    working["_is_working_day"] = (working["Net Time"].fillna(0) > 0).astype(int)
 
     grp = (
         working
@@ -291,8 +293,8 @@ def _billing_summary(df: pd.DataFrame) -> pd.DataFrame:
             dropna=False,
         )
         .agg(
-            Working_Days  = ("Net Time",      "count"),
-            Actual_Hours  = ("Net Time",      "sum"),
+            Working_Days  = ("_is_working_day", "sum"),
+            Actual_Hours  = ("Net Time",        "sum"),
             OT_Hours      = ("OT",            "sum"),
             Breakdown_Hrs = ("Breakdown Hrs", "sum"),
             OT_Billing    = ("_ot_bill_row",  "sum"),
