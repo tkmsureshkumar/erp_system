@@ -561,9 +561,12 @@ def _tab_payment_history() -> None:
         for o in operators
     }
 
-    all_payments = sb.list_advance_payments()
-    all_requests = {r["id"]: r for r in sb.list_advance_requests()}
-    batches      = {b["id"]: b for b in sb.list_advance_batches()}
+    all_payments  = sb.list_advance_payments()
+    all_reqs_list = sb.list_advance_requests()
+    all_requests  = {r["id"]: r for r in all_reqs_list}
+    batches       = {b["id"]: b for b in sb.list_advance_batches()}
+
+    st.caption(f"DB records — Payments: {len(all_payments)} | Requests: {len(all_reqs_list)} | Batches: {len(batches)}")
 
     fc = st.columns([2, 2, 2])
     emp_filter    = fc[0].selectbox("Employee", ["All"] + list(op_options.keys()), key="adv_ph_emp")
