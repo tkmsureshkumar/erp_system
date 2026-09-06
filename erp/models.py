@@ -21,6 +21,18 @@ from pydantic import BaseModel, Field
 # --------------------------------------------------------------------------- #
 # ENUMS — single source of truth (value == exact DB string)                   #
 # --------------------------------------------------------------------------- #
+class PayrollApprovalStatus(str, Enum):
+    PENDING  = "Pending"
+    APPROVED = "Approved"
+    REJECTED = "Rejected"
+
+
+class ConveyanceUnit(str, Enum):
+    PER_DAY  = "Per Day"
+    PER_KM   = "Per KM"
+    PER_TRIP = "Per Trip"
+
+
 class OperationalStatus(str, Enum):
     AVAILABLE = "Available"
     RESERVED = "Reserved"
