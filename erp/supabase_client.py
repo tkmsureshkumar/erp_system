@@ -1484,7 +1484,7 @@ class SupabaseClient:
         return data if isinstance(data, list) else []
 
     def list_advance_opening_balances(self, employee_id: str | None = None) -> List[Dict[str, Any]]:
-        q = self.client.table("advance_opening_balance").select("*").order("as_on_date")
+        q = self.admin_client.table("advance_opening_balance").select("*").order("as_on_date")
         if employee_id:
             q = q.eq("employee_id", employee_id)
         return self._adv_exec(q.execute())
@@ -1495,7 +1495,7 @@ class SupabaseClient:
 
     def list_advance_batches(self) -> List[Dict[str, Any]]:
         return self._adv_exec(
-            self.client.table("advance_batches").select("*").order("submitted_at", desc=True).execute()
+            self.admin_client.table("advance_batches").select("*").order("submitted_at", desc=True).execute()
         )
 
     def insert_advance_batch(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1514,7 +1514,7 @@ class SupabaseClient:
         employee_id: str | None = None,
         batch_id: str | None = None,
     ) -> List[Dict[str, Any]]:
-        q = self.client.table("advance_requests").select("*").order("created_at", desc=True)
+        q = self.admin_client.table("advance_requests").select("*").order("created_at", desc=True)
         if status:
             q = q.eq("status", status)
         if employee_id:
@@ -1538,7 +1538,7 @@ class SupabaseClient:
         employee_id: str | None = None,
         payment_status: str | None = None,
     ) -> List[Dict[str, Any]]:
-        q = self.client.table("advance_payments").select("*").order("created_at", desc=True)
+        q = self.admin_client.table("advance_payments").select("*").order("created_at", desc=True)
         if employee_id:
             q = q.eq("employee_id", employee_id)
         if payment_status:
@@ -1560,7 +1560,7 @@ class SupabaseClient:
         employee_id: str | None = None,
         payroll_month: str | None = None,
     ) -> List[Dict[str, Any]]:
-        q = self.client.table("advance_recoveries").select("*").order("processed_at", desc=True)
+        q = self.admin_client.table("advance_recoveries").select("*").order("processed_at", desc=True)
         if employee_id:
             q = q.eq("employee_id", employee_id)
         if payroll_month:
