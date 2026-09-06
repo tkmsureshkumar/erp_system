@@ -19,8 +19,10 @@ from erp import auth
 from erp.supabase_client import SupabaseClient
 from erp.views import (
     admin,
+    advance_management,
     asset,
     closeworkorder,
+    conveyance_rules,
     customerreport,
     customers,
     dashboard,
@@ -772,6 +774,9 @@ _SIDEBAR_ITEMS = [
     ("wldetailreport",    "description",             "WL Detail",         "REPORTS",      "WORK LOG"),
     ("wlreports",         "pending_actions",         "Pending Worklogs",  "REPORTS",      "WORK LOG"),
     ("opreport",          "badge",                   "Op Report",         "REPORTS",      "REVENUE"),
+    # ── Payroll ───────────────────────────────────────────────────────────────
+    ("conveyance_rules",   "commute",                "Conveyance Rules",  "PAYROLL",      None),
+    ("advance_management", "account_balance_wallet", "Advance Mgmt",      "PAYROLL",      None),
     # ── Config ────────────────────────────────────────────────────────────────
     ("system",            "settings",                "System",            "CONFIG",       None),
 ]
@@ -1064,6 +1069,18 @@ elif page == "custreport":
 elif page == "opreport":
     if auth.has_page_access("opreport"):
         operatorreport.render()
+    else:
+        _access_denied()
+
+elif page == "conveyance_rules":
+    if auth.has_page_access("conveyance_rules"):
+        conveyance_rules.render()
+    else:
+        _access_denied()
+
+elif page == "advance_management":
+    if auth.has_page_access("advance_management"):
+        advance_management.render()
     else:
         _access_denied()
 

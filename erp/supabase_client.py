@@ -1327,3 +1327,252 @@ class SupabaseClient:
             return bytes(data) if data else None
         except Exception:
             return None
+
+    # ── Payroll Masters ────────────────────────────────────────────────────────
+
+    def list_payroll_masters(self) -> List[Dict[str, Any]]:
+        """All payroll master records joined with operator name/emp_code."""
+        resp = (
+            self.client.table("payroll_masters")
+            .select("*, operators(emp_code, operator_name, designation, mobile_number, joining_date, status)")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data if isinstance(data, list) else []
+
+    def list_payroll_masters_for_operator(self, operator_id: str) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("payroll_masters")
+            .select("*")
+            .eq("operator_id", operator_id)
+            .order("revision_number", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data if isinstance(data, list) else []
+
+    def get_current_payroll_master(self, operator_id: str) -> Dict[str, Any]:
+        resp = (
+            self.client.table("payroll_masters")
+            .select("*")
+            .eq("operator_id", operator_id)
+            .eq("is_current", True)
+            .limit(1)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data[0] if isinstance(data, list) and data else {}
+
+    def get_pending_payroll_master(self, operator_id: str) -> Dict[str, Any]:
+        resp = (
+            self.client.table("payroll_masters")
+            .select("*")
+            .eq("operator_id", operator_id)
+            .eq("approval_status", "Pending")
+            .limit(1)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data[0] if isinstance(data, list) and data else {}
+
+    def list_all_pending_payroll_masters(self) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("payroll_masters")
+            .select("*, operators(emp_code, operator_name, designation)")
+            .eq("approval_status", "Pending")
+            .order("created_at", desc=False)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data if isinstance(data, list) else []
+
+    def insert_payroll_master(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.client.table("payroll_masters").insert(payload).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data[0] if isinstance(data, list) and data else {}
+
+    def approve_payroll_master(self, record_id: str, operator_id: str, reviewed_by: str, remarks: str) -> None:
+        from datetime import datetime, timezone
+        now_ts = datetime.now(timezone.utc).isoformat()
+        # Mark all existing records for this operator as not-current
+        self.admin_client.table("payroll_masters").update({"is_current": False}).eq("operator_id", operator_id).execute()
+        # Approve and set as current
+        self.admin_client.table("payroll_masters").update({
+            "approval_status": "Approved",
+            "is_current":      True,
+            "reviewed_by":     reviewed_by,
+            "reviewed_at":     now_ts,
+            "review_remarks":  remarks,
+        }).eq("id", record_id).execute()
+
+    def reject_payroll_master(self, record_id: str, reviewed_by: str, remarks: str) -> None:
+        from datetime import datetime, timezone
+        now_ts = datetime.now(timezone.utc).isoformat()
+        self.admin_client.table("payroll_masters").update({
+            "approval_status": "Rejected",
+            "is_current":      False,
+            "reviewed_by":     reviewed_by,
+            "reviewed_at":     now_ts,
+            "review_remarks":  remarks,
+        }).eq("id", record_id).execute()
+
+    # ── Conveyance Site Rules ──────────────────────────────────────────────────
+
+    def list_conveyance_site_rules(self) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("conveyance_site_rules")
+            .select("*, sites(site_name)")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data if isinstance(data, list) else []
+
+    def upsert_conveyance_site_rule(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if payload.get("id"):
+            rule_id = payload.pop("id")
+            resp = self.admin_client.table("conveyance_site_rules").update(payload).eq("id", rule_id).execute()
+        else:
+            resp = self.admin_client.table("conveyance_site_rules").insert(payload).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data[0] if isinstance(data, list) and data else {}
+
+    def delete_conveyance_site_rule(self, rule_id: str) -> None:
+        self.admin_client.table("conveyance_site_rules").delete().eq("id", rule_id).execute()
+
+    # ── Conveyance Employee Overrides ──────────────────────────────────────────
+
+    def list_conveyance_overrides(self) -> List[Dict[str, Any]]:
+        resp = (
+            self.client.table("conveyance_employee_overrides")
+            .select("*, operators(emp_code, operator_name), sites(site_name)")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        return data if isinstance(data, list) else []
+
+    def upsert_conveyance_override(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if payload.get("id"):
+            ov_id = payload.pop("id")
+            resp = self.admin_client.table("conveyance_employee_overrides").update(payload).eq("id", ov_id).execute()
+        else:
+            resp = self.admin_client.table("conveyance_employee_overrides").insert(payload).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data[0] if isinstance(data, list) and data else {}
+
+    def delete_conveyance_override(self, override_id: str) -> None:
+        self.admin_client.table("conveyance_employee_overrides").delete().eq("id", override_id).execute()
+
+    # ── Advance Management ─────────────────────────────────────────────────────
+
+    def _adv_exec(self, resp) -> list:
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data if isinstance(data, list) else []
+
+    def list_advance_opening_balances(self, employee_id: str | None = None) -> List[Dict[str, Any]]:
+        q = self.client.table("advance_opening_balance").select("*").order("as_on_date")
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        return self._adv_exec(q.execute())
+
+    def insert_advance_opening_balance(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("advance_opening_balance").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def list_advance_batches(self) -> List[Dict[str, Any]]:
+        return self._adv_exec(
+            self.client.table("advance_batches").select("*").order("submitted_at", desc=True).execute()
+        )
+
+    def insert_advance_batch(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("advance_batches").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def update_advance_batch(self, batch_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("advance_batches").update(payload).eq("id", batch_id).execute()
+        )
+        return rows[0] if rows else {}
+
+    def list_advance_requests(
+        self,
+        status: str | None = None,
+        employee_id: str | None = None,
+        batch_id: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.client.table("advance_requests").select("*").order("created_at", desc=True)
+        if status:
+            q = q.eq("status", status)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        if batch_id:
+            q = q.eq("batch_id", batch_id)
+        return self._adv_exec(q.execute())
+
+    def insert_advance_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("advance_requests").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def update_advance_request(self, request_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("advance_requests").update(payload).eq("id", request_id).execute()
+        )
+        return rows[0] if rows else {}
+
+    def list_advance_payments(
+        self,
+        employee_id: str | None = None,
+        payment_status: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.client.table("advance_payments").select("*").order("created_at", desc=True)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        if payment_status:
+            q = q.eq("payment_status", payment_status)
+        return self._adv_exec(q.execute())
+
+    def insert_advance_payment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("advance_payments").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def update_advance_payment(self, payment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("advance_payments").update(payload).eq("id", payment_id).execute()
+        )
+        return rows[0] if rows else {}
+
+    def list_advance_recoveries(
+        self,
+        employee_id: str | None = None,
+        payroll_month: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.client.table("advance_recoveries").select("*").order("processed_at", desc=True)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        if payroll_month:
+            q = q.eq("payroll_month", payroll_month)
+        return self._adv_exec(q.execute())
+
+    def insert_advance_recovery(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("advance_recoveries").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def update_advance_recovery(self, recovery_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("advance_recoveries").update(payload).eq("id", recovery_id).execute()
+        )
+        return rows[0] if rows else {}

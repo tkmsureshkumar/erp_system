@@ -36,6 +36,9 @@ ALL_PAGES: dict[str, str] = {
     "wlreports":       "Worklog Status",
     "custreport":      "Customer Report",
     "opreport":        "Operator Report",
+    # ── Payroll ───────────────────────────────────────────────────────────────
+    "conveyance_rules":    "Conveyance Rules",
+    "advance_management":  "Advance Management",
     # ── Config ────────────────────────────────────────────────────────────────
     "system":          "System",
 }
