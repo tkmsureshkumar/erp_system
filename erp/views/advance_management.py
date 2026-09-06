@@ -103,9 +103,11 @@ def _compute_balance(sb: SupabaseClient, employee_id: str, as_on: date) -> dict:
     advances_given = sum(
         float(p.get("amount") or 0)
         for p in payments
-        if p.get("payment_status") == "Paid"
-        and p.get("payment_date")
-        and str(p["payment_date"]) <= str(as_on)
+        if p.get("payment_status") in ("Paid", "Pending")
+        and (
+            not p.get("payment_date")                        # approved, pending payment
+            or str(p["payment_date"]) <= str(as_on)         # or paid on/before as_on
+        )
     )
 
     recoveries = sb.list_advance_recoveries(employee_id=employee_id)
@@ -127,7 +129,7 @@ def _render_ledger(sb: SupabaseClient, employee_id: str, as_on: date | None = No
     opening_recs = sb.list_advance_opening_balances(employee_id=employee_id)
     payments     = [
         p for p in sb.list_advance_payments(employee_id=employee_id)
-        if p.get("payment_status") == "Paid"
+        if p.get("payment_status") in ("Paid", "Pending")
     ]
     recoveries = sb.list_advance_recoveries(employee_id=employee_id)
 
