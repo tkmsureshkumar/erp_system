@@ -91,32 +91,25 @@ def _generate_batch_number(sb: SupabaseClient) -> str:
     return f"{prefix}-{count + 1:03d}"
 
 
-def _compute_balance(sb: SupabaseClient, employee_id: str, as_on: date) -> dict:
-    opening_recs = sb.list_advance_opening_balances(employee_id=employee_id)
+def _compute_balance_from(
+    openings: list, payments: list, recoveries: list, as_on: date
+) -> dict:
     opening = sum(
         float(r.get("balance") or 0)
-        for r in opening_recs
+        for r in openings
         if r.get("as_on_date") and str(r["as_on_date"]) <= str(as_on)
     )
-
-    payments = sb.list_advance_payments(employee_id=employee_id)
     advances_given = sum(
         float(p.get("amount") or 0)
         for p in payments
         if p.get("payment_status") in ("Paid", "Pending")
-        and (
-            not p.get("payment_date")                        # approved, pending payment
-            or str(p["payment_date"]) <= str(as_on)         # or paid on/before as_on
-        )
+        and (not p.get("payment_date") or str(p["payment_date"]) <= str(as_on))
     )
-
-    recoveries = sb.list_advance_recoveries(employee_id=employee_id)
     total_recoveries = sum(
         float(r.get("final_recovery") or 0)
         for r in recoveries
         if r.get("processed_at") and str(r["processed_at"])[:10] <= str(as_on)
     )
-
     return {
         "opening":        opening,
         "advances_given": advances_given,
@@ -125,13 +118,30 @@ def _compute_balance(sb: SupabaseClient, employee_id: str, as_on: date) -> dict:
     }
 
 
-def _render_ledger(sb: SupabaseClient, employee_id: str, as_on: date | None = None) -> None:
-    opening_recs = sb.list_advance_opening_balances(employee_id=employee_id)
-    payments     = [
-        p for p in sb.list_advance_payments(employee_id=employee_id)
-        if p.get("payment_status") in ("Paid", "Pending")
-    ]
-    recoveries = sb.list_advance_recoveries(employee_id=employee_id)
+def _render_ledger(
+    sb: SupabaseClient,
+    employee_id: str,
+    as_on: date | None = None,
+    all_openings: list | None = None,
+    all_payments: list | None = None,
+    all_recoveries: list | None = None,
+) -> None:
+    opening_recs = [r for r in (all_openings  or sb.list_advance_opening_balances(employee_id=employee_id))
+                    if r.get("employee_id") == employee_id] \
+                   if all_openings is not None \
+                   else sb.list_advance_opening_balances(employee_id=employee_id)
+
+    raw_payments = [p for p in (all_payments or sb.list_advance_payments(employee_id=employee_id))
+                    if p.get("employee_id") == employee_id] \
+                   if all_payments is not None \
+                   else sb.list_advance_payments(employee_id=employee_id)
+
+    payments = [p for p in raw_payments if p.get("payment_status") in ("Paid", "Pending")]
+
+    recoveries = [r for r in (all_recoveries or sb.list_advance_recoveries(employee_id=employee_id))
+                  if r.get("employee_id") == employee_id] \
+                 if all_recoveries is not None \
+                 else sb.list_advance_recoveries(employee_id=employee_id)
 
     transactions: list[dict] = []
     for r in opening_recs:
@@ -415,7 +425,10 @@ def _tab_pending_approval() -> None:
         batch    = batches.get(r.get("batch_id", ""), {})
         req_amt  = float(r.get("requested_amount") or 0)
 
-        bal = _compute_balance(sb, emp_id, today)
+        _emp_pays = sb.list_advance_payments(employee_id=emp_id)
+        _emp_open = sb.list_advance_opening_balances(employee_id=emp_id)
+        _emp_recv = sb.list_advance_recoveries(employee_id=emp_id)
+        bal = _compute_balance_from(_emp_open, _emp_pays, _emp_recv, today)
 
         title = (
             f"{emp_name}  ({emp_code})  |  "
@@ -486,18 +499,40 @@ def _tab_current_advance() -> None:
     st.markdown("#### Current Advance Balances")
     sb        = SupabaseClient()
     operators = sb.list_operators()
-    op_by_id  = {o["id"]: o for o in operators}
 
     as_on = st.date_input("As on Date", value=date.today(), key="adv_cur_date")
+
+    with st.spinner("Loading advance data…"):
+        # 3 bulk calls instead of N×3 per-operator calls
+        all_openings   = sb.list_advance_opening_balances()
+        all_payments   = sb.list_advance_payments()
+        all_recoveries = sb.list_advance_recoveries()
+
+    # Group by employee_id in Python
+    from collections import defaultdict
+    openings_by_emp   = defaultdict(list)
+    payments_by_emp   = defaultdict(list)
+    recoveries_by_emp = defaultdict(list)
+    for r in all_openings:
+        openings_by_emp[r.get("employee_id", "")].append(r)
+    for p in all_payments:
+        payments_by_emp[p.get("employee_id", "")].append(p)
+    for r in all_recoveries:
+        recoveries_by_emp[r.get("employee_id", "")].append(r)
 
     rows = []
     for op in operators:
         eid = op["id"]
-        bal = _compute_balance(sb, eid, as_on)
+        bal = _compute_balance_from(
+            openings_by_emp[eid],
+            payments_by_emp[eid],
+            recoveries_by_emp[eid],
+            as_on,
+        )
         if bal["opening"] == 0 and bal["advances_given"] == 0 and bal["recoveries"] == 0:
             continue
         rows.append({
-            "Employee":           op.get("name", eid),
+            "Employee":           op.get("operator_name", eid),
             "Emp Code":           op.get("emp_code", ""),
             "Opening (₹)":        bal["opening"],
             "Advances Given (₹)": bal["advances_given"],
@@ -527,7 +562,10 @@ def _tab_current_advance() -> None:
     if sel != "—":
         emp_id = next(r["_id"] for r in rows if r["Employee"] == sel)
         st.markdown(f"**Advance Ledger — {sel}**")
-        _render_ledger(sb, emp_id, as_on)
+        _render_ledger(sb, emp_id, as_on,
+                       all_openings=all_openings,
+                       all_payments=all_payments,
+                       all_recoveries=all_recoveries)
 
 
 # ── Tab 3.5 Advance Ledger ─────────────────────────────────────────────────────
