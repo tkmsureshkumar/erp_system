@@ -33,6 +33,7 @@ Supabase tables required (run in Supabase SQL editor before first use):
         requested_amount     numeric NOT NULL,
         approved_amount      numeric,
         reason               text,
+        payment_mode         text,
         status               text DEFAULT 'Pending',
         approved_by          text,
         approved_at          timestamptz,
@@ -40,6 +41,7 @@ Supabase tables required (run in Supabase SQL editor before first use):
         amount_change_reason text,
         created_at           timestamptz DEFAULT now()
     );
+    -- If table already exists, run: ALTER TABLE advance_requests ADD COLUMN IF NOT EXISTS payment_mode text;
 
     CREATE TABLE IF NOT EXISTS advance_payments (
         id                  uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -75,6 +77,8 @@ import streamlit as st
 
 from .. import auth
 from ..supabase_client import SupabaseClient
+
+_PAYMENT_MODES = ["UPI", "Netbanking"]
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -126,20 +130,17 @@ def _render_ledger(
     all_payments: list | None = None,
     all_recoveries: list | None = None,
 ) -> None:
-    opening_recs = [r for r in (all_openings  or sb.list_advance_opening_balances(employee_id=employee_id))
-                    if r.get("employee_id") == employee_id] \
+    opening_recs = [r for r in (all_openings or []) if r.get("employee_id") == employee_id] \
                    if all_openings is not None \
                    else sb.list_advance_opening_balances(employee_id=employee_id)
 
-    raw_payments = [p for p in (all_payments or sb.list_advance_payments(employee_id=employee_id))
-                    if p.get("employee_id") == employee_id] \
+    raw_payments = [p for p in (all_payments or []) if p.get("employee_id") == employee_id] \
                    if all_payments is not None \
                    else sb.list_advance_payments(employee_id=employee_id)
 
     payments = [p for p in raw_payments if p.get("payment_status") in ("Paid", "Pending")]
 
-    recoveries = [r for r in (all_recoveries or sb.list_advance_recoveries(employee_id=employee_id))
-                  if r.get("employee_id") == employee_id] \
+    recoveries = [r for r in (all_recoveries or []) if r.get("employee_id") == employee_id] \
                  if all_recoveries is not None \
                  else sb.list_advance_recoveries(employee_id=employee_id)
 
@@ -188,7 +189,69 @@ def _render_ledger(
     )
 
 
-# ── Tab 3.1 Opening Balance ────────────────────────────────────────────────────
+def _build_print_html(items: list, op_by_id: dict) -> str:
+    """Build a printable HTML voucher for the Accounts team."""
+    rows_html = ""
+    total = 0.0
+    for i, p in enumerate(items, 1):
+        op        = op_by_id.get(p["_emp_id"], {})
+        name      = op.get("operator_name", "—")
+        code      = op.get("emp_code", "—")
+        amount    = float(p.get("Amount (₹)") or 0)
+        total    += amount
+        mode      = p.get("Payment Mode", "—")
+        bank_acc  = op.get("bank_account_number") or op.get("bank_account") or "—"
+        bank_name = op.get("bank_name") or "—"
+        ifsc      = op.get("ifsc_code") or op.get("bank_ifsc") or "—"
+        rows_html += f"""
+        <tr>
+            <td>{i}</td>
+            <td>{name}</td>
+            <td>{code}</td>
+            <td style="text-align:right">&#8377;{amount:,.0f}</td>
+            <td>{mode}</td>
+            <td>{bank_acc}</td>
+            <td>{bank_name}</td>
+            <td>{ifsc}</td>
+        </tr>"""
+
+    print_date = date.today().strftime("%d %b %Y")
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  body {{ font-family: Arial, sans-serif; font-size: 12px; margin: 30px; }}
+  h2   {{ color: #1E293B; margin-bottom: 4px; }}
+  p    {{ margin: 2px 0 14px; color: #64748B; }}
+  table {{ width: 100%; border-collapse: collapse; }}
+  th, td {{ border: 1px solid #CBD5E1; padding: 6px 10px; }}
+  th {{ background: #1E293B; color: #fff; text-align: left; font-size: 11px; }}
+  tfoot td {{ font-weight: bold; }}
+  @media print {{
+    button {{ display: none; }}
+  }}
+</style>
+</head><body>
+<h2>Advance Payment Voucher</h2>
+<p>Date: {print_date} &nbsp;|&nbsp; Total entries: {len(items)}</p>
+<table>
+<thead><tr>
+  <th>#</th><th>Employee Name</th><th>Emp Code</th>
+  <th>Amount</th><th>Payment Mode</th>
+  <th>Account No.</th><th>Bank Name</th><th>IFSC</th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+<tfoot><tr>
+  <td colspan="3" style="text-align:right">Total</td>
+  <td style="text-align:right">&#8377;{total:,.0f}</td>
+  <td colspan="4"></td>
+</tr></tfoot>
+</table>
+<br><br>
+<p>Prepared by: _____________________________ &nbsp;&nbsp;&nbsp; Authorised by: _____________________________</p>
+</body></html>"""
+
+
+# ── Tab 1: Opening Balance ─────────────────────────────────────────────────────
 
 def _tab_opening_balance() -> None:
     st.markdown("#### Opening Balance")
@@ -249,15 +312,14 @@ def _tab_opening_balance() -> None:
                 st.rerun()
 
 
-# ── Tab 3.2 New Advance ────────────────────────────────────────────────────────
+# ── Tab 2: New Advance ─────────────────────────────────────────────────────────
 
 def _tab_new_advance() -> None:
     st.markdown("#### New Advance Request")
     sb        = SupabaseClient()
     operators = sorted(sb.list_operators(), key=lambda o: o.get("emp_code") or "")
 
-    # Build label → id lookup; label = "EMP001 – Raj Kumar"
-    op_labels  = []
+    op_labels: list[str] = []
     label_to_id: dict[str, str] = {}
     for o in operators:
         code  = (o.get("emp_code") or "").strip()
@@ -271,26 +333,29 @@ def _tab_new_advance() -> None:
         st.warning("No operators found. Please add operators in the Operator Master first.")
         return
 
-    # ── Row management via session state ──────────────────────────────────────
-    _ROWS_KEY = "adv_rows_v3"
+    _ROWS_KEY = "adv_rows_v4"
     if _ROWS_KEY not in st.session_state:
         st.session_state[_ROWS_KEY] = [
-            {"label": op_labels[0], "date": date.today(), "amount": 0.0, "reason": ""}
+            {"label": op_labels[0], "date": date.today(), "amount": 0.0,
+             "payment_mode": "UPI", "reason": ""}
         ]
 
-    # Column headers
-    h1, h2, h3, h4, h5 = st.columns([3, 2, 2, 3, 0.5])
+    h1, h2, h3, h4, h5, h6 = st.columns([2.8, 1.6, 1.6, 1.6, 2.5, 0.5])
     h1.markdown("**Employee**")
     h2.markdown("**Date**")
     h3.markdown("**Amount (₹)**")
-    h4.markdown("**Reason**")
-    h5.markdown("")
+    h4.markdown("**Payment Mode \\***")
+    h5.markdown("**Reason**")
+    h6.markdown("")
 
     rows      = st.session_state[_ROWS_KEY]
     keep_rows = []
     for i, row in enumerate(rows):
-        c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 3, 0.5])
-        cur_idx = op_labels.index(row["label"]) if row["label"] in op_labels else 0
+        c1, c2, c3, c4, c5, c6 = st.columns([2.8, 1.6, 1.6, 1.6, 2.5, 0.5])
+        cur_idx   = op_labels.index(row["label"]) if row["label"] in op_labels else 0
+        mode_idx  = _PAYMENT_MODES.index(row.get("payment_mode", "UPI")) \
+                    if row.get("payment_mode") in _PAYMENT_MODES else 0
+
         sel_label = c1.selectbox("Employee", op_labels, index=cur_idx,
                                  key=f"adv_emp_{i}", label_visibility="collapsed")
         sel_date  = c2.date_input("Date", value=row["date"],
@@ -298,15 +363,18 @@ def _tab_new_advance() -> None:
         sel_amt   = c3.number_input("Amount", min_value=0.0, step=500.0,
                                     value=float(row["amount"]),
                                     key=f"adv_amt_{i}", label_visibility="collapsed")
-        sel_rsn   = c4.text_input("Reason", value=row["reason"],
+        sel_mode  = c4.selectbox("Mode", _PAYMENT_MODES, index=mode_idx,
+                                 key=f"adv_mode_{i}", label_visibility="collapsed")
+        sel_rsn   = c5.text_input("Reason", value=row["reason"],
                                   key=f"adv_rsn_{i}", label_visibility="collapsed")
-        remove    = c5.button("✕", key=f"adv_del_{i}")
+        remove    = c6.button("✕", key=f"adv_del_{i}")
         if not remove:
             keep_rows.append({
-                "label":  sel_label,
-                "date":   sel_date,
-                "amount": sel_amt,
-                "reason": sel_rsn,
+                "label":        sel_label,
+                "date":         sel_date,
+                "amount":       sel_amt,
+                "payment_mode": sel_mode,
+                "reason":       sel_rsn,
             })
 
     st.session_state[_ROWS_KEY] = keep_rows
@@ -314,7 +382,8 @@ def _tab_new_advance() -> None:
     col_add, col_submit, _ = st.columns([1, 2, 5])
     if col_add.button("＋ Add Row"):
         st.session_state[_ROWS_KEY].append(
-            {"label": op_labels[0], "date": date.today(), "amount": 0.0, "reason": ""}
+            {"label": op_labels[0], "date": date.today(), "amount": 0.0,
+             "payment_mode": "UPI", "reason": ""}
         )
         st.rerun()
 
@@ -345,6 +414,7 @@ def _tab_new_advance() -> None:
                 "employee_id":      label_to_id.get(r["label"], ""),
                 "advance_date":     adv_date,
                 "requested_amount": float(r["amount"]),
+                "payment_mode":     r["payment_mode"],
                 "reason":           r["reason"],
                 "status":           "Pending",
             })
@@ -352,12 +422,13 @@ def _tab_new_advance() -> None:
             f"Batch **{batch_no}** submitted — {n} employee(s) | ₹{total:,.0f} | Pending Approval"
         )
         st.session_state[_ROWS_KEY] = [
-            {"label": op_labels[0], "date": date.today(), "amount": 0.0, "reason": ""}
+            {"label": op_labels[0], "date": date.today(), "amount": 0.0,
+             "payment_mode": "UPI", "reason": ""}
         ]
         st.rerun()
 
 
-# ── Tab 3.3 Pending Approval ───────────────────────────────────────────────────
+# ── Tab 3: Pending Approval ────────────────────────────────────────────────────
 
 def _tab_pending_approval() -> None:
     if not auth.is_admin():
@@ -366,19 +437,19 @@ def _tab_pending_approval() -> None:
 
     st.markdown("#### Pending Approval")
     sb = SupabaseClient()
-    operators  = sb.list_operators()
-    op_by_id   = {o["id"]: o for o in operators}
-    all_reqs   = sb.list_advance_requests(status="Pending")
-    batches    = {b["id"]: b for b in sb.list_advance_batches()}
+    operators = sb.list_operators()
+    op_by_id  = {o["id"]: o for o in operators}
+    all_reqs  = sb.list_advance_requests(status="Pending")
+    batches   = {b["id"]: b for b in sb.list_advance_batches()}
 
     if not all_reqs:
         st.info("No pending advance requests.")
         return
 
-    # ── Filters ────────────────────────────────────────────────────────────────
     today = date.today()
-    fc    = st.columns([1, 1, 1, 1, 1])
-    period = fc[0].selectbox("Period", ["Today", "Last 2 Days", "Last 7 Days", "Custom"], key="adv_ap_period")
+    fc    = st.columns([1, 1, 1, 1])
+    period = fc[0].selectbox("Period", ["Today", "Last 2 Days", "Last 7 Days", "Custom"],
+                              key="adv_ap_period")
     if period == "Today":
         date_from = today
     elif period == "Last 2 Days":
@@ -389,13 +460,10 @@ def _tab_pending_approval() -> None:
         date_from = fc[1].date_input("From", value=today - timedelta(days=30), key="adv_ap_from")
 
     emp_names_in_list = sorted({
-        op_by_id[r["employee_id"]].get("name", r["employee_id"])
+        op_by_id[r["employee_id"]].get("operator_name", r["employee_id"])
         for r in all_reqs if r.get("employee_id") in op_by_id
     })
-    batch_numbers = sorted({b.get("batch_number", "") for b in batches.values() if b.get("batch_number")})
-
-    emp_filter   = fc[2].selectbox("Employee", ["All"] + emp_names_in_list, key="adv_ap_emp")
-    batch_filter = fc[3].selectbox("Batch",    ["All"] + batch_numbers,     key="adv_ap_batch")
+    emp_filter = fc[2].selectbox("Employee", ["All"] + emp_names_in_list, key="adv_ap_emp")
 
     filtered = []
     for r in all_reqs:
@@ -403,11 +471,8 @@ def _tab_pending_approval() -> None:
         if adv_date < date_from or adv_date > today:
             continue
         op       = op_by_id.get(r.get("employee_id", ""), {})
-        emp_name = op.get("name", "")
+        emp_name = op.get("operator_name", "")
         if emp_filter != "All" and emp_name != emp_filter:
-            continue
-        batch = batches.get(r.get("batch_id", ""), {})
-        if batch_filter != "All" and batch.get("batch_number", "") != batch_filter:
             continue
         filtered.append(r)
 
@@ -434,7 +499,7 @@ def _tab_pending_approval() -> None:
             f"{emp_name}  ({emp_code})  |  "
             f"₹{req_amt:,.0f}  |  "
             f"{r.get('advance_date', '')}  |  "
-            f"Batch: {batch.get('batch_number', '')}"
+            f"Mode: {r.get('payment_mode') or '—'}"
         )
         with st.expander(title):
             ic = st.columns(4)
@@ -493,7 +558,145 @@ def _tab_pending_approval() -> None:
                     st.rerun()
 
 
-# ── Tab 3.4 Current Advance ────────────────────────────────────────────────────
+# ── Tab 4: Pending Payment ─────────────────────────────────────────────────────
+
+def _tab_pending_payment() -> None:
+    st.markdown("#### Pending Payment")
+    sb        = SupabaseClient()
+    operators = sb.list_operators()
+    op_by_id  = {o["id"]: o for o in operators}
+    op_labels = {
+        o["id"]: f"{o.get('emp_code', '')} – {o.get('operator_name', '')}".strip(" –")
+        for o in operators
+    }
+
+    all_payments  = sb.list_advance_payments()
+    all_reqs_list = sb.list_advance_requests()
+    all_requests  = {r["id"]: r for r in all_reqs_list}
+
+    # ── Filters ────────────────────────────────────────────────────────────────
+    fc = st.columns([2, 2, 2])
+    label_options = ["All"] + [lbl for lbl in op_labels.values() if lbl]
+    emp_filter    = fc[0].selectbox("Employee", label_options, key="adv_ph_emp")
+
+    enriched = []
+    for p in all_payments:
+        emp_id   = p.get("employee_id", "")
+        op       = op_by_id.get(emp_id, {})
+        emp_name = op.get("operator_name", emp_id)
+        emp_code = op.get("emp_code", "")
+        emp_lbl  = op_labels.get(emp_id, "")
+        if emp_filter != "All" and emp_lbl != emp_filter:
+            continue
+        req = all_requests.get(p.get("advance_request_id", ""), {})
+        enriched.append({
+            "Employee":        f"{emp_name} ({emp_code})",
+            "Advance Date":    req.get("advance_date", ""),
+            "Amount (₹)":      float(p.get("amount") or 0),
+            "Payment Mode":    req.get("payment_mode") or "—",
+            "Approval Date":   str(req.get("approved_at") or "")[:10],
+            "Payment Date":    p.get("payment_date") or "",
+            "Status":          p.get("payment_status") or "Pending",
+            "UTR / Reference": p.get("utr_reference") or "",
+            "_id":             p["id"],
+            "_emp_id":         emp_id,
+        })
+
+    pending_list = [r for r in enriched if r["Status"] == "Pending"]
+    paid_list    = [r for r in enriched if r["Status"] == "Paid"]
+
+    # ── Pending section ────────────────────────────────────────────────────────
+    if not pending_list:
+        st.info("No pending payments.")
+    else:
+        st.markdown(f"**{len(pending_list)} payment(s) awaiting disbursement**")
+
+        # Print / download voucher
+        print_col, _ = st.columns([2, 6])
+        html_voucher = _build_print_html(pending_list, op_by_id)
+        print_col.download_button(
+            label="🖨 Download Payment Voucher",
+            data=html_voucher.encode("utf-8"),
+            file_name=f"advance_voucher_{date.today()}.html",
+            mime="text/html",
+            help="Open the downloaded file in a browser and use Ctrl+P to print.",
+        )
+
+        if auth.is_admin():
+            st.markdown("**Select entries to mark as paid:**")
+            # Select All convenience
+            all_key  = "adv_sel_all"
+            select_all = st.checkbox("Select All", key=all_key)
+
+            for p in pending_list:
+                cb_key   = f"pay_sel_{p['_id']}"
+                default  = select_all or st.session_state.get(cb_key, False)
+                st.checkbox(
+                    f"{p['Employee']}  |  ₹{p['Amount (₹)']:,.0f}  |  "
+                    f"Approved: {p['Approval Date']}  |  Mode: {p['Payment Mode']}",
+                    key=cb_key,
+                    value=default,
+                )
+
+            selected = [p for p in pending_list
+                        if st.session_state.get(f"pay_sel_{p['_id']}", False)]
+
+            if selected:
+                st.markdown(
+                    f"**{len(selected)} selected — Total: "
+                    f"₹{sum(r['Amount (₹)'] for r in selected):,.0f}**"
+                )
+                mc1, mc2 = st.columns([1, 2])
+                bulk_date = mc1.date_input("Payment Date", value=date.today(),
+                                            key="adv_bulk_pdate")
+                bulk_utr  = mc2.text_input("UTR / Reference", key="adv_bulk_utr",
+                                            placeholder="Common UTR or leave blank")
+                if st.button(
+                    f"✅ Mark {len(selected)} Payment(s) as Paid", type="primary",
+                    key="adv_bulk_mark_paid"
+                ):
+                    for p in selected:
+                        sb.update_advance_payment(p["_id"], {
+                            "payment_date":   str(bulk_date),
+                            "payment_status": "Paid",
+                            "utr_reference":  bulk_utr,
+                            "paid_by":        _user_name(),
+                            "paid_at":        datetime.now().isoformat(),
+                        })
+                    st.success(
+                        f"Marked {len(selected)} payment(s) as Paid on {bulk_date}."
+                    )
+                    # Clear checkboxes
+                    for p in selected:
+                        st.session_state.pop(f"pay_sel_{p['_id']}", None)
+                    st.session_state.pop(all_key, None)
+                    st.rerun()
+        else:
+            # Non-admin: read-only view
+            df_pending = pd.DataFrame([{
+                "Employee":     p["Employee"],
+                "Advance Date": p["Advance Date"],
+                "Amount (₹)":   p["Amount (₹)"],
+                "Payment Mode": p["Payment Mode"],
+            } for p in pending_list])
+            st.dataframe(
+                df_pending, use_container_width=True, hide_index=True,
+                column_config={"Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f")},
+            )
+
+    # ── Paid history section ───────────────────────────────────────────────────
+    if paid_list:
+        st.markdown("---")
+        st.markdown("**Paid History**")
+        df = pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")}
+                           for r in paid_list])
+        st.dataframe(
+            df, use_container_width=True, hide_index=True,
+            column_config={"Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f")},
+        )
+
+
+# ── Tab 5: Current Advance ─────────────────────────────────────────────────────
 
 def _tab_current_advance() -> None:
     st.markdown("#### Current Advance Balances")
@@ -503,12 +706,10 @@ def _tab_current_advance() -> None:
     as_on = st.date_input("As on Date", value=date.today(), key="adv_cur_date")
 
     with st.spinner("Loading advance data…"):
-        # 3 bulk calls instead of N×3 per-operator calls
         all_openings   = sb.list_advance_opening_balances()
         all_payments   = sb.list_advance_payments()
         all_recoveries = sb.list_advance_recoveries()
 
-    # Group by employee_id in Python
     from collections import defaultdict
     openings_by_emp   = defaultdict(list)
     payments_by_emp   = defaultdict(list)
@@ -568,7 +769,7 @@ def _tab_current_advance() -> None:
                        all_recoveries=all_recoveries)
 
 
-# ── Tab 3.5 Advance Ledger ─────────────────────────────────────────────────────
+# ── Tab 6: Advance Ledger ──────────────────────────────────────────────────────
 
 def _tab_advance_ledger() -> None:
     st.markdown("#### Advance Ledger")
@@ -585,93 +786,6 @@ def _tab_advance_ledger() -> None:
         return
 
     _render_ledger(sb, op_options[sel])
-
-
-# ── Tab 3.6 Payment History ────────────────────────────────────────────────────
-
-def _tab_payment_history() -> None:
-    st.markdown("#### Payment History")
-    sb        = SupabaseClient()
-    operators = sb.list_operators()
-    op_by_id  = {o["id"]: o for o in operators}
-    op_options = {
-        f"{o.get('emp_code', '')} – {o.get('operator_name', '')}".strip(" –"): o["id"]
-        for o in operators
-    }
-
-    all_payments  = sb.list_advance_payments()
-    all_reqs_list = sb.list_advance_requests()
-    all_requests  = {r["id"]: r for r in all_reqs_list}
-    batches       = {b["id"]: b for b in sb.list_advance_batches()}
-
-    fc = st.columns([2, 2, 2])
-    emp_filter    = fc[0].selectbox("Employee", ["All"] + list(op_options.keys()), key="adv_ph_emp")
-    status_filter = fc[1].selectbox("Status",   ["All", "Pending", "Paid"],         key="adv_ph_status")
-
-    enriched = []
-    for p in all_payments:
-        emp_id   = p.get("employee_id", "")
-        op       = op_by_id.get(emp_id, {})
-        emp_name = op.get("operator_name", emp_id)
-        emp_code = op.get("emp_code", "")
-        if emp_filter != "All" and emp_name != emp_filter:
-            continue
-        if status_filter != "All" and p.get("payment_status") != status_filter:
-            continue
-        req   = all_requests.get(p.get("advance_request_id", ""), {})
-        batch = batches.get(req.get("batch_id", ""), {})
-        enriched.append({
-            "Employee":        f"{emp_name} ({emp_code})",
-            "Advance Date":    req.get("advance_date", ""),
-            "Amount (₹)":      float(p.get("amount") or 0),
-            "Approval Date":   str(req.get("approved_at") or "")[:10],
-            "Payment Date":    p.get("payment_date") or "",
-            "Status":          p.get("payment_status") or "Pending",
-            "UTR / Reference": p.get("utr_reference") or "",
-            "Batch":           batch.get("batch_number", ""),
-            "_id":             p["id"],
-        })
-
-    if not enriched:
-        st.info("No payment records found.")
-        return
-
-    pending_list = [r for r in enriched if r["Status"] == "Pending"]
-    paid_list    = [r for r in enriched if r["Status"] == "Paid"]
-
-    if pending_list:
-        st.markdown("**Pending Payment**")
-        for p in pending_list:
-            with st.expander(
-                f"{p['Employee']}  |  ₹{p['Amount (₹)']:,.0f}  |  Approved: {p['Approval Date']}"
-            ):
-                if auth.is_admin():
-                    pc   = st.columns([1, 2])
-                    pday = pc[0].date_input("Payment Date", value=date.today(), key=f"adv_pd_{p['_id']}")
-                    utr  = pc[1].text_input("UTR / Reference", key=f"adv_utr_{p['_id']}")
-                    if st.button("✅ Mark as Paid", key=f"adv_paid_{p['_id']}", type="primary"):
-                        sb.update_advance_payment(p["_id"], {
-                            "payment_date":   str(pday),
-                            "payment_status": "Paid",
-                            "utr_reference":  utr,
-                            "paid_by":        _user_name(),
-                            "paid_at":        datetime.now().isoformat(),
-                        })
-                        st.success(f"Marked as Paid — UTR: {utr or '—'}")
-                        st.rerun()
-                else:
-                    st.markdown(
-                        f"**Amount:** ₹{p['Amount (₹)']:,.0f}  |  "
-                        f"**Batch:** {p['Batch']}  |  Awaiting payment from Admin."
-                    )
-
-    if paid_list:
-        st.markdown("**Paid**")
-        df = pd.DataFrame([{k: v for k, v in r.items() if k != "_id"} for r in paid_list])
-        st.dataframe(
-            df, use_container_width=True, hide_index=True,
-            column_config={"Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f")},
-        )
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -691,13 +805,13 @@ def render() -> None:
         "📂  Opening Balance",
         "➕  New Advance",
         "⏳  Pending Approval",
+        "💳  Pending Payment",
         "💰  Current Advance",
         "📒  Advance Ledger",
-        "💳  Payment History",
     ])
     with tabs[0]: _tab_opening_balance()
     with tabs[1]: _tab_new_advance()
     with tabs[2]: _tab_pending_approval()
-    with tabs[3]: _tab_current_advance()
-    with tabs[4]: _tab_advance_ledger()
-    with tabs[5]: _tab_payment_history()
+    with tabs[3]: _tab_pending_payment()
+    with tabs[4]: _tab_current_advance()
+    with tabs[5]: _tab_advance_ledger()
