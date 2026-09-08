@@ -136,64 +136,58 @@ def _site_rule_dialog(sb: SupabaseClient, sites: list, prefill: dict, user_name:
 
 def _render_site_rules(sb: SupabaseClient, is_adm: bool, sites: list, user_name: str) -> None:
     try:
-        rules = sb.list_conveyance_site_rules()
+        all_rules = sb.list_conveyance_site_rules()
     except Exception as exc:
         st.warning(f"Could not load rules: {exc}")
         return
 
-    # Build site_id → site_name lookup
+    # Only show active rules
+    rules = [r for r in all_rules if r.get("is_active", True)]
+
     site_lookup = {s["id"]: s["site_name"] for s in sites}
 
     col_add, _ = st.columns([1, 5])
     with col_add:
         if st.button("+ Add Rule", key="_cv_add_site", type="primary"):
-            st.session_state["_cv_site_edit"] = {}
             _site_rule_dialog(sb, sites, {}, user_name)
 
     if not rules:
-        st.markdown("<div class='cv-empty'>No site conveyance rules defined yet.</div>",
+        st.markdown("<div class='cv-empty'>No active site conveyance rules defined yet.</div>",
                     unsafe_allow_html=True)
         return
 
-    # Table header
-    hdrs = ["Site", "Rate", "Unit", "Eff. From", "Eff. To", "Active", "Actions"]
-    html = "<div class='cv-row cv-row-site cv-hdr'>"
-    for h in hdrs:
-        html += f"<span>{h}</span>"
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+    # Column headers
+    h1, h2, h3, h4, h5, h6, h7 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1, 1.2])
+    for col, label in zip([h1,h2,h3,h4,h5,h6,h7],
+                          ["Site","Rate","Unit","Eff. From","Eff. To","Status","Actions"]):
+        col.markdown(f"<span style='font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;'>{label}</span>",
+                     unsafe_allow_html=True)
+    st.markdown("<hr style='margin:4px 0 8px;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
     for rule in rules:
-        site_name  = site_lookup.get(rule.get("site_id", ""), rule.get("site_id", "—"))
-        rate_txt   = f"₹{float(rule.get('rate',0)):,.2f}"
-        badge_cls  = "cv-badge-active" if rule.get("is_active") else "cv-badge-inactive"
-        badge_txt  = "Active" if rule.get("is_active") else "Inactive"
-
-        st.markdown(
-            f"<div class='cv-row cv-row-site'>"
-            f"<span style='font-weight:600;'>{site_name}</span>"
-            f"<span>{rate_txt}</span>"
-            f"<span>{rule.get('unit','—')}</span>"
-            f"<span>{_fmt_date(rule.get('effective_from'))}</span>"
-            f"<span>{_fmt_date(rule.get('effective_to'))}</span>"
-            f"<span><span class='{badge_cls}'>{badge_txt}</span></span>"
-            f"<span></span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        e_col, d_col = st.columns([1, 1])
-        with e_col:
-            if st.button("Edit", key=f"_cv_site_ed_{rule['id']}", use_container_width=True):
+        site_name = site_lookup.get(rule.get("site_id", ""), "—")
+        c1,c2,c3,c4,c5,c6,c7 = st.columns([2.5, 1.2, 1.2, 1.2, 1.2, 1, 1.2])
+        c1.markdown(f"**{site_name}**")
+        c2.write(f"₹{float(rule.get('rate',0)):,.2f}")
+        c3.write(rule.get("unit", "—"))
+        c4.write(_fmt_date(rule.get("effective_from")))
+        c5.write(_fmt_date(rule.get("effective_to")) or "Open")
+        c6.markdown("<span style='background:#DCFCE7;color:#166534;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;'>Active</span>",
+                    unsafe_allow_html=True)
+        with c7:
+            a1, a2 = st.columns(2)
+            if a1.button("Edit", key=f"_cv_site_ed_{rule['id']}", use_container_width=True):
                 _site_rule_dialog(sb, sites, rule, user_name)
-        with d_col:
-            if is_adm:
-                if st.button("Delete", key=f"_cv_site_del_{rule['id']}", use_container_width=True):
-                    try:
-                        sb.delete_conveyance_site_rule(rule["id"])
-                        st.toast("Rule deleted.", icon="🗑️")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Delete failed: {exc}")
+            if is_adm and a2.button("Off", key=f"_cv_site_deact_{rule['id']}", use_container_width=True,
+                                     help="Deactivate this rule"):
+                try:
+                    sb.upsert_conveyance_site_rule({**rule, "id": rule["id"], "is_active": False})
+                    st.toast("Rule deactivated.", icon="✅")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Deactivate failed: {exc}")
+        st.markdown("<div style='border-bottom:1px solid #F1F5F9;margin:2px 0;'></div>",
+                    unsafe_allow_html=True)
 
 
 # ── Employee Overrides ────────────────────────────────────────────────────────
@@ -286,10 +280,13 @@ def _override_dialog(sb: SupabaseClient, operators: list, sites: list, prefill: 
 
 def _render_overrides(sb: SupabaseClient, is_adm: bool, operators: list, sites: list, user_name: str) -> None:
     try:
-        overrides = sb.list_conveyance_overrides()
+        all_overrides = sb.list_conveyance_overrides()
     except Exception as exc:
         st.warning(f"Could not load overrides: {exc}")
         return
+
+    # Only show active overrides
+    overrides = [o for o in all_overrides if o.get("is_active", True)]
 
     op_lookup   = {op["id"]: f"{op.get('emp_code','')} — {op.get('operator_name','')}" for op in operators}
     site_lookup = {s["id"]: s["site_name"] for s in sites}
@@ -300,49 +297,43 @@ def _render_overrides(sb: SupabaseClient, is_adm: bool, operators: list, sites: 
             _override_dialog(sb, operators, sites, {}, user_name)
 
     if not overrides:
-        st.markdown("<div class='cv-empty'>No employee overrides defined yet.</div>",
+        st.markdown("<div class='cv-empty'>No active employee overrides defined yet.</div>",
                     unsafe_allow_html=True)
         return
 
-    hdrs = ["Employee", "Site", "Rate", "Unit", "Eff. From", "Active", "Actions"]
-    html = "<div class='cv-row cv-row-override cv-hdr'>"
-    for h in hdrs:
-        html += f"<span>{h}</span>"
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+    # Column headers
+    h1,h2,h3,h4,h5,h6,h7 = st.columns([2.5, 2, 1.2, 1.2, 1.2, 1, 1.2])
+    for col, label in zip([h1,h2,h3,h4,h5,h6,h7],
+                          ["Employee","Site","Rate","Unit","Eff. From","Status","Actions"]):
+        col.markdown(f"<span style='font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;'>{label}</span>",
+                     unsafe_allow_html=True)
+    st.markdown("<hr style='margin:4px 0 8px;border-color:#F1F5F9;'>", unsafe_allow_html=True)
 
     for ov in overrides:
-        op_name    = op_lookup.get(ov.get("operator_id", ""), "—")
-        site_name  = site_lookup.get(ov.get("site_id", ""), "—")
-        rate_txt   = f"₹{float(ov.get('rate',0)):,.2f}"
-        badge_cls  = "cv-badge-active" if ov.get("is_active") else "cv-badge-inactive"
-        badge_txt  = "Active" if ov.get("is_active") else "Inactive"
-
-        st.markdown(
-            f"<div class='cv-row cv-row-override'>"
-            f"<span style='font-weight:600;'>{op_name}</span>"
-            f"<span>{site_name}</span>"
-            f"<span>{rate_txt}</span>"
-            f"<span>{ov.get('unit','—')}</span>"
-            f"<span>{_fmt_date(ov.get('effective_from'))}</span>"
-            f"<span><span class='{badge_cls}'>{badge_txt}</span></span>"
-            f"<span></span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        e_col, d_col = st.columns([1, 1])
-        with e_col:
-            if st.button("Edit", key=f"_cv_ov_ed_{ov['id']}", use_container_width=True):
+        op_name   = op_lookup.get(ov.get("operator_id", ""), "—")
+        site_name = site_lookup.get(ov.get("site_id", ""), "—")
+        c1,c2,c3,c4,c5,c6,c7 = st.columns([2.5, 2, 1.2, 1.2, 1.2, 1, 1.2])
+        c1.markdown(f"**{op_name}**")
+        c2.write(site_name)
+        c3.write(f"₹{float(ov.get('rate',0)):,.2f}")
+        c4.write(ov.get("unit", "—"))
+        c5.write(_fmt_date(ov.get("effective_from")))
+        c6.markdown("<span style='background:#DCFCE7;color:#166534;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;'>Active</span>",
+                    unsafe_allow_html=True)
+        with c7:
+            a1, a2 = st.columns(2)
+            if a1.button("Edit", key=f"_cv_ov_ed_{ov['id']}", use_container_width=True):
                 _override_dialog(sb, operators, sites, ov, user_name)
-        with d_col:
-            if is_adm:
-                if st.button("Delete", key=f"_cv_ov_del_{ov['id']}", use_container_width=True):
-                    try:
-                        sb.delete_conveyance_override(ov["id"])
-                        st.toast("Override deleted.", icon="🗑️")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Delete failed: {exc}")
+            if is_adm and a2.button("Off", key=f"_cv_ov_deact_{ov['id']}", use_container_width=True,
+                                     help="Deactivate this override"):
+                try:
+                    sb.upsert_conveyance_override({**ov, "id": ov["id"], "is_active": False})
+                    st.toast("Override deactivated.", icon="✅")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Deactivate failed: {exc}")
+        st.markdown("<div style='border-bottom:1px solid #F1F5F9;margin:2px 0;'></div>",
+                    unsafe_allow_html=True)
 
 
 # ── main render ───────────────────────────────────────────────────────────────

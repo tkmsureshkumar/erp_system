@@ -1424,7 +1424,7 @@ class SupabaseClient:
 
     def list_conveyance_site_rules(self) -> List[Dict[str, Any]]:
         resp = (
-            self.client.table("conveyance_site_rules")
+            self.admin_client.table("conveyance_site_rules")
             .select("*, sites(site_name)")
             .order("created_at", desc=True)
             .execute()
@@ -1451,7 +1451,7 @@ class SupabaseClient:
 
     def list_conveyance_overrides(self) -> List[Dict[str, Any]]:
         resp = (
-            self.client.table("conveyance_employee_overrides")
+            self.admin_client.table("conveyance_employee_overrides")
             .select("*, operators(emp_code, operator_name), sites(site_name)")
             .order("created_at", desc=True)
             .execute()
