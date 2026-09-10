@@ -956,6 +956,211 @@ def _tab_payment_history() -> None:
     )
 
 
+# ── Tab 8: Advance Recovery Through Payroll ───────────────────────────────────
+
+def _tab_advance_recovery() -> None:
+    import calendar
+
+    if not auth.is_admin():
+        st.info("Only Admin can process advance recovery.", icon="🔒")
+        return
+
+    st.markdown("#### Advance Recovery Through Payroll")
+    sb = SupabaseClient()
+    operators = sb.list_operators()
+
+    # ── Month / Year selector ─────────────────────────────────────────────────
+    cy, cm, _ = st.columns([1, 1, 4])
+    sel_year  = cy.number_input("Year",  min_value=2020, max_value=2035,
+                                 value=date.today().year, step=1, key="rec_year")
+    sel_month = cm.selectbox("Month", list(range(1, 13)),
+                              index=date.today().month - 1,
+                              format_func=lambda m: date(2000, m, 1).strftime("%B"),
+                              key="rec_month")
+    payroll_month = f"{int(sel_year)}-{int(sel_month):02d}"
+    last_day      = calendar.monthrange(int(sel_year), int(sel_month))[1]
+    as_on         = date(int(sel_year), int(sel_month), last_day)
+
+    # ── Bulk data load ─────────────────────────────────────────────────────────
+    with st.spinner("Loading advance balances…"):
+        all_openings   = sb.list_advance_opening_balances()
+        all_payments   = sb.list_advance_payments()
+        all_recoveries = sb.list_advance_recoveries()
+
+    from collections import defaultdict
+    openings_by_emp   = defaultdict(list)
+    payments_by_emp   = defaultdict(list)
+    recoveries_by_emp = defaultdict(list)
+    for r in all_openings:   openings_by_emp[r.get("employee_id", "")].append(r)
+    for p in all_payments:   payments_by_emp[p.get("employee_id", "")].append(p)
+    for r in all_recoveries: recoveries_by_emp[r.get("employee_id", "")].append(r)
+
+    already_processed = {
+        r["employee_id"] for r in all_recoveries
+        if r.get("payroll_month") == payroll_month
+    }
+
+    # ── Build eligible operator list ──────────────────────────────────────────
+    eligible = []
+    for op in operators:
+        eid = op["id"]
+        bal = _compute_balance_from(
+            openings_by_emp[eid],
+            payments_by_emp[eid],
+            recoveries_by_emp[eid],
+            as_on,
+        )
+        if bal["balance"] <= 0:
+            continue
+        eligible.append({
+            "emp_id":    eid,
+            "emp_name":  op.get("operator_name", eid),
+            "emp_code":  op.get("emp_code", ""),
+            "outstanding": round(bal["balance"], 2),
+            "done":      eid in already_processed,
+        })
+
+    if not eligible:
+        st.info(f"No operators with outstanding advance balance as of {as_on.strftime('%B %Y')}.")
+        return
+
+    # ── Session state for editable values ─────────────────────────────────────
+    _ROWS_KEY = f"adv_rec_{payroll_month}"
+    if _ROWS_KEY not in st.session_state:
+        st.session_state[_ROWS_KEY] = {}
+    row_state = st.session_state[_ROWS_KEY]
+    for e in eligible:
+        if e["emp_id"] not in row_state:
+            row_state[e["emp_id"]] = {"final": e["outstanding"], "reason": ""}
+
+    # ── Column headers ────────────────────────────────────────────────────────
+    h = st.columns([2.5, 1.3, 1.3, 1.5, 1.5, 2.5])
+    for col, lbl in zip(h, ["Employee", "Outstanding", "Suggested", "Final Recovery",
+                             "Balance After", "Reason (if changed)"]):
+        col.markdown(
+            f"<span style='font-size:10px;font-weight:700;color:#64748B;"
+            f"text-transform:uppercase;'>{lbl}</span>",
+            unsafe_allow_html=True,
+        )
+    st.markdown("<hr style='margin:4px 0 8px;border-color:#F1F5F9;'>",
+                unsafe_allow_html=True)
+
+    # ── Per-operator rows ─────────────────────────────────────────────────────
+    validation_errors: list[str] = []
+
+    for e in eligible:
+        eid         = e["emp_id"]
+        outstanding = e["outstanding"]
+        state       = row_state[eid]
+
+        c1, c2, c3, c4, c5, c6 = st.columns([2.5, 1.3, 1.3, 1.5, 1.5, 2.5])
+
+        if e["done"]:
+            c1.markdown(f"~~{e['emp_name']} ({e['emp_code']})~~")
+            c2.write(f"₹{outstanding:,.0f}")
+            c3.write(f"₹{outstanding:,.0f}")
+            c4.markdown(
+                "<span style='background:#FEF3C7;color:#92400E;padding:2px 8px;"
+                "border-radius:10px;font-size:11px;'>Already Processed</span>",
+                unsafe_allow_html=True,
+            )
+            c5.write("—")
+            c6.write("—")
+        else:
+            c1.markdown(f"**{e['emp_name']}**  `{e['emp_code']}`")
+            c2.write(f"₹{outstanding:,.0f}")
+            c3.write(f"₹{outstanding:,.0f}")
+
+            final = c4.number_input(
+                "Final", min_value=0.0, max_value=float(outstanding),
+                value=float(min(state["final"], outstanding)),
+                step=100.0, key=f"rec_final_{eid}",
+                label_visibility="collapsed",
+            )
+            state["final"] = final
+            balance_after  = outstanding - final
+
+            if balance_after > 0:
+                c5.markdown(f"**₹{balance_after:,.0f}**")
+            else:
+                c5.markdown(
+                    "<span style='background:#DCFCE7;color:#166534;padding:2px 6px;"
+                    "border-radius:8px;font-size:11px;'>Fully Cleared</span>",
+                    unsafe_allow_html=True,
+                )
+
+            reason_required = (round(final, 2) != round(outstanding, 2))
+            reason = c6.text_input(
+                "Reason *" if reason_required else "Reason",
+                value=state["reason"],
+                key=f"rec_reason_{eid}",
+                placeholder="Mandatory if amount reduced" if reason_required else "",
+                label_visibility="collapsed",
+            )
+            state["reason"] = reason
+
+            if reason_required and not reason.strip():
+                validation_errors.append(
+                    f"{e['emp_name']}: reason is mandatory when final recovery "
+                    f"differs from suggested."
+                )
+
+        st.markdown("<div style='border-bottom:1px solid #F8FAFC;margin:2px 0;'></div>",
+                    unsafe_allow_html=True)
+
+    # ── Summary metrics ───────────────────────────────────────────────────────
+    st.markdown("---")
+    processable    = [e for e in eligible if not e["done"]]
+    total_out      = sum(e["outstanding"] for e in processable)
+    total_recovery = sum(row_state[e["emp_id"]]["final"] for e in processable)
+    total_balance  = total_out - total_recovery
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Operators",         len(processable))
+    m2.metric("Total Outstanding", f"₹{total_out:,.0f}")
+    m3.metric("Total Recovery",    f"₹{total_recovery:,.0f}")
+    m4.metric("Balance Remaining", f"₹{total_balance:,.0f}")
+
+    if validation_errors:
+        for err in validation_errors:
+            st.error(err)
+
+    already_count = sum(1 for e in eligible if e["done"])
+    if already_count:
+        st.caption(
+            f"{already_count} operator(s) already have recovery processed for "
+            f"{date(int(sel_year), int(sel_month), 1).strftime('%B %Y')} — shown as struck-through above."
+        )
+
+    if st.button(
+        f"✅ Submit & Process Payroll Recovery — {date(int(sel_year), int(sel_month), 1).strftime('%B %Y')}",
+        type="primary",
+        disabled=(len(processable) == 0),
+        key="adv_rec_submit",
+    ):
+        if validation_errors:
+            st.error("Please fix the errors above before submitting.")
+        else:
+            for e in processable:
+                eid   = e["emp_id"]
+                state = row_state[eid]
+                sb.insert_advance_recovery({
+                    "employee_id":        eid,
+                    "payroll_month":      payroll_month,
+                    "suggested_recovery": e["outstanding"],
+                    "final_recovery":     state["final"],
+                    "change_reason":      state["reason"].strip() if state["reason"].strip() else None,
+                    "processed_by":       _user_name(),
+                })
+            st.success(
+                f"Recovery processed for {len(processable)} operator(s) — "
+                f"{date(int(sel_year), int(sel_month), 1).strftime('%B %Y')}. "
+                f"Advance balances updated."
+            )
+            st.session_state.pop(_ROWS_KEY, None)
+            st.rerun()
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def render() -> None:
@@ -977,6 +1182,7 @@ def render() -> None:
         "💰  Current Advance",
         "📒  Advance Ledger",
         "🗂  Payment History",
+        "🔄  Advance Recovery",
     ])
     with tabs[0]: _tab_opening_balance()
     with tabs[1]: _tab_new_advance()
@@ -985,3 +1191,4 @@ def render() -> None:
     with tabs[4]: _tab_current_advance()
     with tabs[5]: _tab_advance_ledger()
     with tabs[6]: _tab_payment_history()
+    with tabs[7]: _tab_advance_recovery()
