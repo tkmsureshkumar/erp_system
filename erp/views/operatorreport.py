@@ -506,7 +506,8 @@ def _render_salary_report(
     if sal_from and sal_to:
         df = df[(df["Date"] >= sal_from) & (df["Date"] <= sal_to)]
 
-    working_df = df[df["Net Time"] > 0].copy()
+    # A working day is any shift where Net Time > 0 OR Breakdown Hrs > 0
+    working_df = df[(df["Net Time"] > 0) | (df["Breakdown Hrs"] > 0)].copy()
 
     period_start = sal_from or (df["Date"].min() if not df["Date"].dropna().empty else date.today())
     period_end   = sal_to   or (df["Date"].max() if not df["Date"].dropna().empty else date.today())
@@ -518,8 +519,8 @@ def _render_salary_report(
     # ── KPI strip ──────────────────────────────────────────────────────────────
     n_ops    = working_df["Emp Code"].nunique()
     n_days   = len(working_df)
-    ot_hrs   = df[df["OT"] > 0]["OT"].sum()   # includes Sunday OT where Net Time = 0
-    bd_hrs   = working_df["Breakdown Hrs"].sum()
+    ot_hrs   = df[df["OT"] > 0]["OT"].sum()
+    bd_hrs   = df[df["Breakdown Hrs"] > 0]["Breakdown Hrs"].sum()
     total_sal = working_df.drop_duplicates("Emp Code")["Fixed Salary"].sum()
 
     st.markdown(
@@ -545,7 +546,7 @@ def _render_salary_report(
         working_df
         .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date",
                   "Name in Passbook", "IFSC", "Account No."], dropna=False)
-        .agg(Working_Days=("Net Time", "count"))
+        .agg(Working_Days=("Emp Code", "count"))  # each row = 1 working day (Net Time>0 or BD>0)
         .reset_index()
     )
     _ot_emp = (
@@ -638,7 +639,7 @@ def _render_salary_report(
         .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date",
                   "Name in Passbook", "IFSC", "Account No.",
                   "Customer", "Site", "Machine"], dropna=False)
-        .agg(Working_Days=("Net Time", "count"))
+        .agg(Working_Days=("Emp Code", "count"))  # each row = 1 working day (Net Time>0 or BD>0)
         .reset_index()
     )
     _ot_client = (
