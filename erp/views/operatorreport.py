@@ -518,7 +518,7 @@ def _render_salary_report(
     # ── KPI strip ──────────────────────────────────────────────────────────────
     n_ops    = working_df["Emp Code"].nunique()
     n_days   = len(working_df)
-    ot_hrs   = working_df["OT"].sum()
+    ot_hrs   = df[df["OT"] > 0]["OT"].sum()   # includes Sunday OT where Net Time = 0
     bd_hrs   = working_df["Breakdown Hrs"].sum()
     total_sal = working_df.drop_duplicates("Emp Code")["Fixed Salary"].sum()
 
@@ -545,12 +545,16 @@ def _render_salary_report(
         working_df
         .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date",
                   "Name in Passbook", "IFSC", "Account No."], dropna=False)
-        .agg(
-            Working_Days = ("Net Time", "count"),
-            OT_Hrs       = ("OT",       "sum"),
-        )
+        .agg(Working_Days=("Net Time", "count"))
         .reset_index()
     )
+    _ot_emp = (
+        df[df["OT"] > 0]
+        .groupby("Emp Code")["OT"].sum()
+        .rename("OT_Hrs").reset_index()
+    )
+    op_grp = op_grp.merge(_ot_emp, on="Emp Code", how="left")
+    op_grp["OT_Hrs"] = op_grp["OT_Hrs"].fillna(0)
     op_grp["Available Days"] = op_grp["Joining Date"].apply(
         lambda jd: _available_days(jd, period_start, period_end)
     )
@@ -634,12 +638,18 @@ def _render_salary_report(
         .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date",
                   "Name in Passbook", "IFSC", "Account No.",
                   "Customer", "Site", "Machine"], dropna=False)
-        .agg(
-            Working_Days = ("Net Time", "count"),
-            OT_Hrs       = ("OT",       "sum"),
-        )
+        .agg(Working_Days=("Net Time", "count"))
         .reset_index()
     )
+    _ot_client = (
+        df[df["OT"] > 0]
+        .groupby(["Emp Code", "Customer", "Site", "Machine"])["OT"].sum()
+        .rename("OT_Hrs").reset_index()
+    )
+    client_grp = client_grp.merge(
+        _ot_client, on=["Emp Code", "Customer", "Site", "Machine"], how="left"
+    )
+    client_grp["OT_Hrs"] = client_grp["OT_Hrs"].fillna(0)
     client_grp["Available Days"] = client_grp["Joining Date"].apply(
         lambda jd: _available_days(jd, period_start, period_end)
     )
