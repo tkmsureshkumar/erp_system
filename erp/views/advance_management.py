@@ -852,6 +852,110 @@ def _tab_advance_ledger() -> None:
     _render_ledger(sb, op_options[sel])
 
 
+# ── Tab 7: Payment History ─────────────────────────────────────────────────────
+
+def _tab_payment_history() -> None:
+    st.markdown("#### Payment History")
+    sb        = SupabaseClient()
+    operators = sb.list_operators()
+    op_by_id  = {o["id"]: o for o in operators}
+    op_labels = {
+        o["id"]: f"{o.get('emp_code', '')} – {o.get('operator_name', '')}".strip(" –")
+        for o in operators
+    }
+
+    all_payments  = sb.list_advance_payments()
+    all_reqs_list = sb.list_advance_requests()
+    all_requests  = {r["id"]: r for r in all_reqs_list}
+    batches       = {b["id"]: b for b in sb.list_advance_batches()}
+
+    # ── Filters ────────────────────────────────────────────────────────────────
+    fc = st.columns([2, 1.5, 1.5, 1.5, 1.5])
+    label_options  = ["All"] + sorted(lbl for lbl in op_labels.values() if lbl)
+    emp_filter     = fc[0].selectbox("Employee",  label_options,               key="adv_hist_emp")
+    status_filter  = fc[1].selectbox("Status",    ["All", "Pending", "Paid"],  key="adv_hist_status")
+
+    today = date.today()
+    period = fc[2].selectbox("Period",
+                              ["All Time", "This Month", "Last 3 Months", "Custom"],
+                              key="adv_hist_period")
+    if period == "This Month":
+        date_from = today.replace(day=1)
+        date_to   = today
+    elif period == "Last 3 Months":
+        date_from = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+        date_from = date_from.replace(month=max(1, date_from.month - 2))
+        date_to   = today
+    elif period == "Custom":
+        date_from = fc[3].date_input("From", value=today - timedelta(days=30), key="adv_hist_from")
+        date_to   = fc[4].date_input("To",   value=today,                      key="adv_hist_to")
+    else:
+        date_from = None
+        date_to   = None
+
+    rows = []
+    for p in all_payments:
+        emp_id   = p.get("employee_id", "")
+        op       = op_by_id.get(emp_id, {})
+        emp_name = op.get("operator_name", emp_id)
+        emp_code = op.get("emp_code", "")
+        emp_lbl  = op_labels.get(emp_id, "")
+
+        if emp_filter != "All" and emp_lbl != emp_filter:
+            continue
+
+        status = p.get("payment_status") or "Pending"
+        if status_filter != "All" and status != status_filter:
+            continue
+
+        req       = all_requests.get(p.get("advance_request_id", ""), {})
+        batch     = batches.get(req.get("batch_id", ""), {})
+        pay_date  = p.get("payment_date") or ""
+        appr_date = str(req.get("approved_at") or "")[:10]
+
+        # Date range filter applies on payment_date (fall back to approval date for pending)
+        ref_date_str = pay_date or appr_date
+        if date_from and ref_date_str:
+            if ref_date_str < str(date_from):
+                continue
+        if date_to and ref_date_str:
+            if ref_date_str > str(date_to):
+                continue
+
+        rows.append({
+            "Employee":        f"{emp_name} ({emp_code})",
+            "Advance Date":    req.get("advance_date", ""),
+            "Amount (₹)":      float(p.get("amount") or 0),
+            "Approval Date":   appr_date,
+            "Payment Date":    pay_date,
+            "Payment Status":  status,
+            "UTR / Reference": p.get("utr_reference") or "—",
+            "Batch Number":    batch.get("batch_number") or "—",
+        })
+
+    if not rows:
+        st.info("No payment records found for the selected filters.")
+        return
+
+    total_paid    = sum(r["Amount (₹)"] for r in rows if r["Payment Status"] == "Paid")
+    total_pending = sum(r["Amount (₹)"] for r in rows if r["Payment Status"] == "Pending")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Records",   len(rows))
+    m2.metric("Total Paid",      f"₹{total_paid:,.0f}")
+    m3.metric("Total Pending",   f"₹{total_pending:,.0f}")
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f"),
+            "Payment Status": st.column_config.TextColumn(),
+        },
+    )
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def render() -> None:
@@ -872,6 +976,7 @@ def render() -> None:
         "💳  Pending Payment",
         "💰  Current Advance",
         "📒  Advance Ledger",
+        "🗂  Payment History",
     ])
     with tabs[0]: _tab_opening_balance()
     with tabs[1]: _tab_new_advance()
@@ -879,3 +984,4 @@ def render() -> None:
     with tabs[3]: _tab_pending_payment()
     with tabs[4]: _tab_current_advance()
     with tabs[5]: _tab_advance_ledger()
+    with tabs[6]: _tab_payment_history()
