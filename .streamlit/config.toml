@@ -1,0 +1,9 @@
+[server]
+# Maximum time (seconds) the server waits before closing an idle connection
+# 5 hours = 18000 seconds
+maxUploadSize = 200
+
+[browser]
+# How long (seconds) the browser waits for the server before timing out the session
+# 5 hours = 18000 seconds
+serverTimeout = 18000
