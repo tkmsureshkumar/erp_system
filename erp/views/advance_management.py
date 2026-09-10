@@ -405,11 +405,12 @@ def _tab_new_advance() -> None:
             "status":         "Submitted",
         })
         batch_id = batch.get("id")
+        _pm_col_missing = False
         for r in valid:
             adv_date = r["date"]
             if hasattr(adv_date, "isoformat"):
                 adv_date = adv_date.isoformat()
-            sb.insert_advance_request({
+            payload = {
                 "batch_id":         batch_id,
                 "employee_id":      label_to_id.get(r["label"], ""),
                 "advance_date":     adv_date,
@@ -417,7 +418,23 @@ def _tab_new_advance() -> None:
                 "payment_mode":     r["payment_mode"],
                 "reason":           r["reason"],
                 "status":           "Pending",
-            })
+            }
+            try:
+                sb.insert_advance_request(payload)
+            except Exception as exc:
+                if "payment_mode" in str(exc) or "column" in str(exc).lower():
+                    _pm_col_missing = True
+                    payload.pop("payment_mode", None)
+                    sb.insert_advance_request(payload)
+                else:
+                    raise
+        if _pm_col_missing:
+            st.warning(
+                "Payment Mode was not saved — the `payment_mode` column is missing in Supabase. "
+                "Run this once in the Supabase SQL editor to enable it:\n\n"
+                "```sql\nALTER TABLE advance_requests "
+                "ADD COLUMN IF NOT EXISTS payment_mode text;\n```"
+            )
         st.success(
             f"Batch **{batch_no}** submitted — {n} employee(s) | ₹{total:,.0f} | Pending Approval"
         )
@@ -688,6 +705,52 @@ def _tab_pending_payment() -> None:
     if paid_list:
         st.markdown("---")
         st.markdown("**Paid History**")
+
+        if auth.is_admin():
+            st.caption("Select entries below to revert them to Unpaid (Pending) status.")
+            unp_all_key  = "adv_unp_sel_all"
+            unp_select_all = st.checkbox("Select All", key=unp_all_key)
+
+            for p in paid_list:
+                cb_key  = f"unp_sel_{p['_id']}"
+                default = unp_select_all or st.session_state.get(cb_key, False)
+                st.checkbox(
+                    f"{p['Employee']}  |  ₹{p['Amount (₹)']:,.0f}  |  "
+                    f"Paid: {p['Payment Date']}  |  UTR: {p['UTR / Reference'] or '—'}",
+                    key=cb_key,
+                    value=default,
+                )
+
+            unp_selected = [p for p in paid_list
+                            if st.session_state.get(f"unp_sel_{p['_id']}", False)]
+
+            if unp_selected:
+                st.markdown(
+                    f"**{len(unp_selected)} selected — Total: "
+                    f"₹{sum(r['Amount (₹)'] for r in unp_selected):,.0f}**"
+                )
+                if st.button(
+                    f"↩ Mark {len(unp_selected)} Payment(s) as Unpaid",
+                    key="adv_bulk_mark_unpaid",
+                    type="secondary",
+                ):
+                    for p in unp_selected:
+                        sb.update_advance_payment(p["_id"], {
+                            "payment_status": "Pending",
+                            "payment_date":   None,
+                            "utr_reference":  None,
+                            "paid_by":        None,
+                            "paid_at":        None,
+                        })
+                    st.success(
+                        f"Reverted {len(unp_selected)} payment(s) back to Pending."
+                    )
+                    for p in unp_selected:
+                        st.session_state.pop(f"unp_sel_{p['_id']}", None)
+                    st.session_state.pop(unp_all_key, None)
+                    st.rerun()
+
+        st.markdown("")
         df = pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")}
                            for r in paid_list])
         st.dataframe(
