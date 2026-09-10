@@ -506,7 +506,7 @@ def _render_salary_report(
     if sal_from and sal_to:
         df = df[(df["Date"] >= sal_from) & (df["Date"] <= sal_to)]
 
-    working_df = df[df["Start Time"].notna() & (df["Start Time"] != "")]
+    working_df = df[df["Net Time"] > 0].copy()
 
     period_start = sal_from or (df["Date"].min() if not df["Date"].dropna().empty else date.today())
     period_end   = sal_to   or (df["Date"].max() if not df["Date"].dropna().empty else date.today())
