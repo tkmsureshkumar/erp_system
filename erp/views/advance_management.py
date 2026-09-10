@@ -106,8 +106,9 @@ def _compute_balance_from(
     advances_given = sum(
         float(p.get("amount") or 0)
         for p in payments
-        if p.get("payment_status") in ("Paid", "Pending")
-        and (not p.get("payment_date") or str(p["payment_date"]) <= str(as_on))
+        if p.get("payment_status") == "Paid"
+        and p.get("payment_date")
+        and str(p["payment_date"]) <= str(as_on)
     )
     total_recoveries = sum(
         float(r.get("final_recovery") or 0)
@@ -138,7 +139,7 @@ def _render_ledger(
                    if all_payments is not None \
                    else sb.list_advance_payments(employee_id=employee_id)
 
-    payments = [p for p in raw_payments if p.get("payment_status") in ("Paid", "Pending")]
+    payments = [p for p in raw_payments if p.get("payment_status") == "Paid"]
 
     recoveries = [r for r in (all_recoveries or []) if r.get("employee_id") == employee_id] \
                  if all_recoveries is not None \
