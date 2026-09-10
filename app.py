@@ -20,6 +20,8 @@ from erp.supabase_client import SupabaseClient
 from erp.views import (
     admin,
     advance_management,
+    payroll_inputs,
+    pf_payments,
     asset,
     closeworkorder,
     conveyance_rules,
@@ -777,6 +779,8 @@ _SIDEBAR_ITEMS = [
     # ── Payroll ───────────────────────────────────────────────────────────────
     ("conveyance_rules",   "commute",                "Conveyance Rules",  "PAYROLL",      None),
     ("advance_management", "account_balance_wallet", "Advance Mgmt",      "PAYROLL",      None),
+    ("payroll_inputs",     "add_circle",             "Payroll Inputs",     "PAYROLL",      None),
+    ("pf_payments",        "account_balance",        "PF & Cust Payments", "PAYROLL",      None),
     # ── Config ────────────────────────────────────────────────────────────────
     ("system",            "settings",                "System",            "CONFIG",       None),
 ]
@@ -1081,6 +1085,18 @@ elif page == "conveyance_rules":
 elif page == "advance_management":
     if auth.has_page_access("advance_management"):
         advance_management.render()
+    else:
+        _access_denied()
+
+elif page == "payroll_inputs":
+    if auth.has_page_access("payroll_inputs"):
+        payroll_inputs.render()
+    else:
+        _access_denied()
+
+elif page == "pf_payments":
+    if auth.has_page_access("pf_payments"):
+        pf_payments.render()
     else:
         _access_denied()
 

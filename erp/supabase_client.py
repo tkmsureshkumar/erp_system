@@ -1576,3 +1576,117 @@ class SupabaseClient:
             self.admin_client.table("advance_recoveries").update(payload).eq("id", recovery_id).execute()
         )
         return rows[0] if rows else {}
+
+    # ── Payroll Inputs (Additions & Deductions) ───────────────────────────────
+
+    def list_payroll_additions(
+        self,
+        employee_id: str | None = None,
+        payroll_month: str | None = None,
+        status: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.admin_client.table("payroll_additions").select("*").order("created_at", desc=True)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        if payroll_month:
+            q = q.eq("payroll_month", payroll_month)
+        if status:
+            q = q.eq("status", status)
+        return self._adv_exec(q.execute())
+
+    def insert_payroll_addition(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("payroll_additions").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def update_payroll_addition(self, rec_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("payroll_additions").update(payload).eq("id", rec_id).execute()
+        )
+        return rows[0] if rows else {}
+
+    def delete_payroll_addition(self, rec_id: str) -> None:
+        self.admin_client.table("payroll_additions").delete().eq("id", rec_id).execute()
+
+    def list_payroll_deductions(
+        self,
+        employee_id: str | None = None,
+        payroll_month: str | None = None,
+        status: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.admin_client.table("payroll_deductions").select("*").order("created_at", desc=True)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        if payroll_month:
+            q = q.eq("payroll_month", payroll_month)
+        if status:
+            q = q.eq("status", status)
+        return self._adv_exec(q.execute())
+
+    def insert_payroll_deduction(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("payroll_deductions").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def update_payroll_deduction(self, rec_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("payroll_deductions").update(payload).eq("id", rec_id).execute()
+        )
+        return rows[0] if rows else {}
+
+    def delete_payroll_deduction(self, rec_id: str) -> None:
+        self.admin_client.table("payroll_deductions").delete().eq("id", rec_id).execute()
+
+    # ── PF Records ────────────────────────────────────────────────────────────
+
+    def list_payroll_pf(
+        self,
+        employee_id: str | None = None,
+        payroll_month: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.admin_client.table("payroll_pf").select("*").order("created_at", desc=True)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        if payroll_month:
+            q = q.eq("payroll_month", payroll_month)
+        return self._adv_exec(q.execute())
+
+    def insert_payroll_pf(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(self.admin_client.table("payroll_pf").insert(payload).execute())
+        return rows[0] if rows else {}
+
+    def update_payroll_pf(self, rec_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("payroll_pf").update(payload).eq("id", rec_id).execute()
+        )
+        return rows[0] if rows else {}
+
+    def delete_payroll_pf(self, rec_id: str) -> None:
+        self.admin_client.table("payroll_pf").delete().eq("id", rec_id).execute()
+
+    # ── Customer Direct Payments ──────────────────────────────────────────────
+
+    def list_payroll_customer_payments(
+        self,
+        employee_id: str | None = None,
+        payroll_month: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.admin_client.table("payroll_customer_payments").select("*").order("created_at", desc=True)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        if payroll_month:
+            q = q.eq("payroll_month", payroll_month)
+        return self._adv_exec(q.execute())
+
+    def insert_payroll_customer_payment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("payroll_customer_payments").insert(payload).execute()
+        )
+        return rows[0] if rows else {}
+
+    def update_payroll_customer_payment(self, rec_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._adv_exec(
+            self.admin_client.table("payroll_customer_payments").update(payload).eq("id", rec_id).execute()
+        )
+        return rows[0] if rows else {}
+
+    def delete_payroll_customer_payment(self, rec_id: str) -> None:
+        self.admin_client.table("payroll_customer_payments").delete().eq("id", rec_id).execute()

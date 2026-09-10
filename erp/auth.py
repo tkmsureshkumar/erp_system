@@ -39,6 +39,8 @@ ALL_PAGES: dict[str, str] = {
     # ── Payroll ───────────────────────────────────────────────────────────────
     "conveyance_rules":    "Conveyance Rules",
     "advance_management":  "Advance Management",
+    "payroll_inputs":      "Payroll Inputs",
+    "pf_payments":         "PF & Customer Payments",
     # ── Config ────────────────────────────────────────────────────────────────
     "system":          "System",
 }
