@@ -249,24 +249,19 @@ def _build_worklog_agg(
 # ── Calculation ───────────────────────────────────────────────────────────────
 
 def _recompute(df: pd.DataFrame) -> pd.DataFrame:
-    """Recompute all derived columns from editable inputs.
+    """Auto-calculate summary columns from component values.
 
-    Formulas:
-        Earned Basic   = Fixed Salary × No. of Days Worked / Month Days
-        OT Amt         = Fixed Salary / Month Days / 12 × OT Hours
-        Total Amt      = Earned Basic + OT Amt
-        Deduction Total= Sal Paid Other + Advance Deduction + PF Amt
-        Net Payable    = Total Amt − Deduction Total
+    Earned Basic and OT Amt are pre-filled on load and freely editable.
+    Total Amt, Deduction Total, Net Payable are always derived:
+        No. of Days Worked = min(Working Days, Month Days)          [display only]
+        Total Amt          = Earned Basic + OT Amt
+        Deduction Total    = Sal Paid Other + Advance Deduction + PF Amt
+        Net Payable        = Total Amt − Deduction Total
     """
     df = df.copy()
-    md = df["Month Days"].astype(float).replace(0.0, 1.0)
-    fs = df["Fixed Salary"].astype(float)
     dw = df["Working Days"].astype(float).clip(upper=df["Month Days"].astype(float))
     df["No. of Days Worked"] = dw.astype(int)
-
-    df["Earned Basic"]    = (fs * dw / md).round(0)
-    df["OT Amt"]          = (fs / md / 12.0 * df["OT Hours"].astype(float)).round(0)
-    df["Total Amt"]       = df["Earned Basic"] + df["OT Amt"]
+    df["Total Amt"]       = df["Earned Basic"].astype(float) + df["OT Amt"].astype(float)
     df["Deduction Total"] = (
         df["Sal Paid Other"].astype(float)
         + df["Advance Deduction"].astype(float)
@@ -274,6 +269,17 @@ def _recompute(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["Net Payable"]     = df["Total Amt"] - df["Deduction Total"]
     return df
+
+
+def _initial_fill(df: pd.DataFrame) -> pd.DataFrame:
+    """Pre-fill Earned Basic and OT Amt from formula on first load."""
+    df = df.copy()
+    md = df["Month Days"].astype(float).replace(0.0, 1.0)
+    fs = df["Fixed Salary"].astype(float)
+    dw = df["Working Days"].astype(float).clip(upper=md)
+    df["Earned Basic"] = (fs * dw / md).round(0)
+    df["OT Amt"]       = (fs / md / 12.0 * df["OT Hours"].astype(float)).round(0)
+    return _recompute(df)
 
 
 # ── Tab 1: Payroll Calculator ─────────────────────────────────────────────────
@@ -398,7 +404,7 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
 
             df = pd.DataFrame(rows) if rows else pd.DataFrame()
             if not df.empty:
-                df = _recompute(df)
+                df = _initial_fill(df)   # formula-fill Earned Basic & OT Amt, then summarise
             st.session_state[cache_key] = df
 
     df: pd.DataFrame = st.session_state.get(cache_key, pd.DataFrame())
@@ -437,52 +443,57 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
 
     st.markdown(
         "<div class='ps-info-note'>"
-        "✏️ <strong>Editable columns:</strong> Working Days · OT Hours · Sal Paid Other · "
-        "Advance Deduction · PF Amt · Remarks — all other columns auto-calculate on edit.<br>"
-        "📐 <strong>Formulas:</strong> "
-        "Earned = Fixed Sal × Days Worked ÷ Month Days &nbsp;|&nbsp; "
-        "Total = Earned + OT &nbsp;|&nbsp; "
-        "Deductions = Sal by Cust + Advance + PF &nbsp;|&nbsp; "
-        "Net = Total − Deductions"
+        "✏️ <strong>All numeric columns are editable.</strong> "
+        "Earned Basic and OT Amt are pre-filled from formula on load and can be overridden.<br>"
+        "🔄 <strong>Auto-calculated on every edit:</strong> "
+        "Total Amt = Earned + OT &nbsp;·&nbsp; "
+        "Deduction Total = Sal by Cust + Advance + PF &nbsp;·&nbsp; "
+        "Net Payable = Total − Deductions"
         "</div>",
         unsafe_allow_html=True,
     )
 
     # ── Editor ─────────────────────────────────────────────────────────────────
-    editable = {"Working Days", "OT Hours", "Sal Paid Other", "Advance Deduction", "PF Amt", "Remarks"}
-    display_cols = [c for c in df.columns if c != "_emp_id"]
-    readonly_cols = [c for c in display_cols if c not in editable]
+    # Text identity columns stay read-only; No. of Days Worked, Total Amt,
+    # Deduction Total, Net Payable are always auto-calculated.
+    # Every OTHER column (all numeric) is editable.
+    always_readonly = {
+        "Emp Code", "Operator", "Name in Passbook", "IFSC", "Account No.",
+        "No. of Days Worked", "Total Amt", "Deduction Total", "Net Payable",
+    }
+    display_cols  = [c for c in df.columns if c != "_emp_id"]
+    readonly_cols = [c for c in display_cols if c in always_readonly]
 
     col_cfg: dict = {
-        "Emp Code":          st.column_config.TextColumn("Emp Code",     width="small"),
-        "Operator":          st.column_config.TextColumn("Operator",     width="medium"),
-        "Fixed Salary":      st.column_config.NumberColumn("Fixed Sal",  format="₹%,.0f", width="small"),
-        "Avail Days":        st.column_config.NumberColumn("Avail Days", width="small"),
-        "Working Days":      st.column_config.NumberColumn("Work Days",  width="small",
-                              min_value=0, max_value=366,
-                              help="Days from worklog (Net>0 or BD>0). Edit to override."),
-        "OT Hours":          st.column_config.NumberColumn("OT Hrs",     format="%.2f", width="small",
-                              min_value=0.0, help="Edit to override OT hours from worklog."),
-        "Name in Passbook":  st.column_config.TextColumn("Passbook Name", width="medium"),
-        "IFSC":              st.column_config.TextColumn("IFSC",         width="small"),
-        "Account No.":       st.column_config.TextColumn("Account No.",  width="medium"),
-        "Month Days":        st.column_config.NumberColumn("Month Days",       width="small"),
-        "No. of Days Worked":st.column_config.NumberColumn("No. of Days Worked", width="small"),
-        "Earned Basic":      st.column_config.NumberColumn("Earned",            format="₹%,.0f", width="small"),
-        "OT Amt":            st.column_config.NumberColumn("OT Amt",     format="₹%,.0f", width="small"),
-        "Additions":         st.column_config.NumberColumn("Additions",  format="₹%,.0f", width="small"),
-        "Total Amt":         st.column_config.NumberColumn("Total Amt",  format="₹%,.0f", width="small"),
-        "Sal Paid Other":    st.column_config.NumberColumn("Sal by Cust",format="₹%,.0f", width="small",
-                              min_value=0.0, help="Salary paid directly by customer. Edit to override."),
-        "Current Advance":   st.column_config.NumberColumn("Curr Adv",   format="₹%,.0f", width="small"),
-        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct", format="₹%,.0f", width="small",
-                              min_value=0.0, help="Advance recovery for this payroll month."),
-        "PF Amt":            st.column_config.NumberColumn("PF Amt",     format="₹%,.0f", width="small",
-                              min_value=0.0, help="PF deduction from employee salary."),
-        "Other Deductions":  st.column_config.NumberColumn("Other Ded",  format="₹%,.0f", width="small"),
-        "Deduction Total":   st.column_config.NumberColumn("Ded Total",  format="₹%,.0f", width="small"),
-        "Net Payable":       st.column_config.NumberColumn("Net Payable",format="₹%,.0f", width="small"),
-        "Remarks":           st.column_config.TextColumn("Remarks",      width="medium"),
+        "Emp Code":          st.column_config.TextColumn("Emp Code",          width="small"),
+        "Operator":          st.column_config.TextColumn("Operator",          width="medium"),
+        "Fixed Salary":      st.column_config.NumberColumn("Fixed Sal",       format="₹%,.0f", width="small",   min_value=0),
+        "Avail Days":        st.column_config.NumberColumn("Avail Days",      width="small",   min_value=0),
+        "Working Days":      st.column_config.NumberColumn("Work Days",       width="small",   min_value=0, max_value=366,
+                              help="Auto-filled from worklog. Edit to override."),
+        "OT Hours":          st.column_config.NumberColumn("OT Hrs",          format="%.2f",   width="small",   min_value=0.0,
+                              help="Auto-filled from worklog. Edit to override."),
+        "Name in Passbook":  st.column_config.TextColumn("Passbook Name",     width="medium"),
+        "IFSC":              st.column_config.TextColumn("IFSC",              width="small"),
+        "Account No.":       st.column_config.TextColumn("Account No.",       width="medium"),
+        "Month Days":        st.column_config.NumberColumn("Month Days",      width="small",   min_value=1, max_value=31),
+        "No. of Days Worked":st.column_config.NumberColumn("Days Worked",     width="small"),
+        "Earned Basic":      st.column_config.NumberColumn("Earned Basic",    format="₹%,.0f", width="small",   min_value=0,
+                              help="Pre-filled from formula. Edit to override."),
+        "OT Amt":            st.column_config.NumberColumn("OT Amt",          format="₹%,.0f", width="small",   min_value=0,
+                              help="Pre-filled from formula. Edit to override."),
+        "Additions":         st.column_config.NumberColumn("Additions",       format="₹%,.0f", width="small",   min_value=0),
+        "Total Amt":         st.column_config.NumberColumn("Total Amt",       format="₹%,.0f", width="small"),
+        "Sal Paid Other":    st.column_config.NumberColumn("Sal by Cust",     format="₹%,.0f", width="small",   min_value=0,
+                              help="Salary paid directly by customer."),
+        "Current Advance":   st.column_config.NumberColumn("Curr Adv",        format="₹%,.0f", width="small",   min_value=0),
+        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct",      format="₹%,.0f", width="small",   min_value=0,
+                              help="Advance recovery for this payroll month."),
+        "PF Amt":            st.column_config.NumberColumn("PF Amt",          format="₹%,.0f", width="small",   min_value=0),
+        "Other Deductions":  st.column_config.NumberColumn("Other Ded",       format="₹%,.0f", width="small",   min_value=0),
+        "Deduction Total":   st.column_config.NumberColumn("Ded Total",       format="₹%,.0f", width="small"),
+        "Net Payable":       st.column_config.NumberColumn("Net Payable",     format="₹%,.0f", width="small"),
+        "Remarks":           st.column_config.TextColumn("Remarks",           width="medium"),
     }
 
     edited = st.data_editor(
@@ -495,10 +506,12 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
         num_rows="fixed",
     )
 
-    # Merge editable columns back, recompute, persist
-    for col in editable:
+    # Merge all edited columns back (everything except the auto-calculated ones)
+    editable_cols = [c for c in display_cols if c not in always_readonly]
+    for col in editable_cols:
         if col in edited.columns:
             df[col] = edited[col].values
+    # Always recalculate summary columns
     df = _recompute(df)
     st.session_state[cache_key] = df
 
