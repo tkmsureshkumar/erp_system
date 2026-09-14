@@ -23,6 +23,7 @@ __all__ = [
     "machine",
     "operatorreport",
     "operator",
+    "payment_summary",
     "payroll_inputs",
     "pf_payments",
     "site",
