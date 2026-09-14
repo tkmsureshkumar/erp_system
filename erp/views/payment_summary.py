@@ -249,36 +249,38 @@ def _build_worklog_agg(
 # ── Calculation ───────────────────────────────────────────────────────────────
 
 def _recompute(df: pd.DataFrame) -> pd.DataFrame:
-    """Auto-calculate summary columns from component values.
+    """Auto-calculate all derived columns.
 
-    Earned Basic and OT Amt are pre-filled on load and freely editable.
-    Total Amt, Deduction Total, Net Payable are always derived:
-        No. of Days Worked = min(Working Days, Month Days)          [display only]
+        No. of Days Worked = min(Working Days, Month Days)
+        Earned Basic       = No. of Days Worked / Month Days × Fixed Salary
+        OT Amt             = Fixed Salary / Month Days / 12 × OT Hours  (editable override)
         Total Amt          = Earned Basic + OT Amt
         Deduction Total    = Sal Paid Other + Advance Deduction + PF Amt
         Net Payable        = Total Amt − Deduction Total
     """
     df = df.copy()
+    md = df["Month Days"].astype(float).replace(0.0, 1.0)
+    fs = df["Fixed Salary"].astype(float)
     dw = df["Working Days"].astype(float).clip(upper=df["Month Days"].astype(float))
+
     df["No. of Days Worked"] = dw.astype(int)
-    df["Total Amt"]       = df["Earned Basic"].astype(float) + df["OT Amt"].astype(float)
-    df["Deduction Total"] = (
+    df["Earned Basic"]       = (dw / md * fs).round(0)
+    df["Total Amt"]          = df["Earned Basic"] + df["OT Amt"].astype(float)
+    df["Deduction Total"]    = (
         df["Sal Paid Other"].astype(float)
         + df["Advance Deduction"].astype(float)
         + df["PF Amt"].astype(float)
     )
-    df["Net Payable"]     = df["Total Amt"] - df["Deduction Total"]
+    df["Net Payable"]        = df["Total Amt"] - df["Deduction Total"]
     return df
 
 
 def _initial_fill(df: pd.DataFrame) -> pd.DataFrame:
-    """Pre-fill Earned Basic and OT Amt from formula on first load."""
+    """Pre-fill OT Amt from formula on first load, then run full recompute."""
     df = df.copy()
     md = df["Month Days"].astype(float).replace(0.0, 1.0)
     fs = df["Fixed Salary"].astype(float)
-    dw = df["Working Days"].astype(float).clip(upper=md)
-    df["Earned Basic"] = (fs * dw / md).round(0)
-    df["OT Amt"]       = (fs / md / 12.0 * df["OT Hours"].astype(float)).round(0)
+    df["OT Amt"] = (fs / md / 12.0 * df["OT Hours"].astype(float)).round(0)
     return _recompute(df)
 
 
@@ -443,12 +445,13 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
 
     st.markdown(
         "<div class='ps-info-note'>"
-        "✏️ <strong>All numeric columns are editable.</strong> "
-        "Earned Basic and OT Amt are pre-filled from formula on load and can be overridden.<br>"
-        "🔄 <strong>Auto-calculated on every edit:</strong> "
-        "Total Amt = Earned + OT &nbsp;·&nbsp; "
-        "Deduction Total = Sal by Cust + Advance + PF &nbsp;·&nbsp; "
-        "Net Payable = Total − Deductions"
+        "🔄 <strong>Auto-calculated (read-only):</strong> "
+        "Earned Basic = Days Worked ÷ Month Days × Fixed Salary &nbsp;·&nbsp; "
+        "Total = Earned + OT &nbsp;·&nbsp; "
+        "Deductions = Sal by Cust + Advance + PF &nbsp;·&nbsp; "
+        "Net = Total − Deductions<br>"
+        "✏️ <strong>Editable:</strong> Working Days · OT Hours · Fixed Salary · Month Days · "
+        "OT Amt · Sal Paid Other · Advance Deduction · PF Amt · Additions · Remarks"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -459,7 +462,7 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
     # Every OTHER column (all numeric) is editable.
     always_readonly = {
         "Emp Code", "Operator", "Name in Passbook", "IFSC", "Account No.",
-        "No. of Days Worked", "Total Amt", "Deduction Total", "Net Payable",
+        "No. of Days Worked", "Earned Basic", "Total Amt", "Deduction Total", "Net Payable",
     }
     display_cols  = [c for c in df.columns if c != "_emp_id"]
     readonly_cols = [c for c in display_cols if c in always_readonly]
