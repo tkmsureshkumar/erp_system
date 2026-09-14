@@ -249,23 +249,30 @@ def _build_worklog_agg(
 # ── Calculation ───────────────────────────────────────────────────────────────
 
 def _recompute(df: pd.DataFrame) -> pd.DataFrame:
-    """Recompute all derived columns from editable inputs."""
+    """Recompute all derived columns from editable inputs.
+
+    Formulas:
+        Earned Basic   = Fixed Salary × No. of Days Worked / Month Days
+        OT Amt         = Fixed Salary / Month Days / 12 × OT Hours
+        Total Amt      = Earned Basic + OT Amt
+        Deduction Total= Sal Paid Other + Advance Deduction + PF Amt
+        Net Payable    = Total Amt − Deduction Total
+    """
     df = df.copy()
     md = df["Month Days"].astype(float).replace(0.0, 1.0)
     fs = df["Fixed Salary"].astype(float)
     dw = df["Working Days"].astype(float).clip(upper=df["Month Days"].astype(float))
     df["No. of Days Worked"] = dw.astype(int)
 
-    df["Earned Basic"]      = (fs * dw / md).round(0)
-    df["OT Amt"]            = (fs / md / 12.0 * df["OT Hours"].astype(float)).round(0)
-    df["Total Amt"]         = df["Earned Basic"] + df["OT Amt"] + df["Additions"].astype(float)
-    df["Deduction Total"]   = (
+    df["Earned Basic"]    = (fs * dw / md).round(0)
+    df["OT Amt"]          = (fs / md / 12.0 * df["OT Hours"].astype(float)).round(0)
+    df["Total Amt"]       = df["Earned Basic"] + df["OT Amt"]
+    df["Deduction Total"] = (
         df["Sal Paid Other"].astype(float)
         + df["Advance Deduction"].astype(float)
         + df["PF Amt"].astype(float)
-        + df["Other Deductions"].astype(float)
     )
-    df["Net Payable"]       = df["Total Amt"] - df["Deduction Total"]
+    df["Net Payable"]     = df["Total Amt"] - df["Deduction Total"]
     return df
 
 
@@ -431,9 +438,12 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
     st.markdown(
         "<div class='ps-info-note'>"
         "✏️ <strong>Editable columns:</strong> Working Days · OT Hours · Sal Paid Other · "
-        "Advance Deduction · PF Amt · Remarks. "
-        "All other columns are auto-calculated. "
-        "OT rate = Fixed Salary ÷ Month Days ÷ 12 hrs."
+        "Advance Deduction · PF Amt · Remarks — all other columns auto-calculate on edit.<br>"
+        "📐 <strong>Formulas:</strong> "
+        "Earned = Fixed Sal × Days Worked ÷ Month Days &nbsp;|&nbsp; "
+        "Total = Earned + OT &nbsp;|&nbsp; "
+        "Deductions = Sal by Cust + Advance + PF &nbsp;|&nbsp; "
+        "Net = Total − Deductions"
         "</div>",
         unsafe_allow_html=True,
     )
