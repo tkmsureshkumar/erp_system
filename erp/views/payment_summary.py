@@ -254,6 +254,7 @@ def _recompute(df: pd.DataFrame) -> pd.DataFrame:
     md = df["Month Days"].astype(float).replace(0.0, 1.0)
     fs = df["Fixed Salary"].astype(float)
     dw = df["Working Days"].astype(float).clip(upper=df["Month Days"].astype(float))
+    df["No. of Days Worked"] = dw.astype(int)
 
     df["Earned Basic"]      = (fs * dw / md).round(0)
     df["OT Amt"]            = (fs / md / 12.0 * df["OT Hours"].astype(float)).round(0)
@@ -373,6 +374,7 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
                     "IFSC":              op.get("ifsc_code", ""),
                     "Account No.":       op.get("bank_account_number", ""),
                     "Month Days":        int(month_days),
+                    "No. of Days Worked": 0,
                     "Earned Basic":      0.0,
                     "OT Amt":            0.0,
                     "Additions":         round(add_by_emp.get(eid, 0.0), 0),
@@ -454,8 +456,9 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
         "Name in Passbook":  st.column_config.TextColumn("Passbook Name", width="medium"),
         "IFSC":              st.column_config.TextColumn("IFSC",         width="small"),
         "Account No.":       st.column_config.TextColumn("Account No.",  width="medium"),
-        "Month Days":        st.column_config.NumberColumn("Month Days", width="small"),
-        "Earned Basic":      st.column_config.NumberColumn("Earned",     format="₹%,.0f", width="small"),
+        "Month Days":        st.column_config.NumberColumn("Month Days",       width="small"),
+        "No. of Days Worked":st.column_config.NumberColumn("No. of Days Worked", width="small"),
+        "Earned Basic":      st.column_config.NumberColumn("Earned",            format="₹%,.0f", width="small"),
         "OT Amt":            st.column_config.NumberColumn("OT Amt",     format="₹%,.0f", width="small"),
         "Additions":         st.column_config.NumberColumn("Additions",  format="₹%,.0f", width="small"),
         "Total Amt":         st.column_config.NumberColumn("Total Amt",  format="₹%,.0f", width="small"),
