@@ -1,47 +1,56 @@
 """
-erp/views/payment_summary.py — Payment Summary & Payroll Calculator
+erp/views/payment_summary.py — Payment Summary (4-tab payroll workflow)
 
-Supabase table required (for save/audit trail):
+Supabase table required — run once in SQL editor:
 
-    CREATE TABLE IF NOT EXISTS payroll_summary (
-        id                uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-        employee_id       text NOT NULL,
-        payroll_month     text NOT NULL,
-        fixed_salary      numeric DEFAULT 0,
-        month_days        int DEFAULT 26,
-        days_worked       int DEFAULT 0,
-        ot_hours          numeric DEFAULT 0,
-        earned_basic      numeric DEFAULT 0,
-        ot_amount         numeric DEFAULT 0,
-        additions         numeric DEFAULT 0,
-        total_amount      numeric DEFAULT 0,
-        salary_paid_other numeric DEFAULT 0,
-        advance_recovery  numeric DEFAULT 0,
-        pf_amount         numeric DEFAULT 0,
-        other_deductions  numeric DEFAULT 0,
-        deduction_total   numeric DEFAULT 0,
-        net_payable       numeric DEFAULT 0,
-        remarks           text,
-        status            text DEFAULT 'Draft',
-        finalized_by      text,
-        finalized_at      timestamptz,
-        created_at        timestamptz DEFAULT now(),
-        CONSTRAINT payroll_summary_emp_month UNIQUE (employee_id, payroll_month)
+    CREATE TABLE IF NOT EXISTS payroll_records (
+        id               uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+        employee_id      text NOT NULL,
+        payroll_month    text NOT NULL,
+        fixed_salary     numeric DEFAULT 0,
+        month_days       int DEFAULT 26,
+        working_days     int DEFAULT 0,
+        ot_hours         numeric DEFAULT 0,
+        no_days_worked   int DEFAULT 0,
+        earned_basic     numeric DEFAULT 0,
+        ot_amount        numeric DEFAULT 0,
+        total_amount     numeric DEFAULT 0,
+        sal_paid_other   numeric DEFAULT 0,
+        advance_recovery numeric DEFAULT 0,
+        pf_amount        numeric DEFAULT 0,
+        deduction_total  numeric DEFAULT 0,
+        net_payable      numeric DEFAULT 0,
+        remarks          text,
+        status           text DEFAULT 'Draft',
+        hold_reason      text,
+        cancel_reason    text,
+        sendback_reason  text,
+        submitted_by     text,
+        submitted_at     timestamptz,
+        approved_by      text,
+        approved_at      timestamptz,
+        paid_by          text,
+        paid_at          timestamptz,
+        payment_date     date,
+        utr_reference    text,
+        created_at       timestamptz DEFAULT now(),
+        updated_at       timestamptz DEFAULT now(),
+        CONSTRAINT payroll_records_emp_month UNIQUE (employee_id, payroll_month)
     );
 
-Calculation formulas:
-    Earned Basic     = Fixed Salary × min(Working Days, Month Days) / Month Days
-    OT Amt           = OT Hours × Fixed Salary / Month Days / 12   (12-hr shift basis)
-    Total Amt        = Earned Basic + OT Amt + Additions (Approved)
-    Deduction Total  = Sal Paid Other + Advance Deduction + PF Amt + Other Deductions (Approved)
-    Net Payable      = Total Amt − Deduction Total
+Workflow:
+    Draft  →  Submitted  →  Approved  →  Paid
+                  ↓               ↓
+               OnHold         SendBack (→ Draft)
+               Cancelled
 """
 from __future__ import annotations
 
 import calendar
+import io
 import json
 from collections import defaultdict
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
@@ -49,6 +58,25 @@ import streamlit as st
 from .. import auth
 from ..supabase_client import SupabaseClient
 
+# ── Status constants ──────────────────────────────────────────────────────────
+
+_S_DRAFT     = "Draft"
+_S_SUBMITTED = "Submitted"
+_S_APPROVED  = "Approved"
+_S_PAID      = "Paid"
+_S_ONHOLD    = "OnHold"
+_S_CANCELLED = "Cancelled"
+_S_SENDBACK  = "SendBack"
+
+_STATUS_BADGE = {
+    _S_DRAFT:     ("#F1F5F9", "#475569", "Draft"),
+    _S_SUBMITTED: ("#FEF3C7", "#D97706", "Submitted"),
+    _S_APPROVED:  ("#DCFCE7", "#166534", "Approved"),
+    _S_PAID:      ("#D1FAE5", "#065F46", "✓ Paid"),
+    _S_ONHOLD:    ("#FEE2E2", "#991B1B", "On Hold"),
+    _S_CANCELLED: ("#F3F4F6", "#6B7280", "Cancelled"),
+    _S_SENDBACK:  ("#FEF9C3", "#854D0E", "Sent Back"),
+}
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -58,20 +86,15 @@ _PAGE_CSS = """
     display: grid;
     grid-template-columns: repeat(5, 1fr);
     gap: 14px;
-    margin: 0 0 24px;
+    margin: 0 0 20px;
 }
 .ps-kpi-card {
-    background: var(--card, #fff);
-    border: 1px solid var(--border, #E2EBF0);
+    background: #fff;
+    border: 1px solid #E2EBF0;
     border-radius: 12px;
-    padding: 16px 20px 12px;
+    padding: 14px 18px 10px;
     position: relative;
     overflow: hidden;
-    transition: box-shadow .18s, transform .18s;
-}
-.ps-kpi-card:hover {
-    box-shadow: 0 6px 20px rgba(0,0,0,.08);
-    transform: translateY(-2px);
 }
 .ps-kpi-bar {
     position: absolute; top: 0; left: 0; right: 0;
@@ -79,20 +102,14 @@ _PAGE_CSS = """
 }
 .ps-kpi-label {
     font-size: 10px; font-weight: 700; letter-spacing: .13em;
-    text-transform: uppercase; color: #9CA3AF; margin-bottom: 8px;
+    text-transform: uppercase; color: #9CA3AF; margin-bottom: 6px;
 }
 .ps-kpi-value {
-    font-size: 24px; font-weight: 800; color: #111827;
-    line-height: 1; margin-bottom: 4px;
+    font-size: 22px; font-weight: 800; color: #111827;
+    line-height: 1; margin-bottom: 2px;
     font-variant-numeric: tabular-nums;
 }
 .ps-kpi-sub { font-size: 11px; color: #6B7280; }
-.ps-kpi-icon {
-    position: absolute; top: 14px; right: 16px;
-    font-size: 22px; opacity: .10;
-    font-family: "Material Symbols Rounded";
-    font-variation-settings: "FILL" 1;
-}
 .ps-total-bar {
     padding: 10px 16px;
     background: #F0FDF4;
@@ -101,7 +118,7 @@ _PAGE_CSS = """
     font-size: 12px;
     color: #166534;
     font-weight: 600;
-    margin: 8px 0 4px;
+    margin: 8px 0 6px;
 }
 .ps-info-note {
     padding: 10px 14px;
@@ -110,11 +127,15 @@ _PAGE_CSS = """
     border-radius: 8px;
     font-size: 12px;
     color: #1E40AF;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
+}
+.ps-section-hdr {
+    font-size: 11px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: #64748B; margin: 16px 0 8px;
+    padding-bottom: 4px; border-bottom: 2px solid #F1F5F9;
 }
 </style>
 """
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -128,16 +149,14 @@ def _month_label(m: int) -> str:
 
 
 def _calc_month_days(year: int, month: int) -> int:
-    """Mon-Sat count in month (excludes Sundays only)."""
     _, total = calendar.monthrange(year, month)
     return sum(1 for d in range(1, total + 1) if date(year, month, d).weekday() < 6)
 
 
-def _kpi(icon: str, label: str, value, sub: str = "", accent: str = "#2563EB") -> str:
+def _kpi(label: str, value, sub: str = "", accent: str = "#2563EB") -> str:
     return (
         f"<div class='ps-kpi-card'>"
         f"<div class='ps-kpi-bar' style='background:{accent}'></div>"
-        f"<span class='ps-kpi-icon'>{icon}</span>"
         f"<div class='ps-kpi-label'>{label}</div>"
         f"<div class='ps-kpi-value'>{value}</div>"
         f"<div class='ps-kpi-sub'>{sub}</div>"
@@ -145,18 +164,15 @@ def _kpi(icon: str, label: str, value, sub: str = "", accent: str = "#2563EB") -
     )
 
 
-def _available_days(joining_date_str, period_start: date, period_end: date) -> int:
-    if not joining_date_str:
-        return (period_end - period_start).days + 1
-    try:
-        jd = date.fromisoformat(str(joining_date_str)[:10])
-    except Exception:
-        return (period_end - period_start).days + 1
-    eff = max(period_start, jd)
-    return max(0, (period_end - eff).days + 1)
+def _badge(status: str) -> str:
+    bg, fg, lbl = _STATUS_BADGE.get(status, ("#F1F5F9", "#475569", status))
+    return (
+        f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:700;"
+        f"padding:2px 8px;border-radius:20px;'>{lbl}</span>"
+    )
 
 
-# ── Worklog parsing (mirrors operatorreport logic) ────────────────────────────
+# ── Worklog aggregation ───────────────────────────────────────────────────────
 
 def _iter_schedule_rows(schedule_data) -> list[dict]:
     if not schedule_data:
@@ -194,26 +210,15 @@ def _resolve_operator(stored: str, op_by_code: dict, op_by_name: dict) -> dict:
 
 
 def _build_worklog_agg(
-    work_logs: list[dict],
-    work_orders: list[dict],
-    op_by_code: dict,
-    op_by_name: dict,
-    period_start: date,
-    period_end: date,
+    work_logs, work_orders, op_by_code, op_by_name,
+    period_start: date, period_end: date,
 ) -> dict[str, dict]:
-    """
-    Returns {employee_uuid: {working_days: int, ot_hours: float}}.
-    Working day = any shift where Net Time > 0 OR Breakdown Hrs > 0.
-    OT counted independently from all shifts where OT > 0.
-    """
-    wo_map = {wo["id"]: wo for wo in work_orders if wo.get("id")}
-
+    wo_map    = {wo["id"]: wo for wo in work_orders if wo.get("id")}
     emp_dates: dict[str, set] = defaultdict(set)
-    emp_ot:    dict[str, float] = defaultdict(float)
+    emp_ot:   dict[str, float] = defaultdict(float)
 
     for wl in work_logs:
-        wo = wo_map.get(wl.get("work_order_id"), {})
-        if not wo:
+        if not wo_map.get(wl.get("work_order_id")):
             continue
         for entry in _iter_schedule_rows(wl.get("schedule_data")):
             op_raw = str(entry.get("operator") or "").strip()
@@ -246,18 +251,9 @@ def _build_worklog_agg(
     return result
 
 
-# ── Calculation ───────────────────────────────────────────────────────────────
+# ── Formula engine ────────────────────────────────────────────────────────────
 
 def _recompute(df: pd.DataFrame) -> pd.DataFrame:
-    """Auto-calculate all derived columns.
-
-        No. of Days Worked = min(Working Days, Month Days)
-        Earned Basic       = No. of Days Worked / Month Days × Fixed Salary
-        OT Amt             = Fixed Salary / Month Days / 12 × OT Hours  (editable override)
-        Total Amt          = Earned Basic + OT Amt
-        Deduction Total    = Sal Paid Other + Advance Deduction + PF Amt
-        Net Payable        = Total Amt − Deduction Total
-    """
     df = df.copy()
     md = df["Month Days"].astype(float).replace(0.0, 1.0)
     fs = df["Fixed Salary"].astype(float)
@@ -276,7 +272,6 @@ def _recompute(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _initial_fill(df: pd.DataFrame) -> pd.DataFrame:
-    """Pre-fill OT Amt from formula on first load, then run full recompute."""
     df = df.copy()
     md = df["Month Days"].astype(float).replace(0.0, 1.0)
     fs = df["Fixed Salary"].astype(float)
@@ -284,349 +279,844 @@ def _initial_fill(df: pd.DataFrame) -> pd.DataFrame:
     return _recompute(df)
 
 
-# ── Tab 1: Payroll Calculator ─────────────────────────────────────────────────
+# ── Period selector widget (shared across tabs) ───────────────────────────────
 
-def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
-    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
-
+def _period_selector(key_prefix: str = "ps") -> tuple[int, int, int, str, date, date, str]:
     today = date.today()
-
-    # ── Period selector ────────────────────────────────────────────────────────
     with st.container(border=True):
         c1, c2, c3, _, c4 = st.columns([1.5, 1.5, 1.5, 3, 1.5])
-        year  = c1.number_input("Year", min_value=2020, max_value=2035,
-                                 value=today.year, step=1, key="ps_year")
+        year  = c1.number_input("Year",  min_value=2020, max_value=2035,
+                                 value=today.year, step=1, key=f"{key_prefix}_year")
         month = c2.selectbox("Month", list(range(1, 13)),
-                              format_func=_month_label, index=today.month - 1, key="ps_month")
-        default_md  = _calc_month_days(int(year), int(month))
-        month_days  = c3.number_input("Month Days", min_value=1, max_value=31,
-                                       value=default_md, step=1, key="ps_mdays",
-                                       help="Mon-Sat working days. Reduce for public holidays.")
-        load_btn = c4.button("Load / Refresh", key="ps_load",
+                              format_func=_month_label, index=today.month - 1,
+                              key=f"{key_prefix}_month")
+        default_md = _calc_month_days(int(year), int(month))
+        month_days = c3.number_input("Month Days", min_value=1, max_value=31,
+                                      value=default_md, step=1, key=f"{key_prefix}_mdays",
+                                      help="Mon-Sat working days. Reduce for public holidays.")
+        load_btn = c4.button("Load / Refresh", key=f"{key_prefix}_load",
                               use_container_width=True, type="primary")
 
     payroll_month = f"{int(year)}-{int(month):02d}"
     _, last_day   = calendar.monthrange(int(year), int(month))
     period_start  = date(int(year), int(month), 1)
     period_end    = date(int(year), int(month), last_day)
-    cache_key     = f"ps_data_{payroll_month}"
+    return int(year), int(month), int(month_days), payroll_month, period_start, period_end, load_btn
 
-    # ── Load data ──────────────────────────────────────────────────────────────
+
+# ── Load & merge payroll data ─────────────────────────────────────────────────
+
+def _load_payroll_data(
+    sb: SupabaseClient,
+    operators: list,
+    payroll_month: str,
+    period_start: date,
+    period_end: date,
+    month_days: int,
+) -> pd.DataFrame:
+    """Build the base payroll dataframe from worklog + Supabase tables."""
+    try:
+        wls = sb.list_all_worklogs()
+        wos = sb.list_work_orders()
+    except Exception:
+        wls, wos = [], []
+
+    op_by_code = {(o.get("emp_code") or "").upper(): o for o in operators if o.get("emp_code")}
+    op_by_name = {(o.get("operator_name") or "").lower(): o for o in operators}
+    op_by_id   = {o["id"]: o for o in operators if o.get("id")}
+
+    wl_agg = _build_worklog_agg(wls, wos, op_by_code, op_by_name, period_start, period_end)
+
+    def _safe(fn, **kw):
+        try:
+            return fn(**kw)
+        except Exception:
+            return []
+
+    pf_recs   = _safe(sb.list_payroll_pf,               payroll_month=payroll_month)
+    cust_recs = _safe(sb.list_payroll_customer_payments, payroll_month=payroll_month)
+    adv_recs  = _safe(sb.list_advance_recoveries,        payroll_month=payroll_month)
+
+    def _sum_field(records, field):
+        out = defaultdict(float)
+        for r in records:
+            out[r.get("employee_id", "")] += float(r.get(field) or 0)
+        return out
+
+    pf_by_emp      = _sum_field(pf_recs,   "amount_to_deduct")
+    cust_by_emp    = _sum_field(cust_recs,  "salary_deduct_from_payroll")
+    adv_rec_by_emp = _sum_field(adv_recs,   "final_recovery")
+
+    # Existing payroll_records for this month
+    existing_recs = {r["employee_id"]: r for r in _safe(sb.list_payroll_records, payroll_month=payroll_month)}
+
+    active_ops = [o for o in operators if o.get("status") == "Active" and o.get("id")]
+    rows = []
+    for op in sorted(active_ops, key=lambda o: o.get("emp_code") or ""):
+        eid  = op["id"]
+        wl   = wl_agg.get(eid, {})
+        rec  = existing_recs.get(eid, {})
+        # Use saved record values if available, fall back to worklog/master
+        rows.append({
+            "_emp_id":           eid,
+            "_rec_id":           rec.get("id", ""),
+            "_status":           rec.get("status", _S_DRAFT),
+            "Emp Code":          op.get("emp_code", ""),
+            "Operator":          op.get("operator_name", ""),
+            "Fixed Salary":      float(rec.get("fixed_salary") or op.get("fixed_salary") or 0),
+            "Month Days":        int(rec.get("month_days") or month_days),
+            "Working Days":      int(rec.get("working_days") or wl.get("working_days", 0)),
+            "OT Hours":          float(rec.get("ot_hours") or wl.get("ot_hours", 0.0)),
+            "No. of Days Worked": int(rec.get("no_days_worked", 0)),
+            "Earned Basic":      float(rec.get("earned_basic", 0)),
+            "OT Amt":            float(rec.get("ot_amount", 0)),
+            "Total Amt":         float(rec.get("total_amount", 0)),
+            "Sal Paid Other":    float(rec.get("sal_paid_other") or cust_by_emp.get(eid, 0.0)),
+            "Advance Deduction": float(rec.get("advance_recovery") or adv_rec_by_emp.get(eid, 0.0)),
+            "PF Amt":            float(rec.get("pf_amount") or pf_by_emp.get(eid, 0.0)),
+            "Deduction Total":   float(rec.get("deduction_total", 0)),
+            "Net Payable":       float(rec.get("net_payable", 0)),
+            "Remarks":           rec.get("remarks", ""),
+        })
+
+    df = pd.DataFrame(rows) if rows else pd.DataFrame()
+    if not df.empty:
+        # For rows with no saved record (no OT Amt calculated), run initial fill
+        no_rec_mask = df["_rec_id"] == ""
+        if no_rec_mask.any():
+            df_new = _initial_fill(df[no_rec_mask].copy())
+            df.loc[no_rec_mask, df_new.columns] = df_new.values
+        # For rows with saved record, just recompute formulas
+        has_rec_mask = ~no_rec_mask
+        if has_rec_mask.any():
+            df_saved = _recompute(df[has_rec_mask].copy())
+            df.loc[has_rec_mask, df_saved.columns] = df_saved.values
+
+    return df
+
+
+# ── Save payroll record to Supabase ──────────────────────────────────────────
+
+def _save_record(sb: SupabaseClient, row: pd.Series, payroll_month: str,
+                 status: str, extra: dict | None = None) -> None:
+    payload: dict = {
+        "employee_id":      row["_emp_id"],
+        "payroll_month":    payroll_month,
+        "fixed_salary":     float(row["Fixed Salary"]),
+        "month_days":       int(row["Month Days"]),
+        "working_days":     int(row["Working Days"]),
+        "ot_hours":         float(row["OT Hours"]),
+        "no_days_worked":   int(row["No. of Days Worked"]),
+        "earned_basic":     float(row["Earned Basic"]),
+        "ot_amount":        float(row["OT Amt"]),
+        "total_amount":     float(row["Total Amt"]),
+        "sal_paid_other":   float(row["Sal Paid Other"]),
+        "advance_recovery": float(row["Advance Deduction"]),
+        "pf_amount":        float(row["PF Amt"]),
+        "deduction_total":  float(row["Deduction Total"]),
+        "net_payable":      float(row["Net Payable"]),
+        "remarks":          str(row.get("Remarks", "") or ""),
+        "status":           status,
+        "updated_at":       datetime.now().isoformat(),
+    }
+    if extra:
+        payload.update(extra)
+    sb.upsert_payroll_record(payload)
+
+
+# ── Tab 1: Payroll Calculator ─────────────────────────────────────────────────
+
+def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+
+    year, month, month_days, payroll_month, period_start, period_end, load_btn = \
+        _period_selector("ps")
+
+    cache_key = f"ps_data_{payroll_month}"
+
     if load_btn or cache_key not in st.session_state:
-        with st.spinner(f"Loading {_month_label(int(month))} {int(year)} payroll data…"):
-            try:
-                wls = sb.list_all_worklogs()
-                wos = sb.list_work_orders()
-            except Exception:
-                wls, wos = [], []
-
-            op_by_code = {(o.get("emp_code") or "").upper(): o for o in operators if o.get("emp_code")}
-            op_by_name = {(o.get("operator_name") or "").lower(): o for o in operators}
-            op_by_id   = {o["id"]: o for o in operators if o.get("id")}
-
-            wl_agg = _build_worklog_agg(wls, wos, op_by_code, op_by_name, period_start, period_end)
-
-            # Payroll data for this month
-            def _safe(fn, **kw):
-                try:
-                    return fn(**kw)
-                except Exception:
-                    return []
-
-            pf_recs    = _safe(sb.list_payroll_pf,                payroll_month=payroll_month)
-            cust_recs  = _safe(sb.list_payroll_customer_payments,  payroll_month=payroll_month)
-            adv_recs   = _safe(sb.list_advance_recoveries,         payroll_month=payroll_month)
-            add_recs   = _safe(sb.list_payroll_additions,          payroll_month=payroll_month, status="Approved")
-            ded_recs   = _safe(sb.list_payroll_deductions,         payroll_month=payroll_month, status="Approved")
-            openings   = _safe(sb.list_advance_opening_balances)
-            adv_paid   = _safe(sb.list_advance_payments,           payment_status="Paid")
-            all_recs   = _safe(sb.list_advance_recoveries)
-
-            # Aggregate by employee_id (UUID)
-            def _sum_field(records, field):
-                out = defaultdict(float)
-                for r in records:
-                    out[r.get("employee_id", "")] += float(r.get(field) or 0)
-                return out
-
-            pf_by_emp      = _sum_field(pf_recs,   "amount_to_deduct")
-            cust_by_emp    = _sum_field(cust_recs,  "salary_deduct_from_payroll")
-            adv_rec_by_emp = _sum_field(adv_recs,   "final_recovery")
-            add_by_emp     = _sum_field(add_recs,   "amount")
-            ded_by_emp     = _sum_field(ded_recs,   "amount")
-
-            # Advance balance as of month start (exclude current month recoveries)
-            open_by = defaultdict(float)
-            for r in openings:
-                if r.get("as_on_date") and str(r["as_on_date"]) < str(period_start):
-                    open_by[r["employee_id"]] += float(r.get("balance") or 0)
-            paid_by = defaultdict(float)
-            for p in adv_paid:
-                if p.get("payment_date") and str(p["payment_date"]) < str(period_start):
-                    paid_by[p["employee_id"]] += float(p.get("amount") or 0)
-            rec_by = defaultdict(float)
-            for r in all_recs:
-                d = str(r.get("processed_at") or "")[:10]
-                if d and d < str(period_start):
-                    rec_by[r["employee_id"]] += float(r.get("final_recovery") or 0)
-            adv_bal = {eid: open_by[eid] + paid_by[eid] - rec_by[eid] for eid in op_by_id}
-
-            # Build one row per active operator
-            active_ops = [o for o in operators if o.get("status") == "Active" and o.get("id")]
-            rows = []
-            for op in sorted(active_ops, key=lambda o: o.get("emp_code") or ""):
-                eid = op["id"]
-                wl  = wl_agg.get(eid, {})
-                rows.append({
-                    "_emp_id":           eid,
-                    "Emp Code":          op.get("emp_code", ""),
-                    "Operator":          op.get("operator_name", ""),
-                    "Fixed Salary":      float(op.get("fixed_salary") or 0),
-                    "Avail Days":        _available_days(op.get("joining_date"), period_start, period_end),
-                    "Working Days":      wl.get("working_days", 0),
-                    "OT Hours":          wl.get("ot_hours", 0.0),
-                    "Name in Passbook":  op.get("name_in_passbook", ""),
-                    "IFSC":              op.get("ifsc_code", ""),
-                    "Account No.":       op.get("bank_account_number", ""),
-                    "Month Days":        int(month_days),
-                    "No. of Days Worked": 0,
-                    "Earned Basic":      0.0,
-                    "OT Amt":            0.0,
-                    "Additions":         round(add_by_emp.get(eid, 0.0), 0),
-                    "Total Amt":         0.0,
-                    "Sal Paid Other":    round(cust_by_emp.get(eid, 0.0), 0),
-                    "Current Advance":   round(adv_bal.get(eid, 0.0), 0),
-                    "Advance Deduction": round(adv_rec_by_emp.get(eid, 0.0), 0),
-                    "PF Amt":            round(pf_by_emp.get(eid, 0.0), 0),
-                    "Other Deductions":  round(ded_by_emp.get(eid, 0.0), 0),
-                    "Deduction Total":   0.0,
-                    "Net Payable":       0.0,
-                    "Remarks":           "",
-                })
-
-            df = pd.DataFrame(rows) if rows else pd.DataFrame()
-            if not df.empty:
-                df = _initial_fill(df)   # formula-fill Earned Basic & OT Amt, then summarise
-            st.session_state[cache_key] = df
+        with st.spinner(f"Loading {_month_label(month)} {year} payroll data…"):
+            df = _load_payroll_data(sb, operators, payroll_month, period_start, period_end, month_days)
+        st.session_state[cache_key] = df
 
     df: pd.DataFrame = st.session_state.get(cache_key, pd.DataFrame())
 
     if df.empty:
-        st.info(
-            f"No active operators found for {_month_label(int(month))} {int(year)}. "
-            "Click **Load / Refresh** to fetch data."
-        )
+        st.info("No active operators found. Click **Load / Refresh**.")
         return
 
-    # Sync Month Days if user changes slider without reloading
+    # Sync Month Days if user changes it without reloading
     if int(month_days) != int(df["Month Days"].iloc[0]):
         df["Month Days"] = int(month_days)
         df = _recompute(df)
         st.session_state[cache_key] = df
 
-    # ── KPIs ───────────────────────────────────────────────────────────────────
-    n_ops     = len(df)
-    net_total = df["Net Payable"].sum()
-    earn_tot  = df["Earned Basic"].sum()
-    ded_tot   = df["Deduction Total"].sum()
-    adv_tot   = df["Advance Deduction"].sum()
-    pf_tot    = df["PF Amt"].sum()
+    # Show only Draft / SendBack employees in the calculator
+    calc_df = df[df["_status"].isin([_S_DRAFT, _S_SENDBACK])].copy()
+    paid_count     = (df["_status"] == _S_PAID).sum()
+    submitted_count = (df["_status"] == _S_SUBMITTED).sum()
+    held_count     = (df["_status"].isin([_S_ONHOLD, _S_CANCELLED])).sum()
 
+    # ── Info banner ────────────────────────────────────────────────────────────
+    info_parts = []
+    if submitted_count:
+        info_parts.append(f"<strong>{submitted_count}</strong> submitted (Approval Queue tab)")
+    if held_count:
+        info_parts.append(f"<strong>{held_count}</strong> on hold/cancelled (Pending tab)")
+    if paid_count:
+        info_parts.append(f"<strong>{paid_count}</strong> already paid (hidden)")
+    if info_parts:
+        st.markdown(
+            f"<div class='ps-info-note'>ℹ️ {' · '.join(info_parts)}</div>",
+            unsafe_allow_html=True,
+        )
+
+    if calc_df.empty:
+        st.success("All employees for this month are submitted, on hold, or paid.")
+        return
+
+    # ── SendBack banner ────────────────────────────────────────────────────────
+    sendback_rows = calc_df[calc_df["_status"] == _S_SENDBACK]
+    if not sendback_rows.empty:
+        st.warning(
+            f"{len(sendback_rows)} employee(s) were sent back by admin — review and resubmit.",
+            icon="↩",
+        )
+
+    # ── KPIs ───────────────────────────────────────────────────────────────────
     st.markdown(
         "<div class='ps-kpi-grid'>"
-        + _kpi("engineering",      "Operators",         n_ops,                   "active this month",    "#2563EB")
-        + _kpi("payments",         "Net Payable",       f"₹{net_total:,.0f}",    "to be paid out",       "#10B981")
-        + _kpi("account_balance",  "Earned Basic",      f"₹{earn_tot:,.0f}",     "gross earned",         "#E87722")
-        + _kpi("remove_circle",    "Total Deductions",  f"₹{ded_tot:,.0f}",      "all deductions",       "#EF4444")
-        + _kpi("currency_rupee",   "Advance Recovery",  f"₹{adv_tot:,.0f}",      "recovered this month", "#8B5CF6")
+        + _kpi("Operators",        len(calc_df),                          "in calculator",        "#2563EB")
+        + _kpi("Net Payable",      f"₹{calc_df['Net Payable'].sum():,.0f}", "to be paid out",      "#10B981")
+        + _kpi("Earned Basic",     f"₹{calc_df['Earned Basic'].sum():,.0f}", "gross earned",       "#E87722")
+        + _kpi("Total Deductions", f"₹{calc_df['Deduction Total'].sum():,.0f}", "all deductions",  "#EF4444")
+        + _kpi("Advance Recovery", f"₹{calc_df['Advance Deduction'].sum():,.0f}", "this month",   "#8B5CF6")
         + "</div>",
         unsafe_allow_html=True,
     )
 
     st.markdown(
         "<div class='ps-info-note'>"
-        "🔄 <strong>Auto-calculated:</strong> "
-        "Earned Basic = Days Worked ÷ Month Days × Fixed Sal &nbsp;·&nbsp; "
-        "Total = Earned + OT &nbsp;·&nbsp; "
-        "Deductions = Sal by Cust + Advance + PF &nbsp;·&nbsp; "
-        "Net = Total − Deductions<br>"
-        "✏️ <strong>Editable:</strong> Working Days · OT Hours · Fixed Salary · Month Days · "
-        "OT Amt · Sal Paid Other · PF Amt · Additions · Remarks &nbsp;·&nbsp; "
-        "🔒 <strong>Advance Deduction</strong> is read-only — set in Advance Recovery tab"
+        "✏️ <strong>Editable:</strong> Working Days · OT Hours · Fixed Salary · OT Amt · "
+        "Sal Paid Other · PF Amt · Remarks &nbsp;·&nbsp; "
+        "🔒 <strong>Read-only:</strong> Earned Basic · Advance Deduction · Total · Net Payable"
         "</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Editor ─────────────────────────────────────────────────────────────────
-    # Text identity columns stay read-only; No. of Days Worked, Total Amt,
-    # Deduction Total, Net Payable are always auto-calculated.
-    # Every OTHER column (all numeric) is editable.
+    # ── data_editor ────────────────────────────────────────────────────────────
     always_readonly = {
-        "Emp Code", "Operator", "Name in Passbook", "IFSC", "Account No.",
+        "Emp Code", "Operator",
         "No. of Days Worked", "Earned Basic", "Advance Deduction",
         "Total Amt", "Deduction Total", "Net Payable",
     }
-    display_cols  = [c for c in df.columns if c != "_emp_id"]
-    readonly_cols = [c for c in display_cols if c in always_readonly]
+    display_cols = [
+        "Select", "Emp Code", "Operator", "Fixed Salary", "Month Days",
+        "Working Days", "OT Hours", "No. of Days Worked",
+        "Earned Basic", "OT Amt", "Total Amt",
+        "Sal Paid Other", "Advance Deduction", "PF Amt", "Deduction Total",
+        "Net Payable", "Remarks",
+    ]
 
-    col_cfg: dict = {
-        "Emp Code":          st.column_config.TextColumn("Emp Code",          width="small"),
-        "Operator":          st.column_config.TextColumn("Operator",          width="medium"),
-        "Fixed Salary":      st.column_config.NumberColumn("Fixed Sal",       format="₹%,.0f", width="small",   min_value=0),
-        "Avail Days":        st.column_config.NumberColumn("Avail Days",      width="small",   min_value=0),
-        "Working Days":      st.column_config.NumberColumn("Work Days",       width="small",   min_value=0, max_value=366,
-                              help="Auto-filled from worklog. Edit to override."),
-        "OT Hours":          st.column_config.NumberColumn("OT Hrs",          format="%.2f",   width="small",   min_value=0.0,
-                              help="Auto-filled from worklog. Edit to override."),
-        "Name in Passbook":  st.column_config.TextColumn("Passbook Name",     width="medium"),
-        "IFSC":              st.column_config.TextColumn("IFSC",              width="small"),
-        "Account No.":       st.column_config.TextColumn("Account No.",       width="medium"),
-        "Month Days":        st.column_config.NumberColumn("Month Days",      width="small",   min_value=1, max_value=31),
-        "No. of Days Worked":st.column_config.NumberColumn("Days Worked",     width="small"),
-        "Earned Basic":      st.column_config.NumberColumn("Earned Basic",    format="₹%,.0f", width="small",   min_value=0,
-                              help="Pre-filled from formula. Edit to override."),
-        "OT Amt":            st.column_config.NumberColumn("OT Amt",          format="₹%,.0f", width="small",   min_value=0,
-                              help="Pre-filled from formula. Edit to override."),
-        "Additions":         st.column_config.NumberColumn("Additions",       format="₹%,.0f", width="small",   min_value=0),
-        "Total Amt":         st.column_config.NumberColumn("Total Amt",       format="₹%,.0f", width="small"),
-        "Sal Paid Other":    st.column_config.NumberColumn("Sal by Cust",     format="₹%,.0f", width="small",   min_value=0,
-                              help="Salary paid directly by customer."),
-        "Current Advance":   st.column_config.NumberColumn("Curr Adv",        format="₹%,.0f", width="small",   min_value=0),
-        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct",      format="₹%,.0f", width="small",   min_value=0,
-                              help="Advance recovery for this payroll month."),
-        "PF Amt":            st.column_config.NumberColumn("PF Amt",          format="₹%,.0f", width="small",   min_value=0),
-        "Other Deductions":  st.column_config.NumberColumn("Other Ded",       format="₹%,.0f", width="small",   min_value=0),
-        "Deduction Total":   st.column_config.NumberColumn("Ded Total",       format="₹%,.0f", width="small"),
-        "Net Payable":       st.column_config.NumberColumn("Net Payable",     format="₹%,.0f", width="small"),
-        "Remarks":           st.column_config.TextColumn("Remarks",           width="medium"),
+    # Attach Select column
+    calc_display = calc_df.copy()
+    calc_display.insert(0, "Select", False)
+
+    col_cfg = {
+        "Select":            st.column_config.CheckboxColumn("Select", default=False, width="small"),
+        "Emp Code":          st.column_config.TextColumn("Emp Code",     width="small"),
+        "Operator":          st.column_config.TextColumn("Operator",     width="medium"),
+        "Fixed Salary":      st.column_config.NumberColumn("Fixed Sal",  format="₹%,.0f", width="small", min_value=0),
+        "Month Days":        st.column_config.NumberColumn("Month Days", width="small",   min_value=1, max_value=31),
+        "Working Days":      st.column_config.NumberColumn("Work Days",  width="small",   min_value=0, max_value=366),
+        "OT Hours":          st.column_config.NumberColumn("OT Hrs",     format="%.2f",   width="small", min_value=0.0),
+        "No. of Days Worked":st.column_config.NumberColumn("Days Worked",width="small"),
+        "Earned Basic":      st.column_config.NumberColumn("Earned",     format="₹%,.0f", width="small"),
+        "OT Amt":            st.column_config.NumberColumn("OT Amt",     format="₹%,.0f", width="small", min_value=0),
+        "Total Amt":         st.column_config.NumberColumn("Total",      format="₹%,.0f", width="small"),
+        "Sal Paid Other":    st.column_config.NumberColumn("Sal by Cust",format="₹%,.0f", width="small", min_value=0),
+        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct", format="₹%,.0f", width="small"),
+        "PF Amt":            st.column_config.NumberColumn("PF Amt",     format="₹%,.0f", width="small", min_value=0),
+        "Deduction Total":   st.column_config.NumberColumn("Ded Total",  format="₹%,.0f", width="small"),
+        "Net Payable":       st.column_config.NumberColumn("Net Payable",format="₹%,.0f", width="small"),
+        "Remarks":           st.column_config.TextColumn("Remarks",      width="medium"),
     }
+    ro_cols = ["Select"] + [c for c in display_cols if c in always_readonly and c != "Select"]
 
     edited = st.data_editor(
-        df[display_cols],
+        calc_display[display_cols],
         key=f"ps_editor_{payroll_month}",
         use_container_width=True,
         hide_index=True,
         column_config=col_cfg,
-        disabled=readonly_cols,
+        disabled=[c for c in display_cols if c in always_readonly],
         num_rows="fixed",
     )
 
-    # Merge all edited columns back (everything except the auto-calculated ones)
-    editable_cols = [c for c in display_cols if c not in always_readonly]
+    # Merge edits back
+    editable_cols = [c for c in display_cols if c not in always_readonly and c != "Select"]
     for col in editable_cols:
         if col in edited.columns:
-            df[col] = edited[col].values
-    # Always recalculate summary columns
-    df = _recompute(df)
+            calc_df[col] = edited[col].values
+    calc_df = _recompute(calc_df)
+
+    # Write updated calc rows back into main df
+    df.loc[df["_status"].isin([_S_DRAFT, _S_SENDBACK]), calc_df.columns] = calc_df.values
     st.session_state[cache_key] = df
 
     # ── Totals bar ─────────────────────────────────────────────────────────────
-    sum_cols = ["Earned Basic", "OT Amt", "Additions", "Total Amt",
-                "Sal Paid Other", "Advance Deduction", "PF Amt",
-                "Other Deductions", "Deduction Total", "Net Payable"]
-    totals = {c: df[c].sum() for c in sum_cols if c in df.columns}
-    highlight = ["Earned Basic", "Total Amt", "Deduction Total", "Net Payable"]
-    parts = [f"<strong>{c}:</strong> ₹{totals[c]:,.0f}" for c in highlight if c in totals]
+    t = calc_df
     st.markdown(
-        f"<div class='ps-total-bar'>Totals — {' &nbsp;·&nbsp; '.join(parts)}</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Export ─────────────────────────────────────────────────────────────────
-    e1, e2, _ = st.columns([1.5, 1.5, 5])
-    try:
-        import io
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            df[display_cols].to_excel(w, index=False, sheet_name="Payroll Summary")
-        e1.download_button(
-            "Export Excel",
-            data=buf.getvalue(),
-            file_name=f"payroll_{payroll_month}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="ps_export_xlsx",
-            use_container_width=True,
-        )
-    except Exception:
-        pass
-
-    try:
-        csv_buf = df[display_cols].to_csv(index=False).encode("utf-8")
-        e2.download_button(
-            "Export CSV",
-            data=csv_buf,
-            file_name=f"payroll_{payroll_month}.csv",
-            mime="text/csv",
-            key="ps_export_csv",
-            use_container_width=True,
-        )
-    except Exception:
-        pass
-
-
-# ── Tab 2: Bank Transfer List ─────────────────────────────────────────────────
-
-def _tab_bank_list() -> None:
-    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
-
-    cache_keys = sorted(
-        [k for k in st.session_state if k.startswith("ps_data_")],
-        reverse=True,
-    )
-    if not cache_keys:
-        st.info("Load a payroll month from the **Payroll Calculator** tab first.")
-        return
-
-    month_opts = [k.replace("ps_data_", "") for k in cache_keys]
-    sel = st.selectbox("Payroll Month", month_opts, key="bank_month_sel")
-    df: pd.DataFrame = st.session_state.get(f"ps_data_{sel}", pd.DataFrame())
-
-    if df.empty:
-        st.info("No data for selected month.")
-        return
-
-    bank_cols = ["Emp Code", "Operator", "Name in Passbook", "Account No.", "IFSC",
-                 "Net Payable", "Remarks"]
-    bank_df = df[[c for c in bank_cols if c in df.columns]].copy()
-    bank_df = bank_df[bank_df["Net Payable"] > 0].reset_index(drop=True)
-
-    st.markdown(
-        f"<div class='ps-info-note'>"
-        f"<strong>{len(bank_df)} operators</strong> with Net Payable > 0 &nbsp;·&nbsp; "
-        f"<strong>Total: ₹{bank_df['Net Payable'].sum():,.0f}</strong>"
+        f"<div class='ps-total-bar'>"
+        f"Totals — <strong>Earned:</strong> ₹{t['Earned Basic'].sum():,.0f} &nbsp;·&nbsp; "
+        f"<strong>OT:</strong> ₹{t['OT Amt'].sum():,.0f} &nbsp;·&nbsp; "
+        f"<strong>Total:</strong> ₹{t['Total Amt'].sum():,.0f} &nbsp;·&nbsp; "
+        f"<strong>Deductions:</strong> ₹{t['Deduction Total'].sum():,.0f} &nbsp;·&nbsp; "
+        f"<strong>Net Payable:</strong> ₹{t['Net Payable'].sum():,.0f}"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-    st.dataframe(
-        bank_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Emp Code":        st.column_config.TextColumn("Emp Code",    width="small"),
-            "Operator":        st.column_config.TextColumn("Name",        width="medium"),
-            "Name in Passbook":st.column_config.TextColumn("Passbook",    width="medium"),
-            "Account No.":     st.column_config.TextColumn("Account No.", width="medium"),
-            "IFSC":            st.column_config.TextColumn("IFSC",        width="small"),
-            "Net Payable":     st.column_config.NumberColumn("Net Payable",format="₹%,.0f"),
-            "Remarks":         st.column_config.TextColumn("Remarks",     width="medium"),
-        },
+    # ── Action buttons ─────────────────────────────────────────────────────────
+    selected_mask = edited["Select"] == True  # noqa: E712
+    selected_df   = calc_df[selected_mask.values]
+    n_sel = len(selected_df)
+
+    st.markdown(
+        f"<div style='font-size:12px;color:#64748B;margin:8px 0 4px;'>"
+        f"<strong style='color:#1E293B;'>{n_sel}</strong> / {len(calc_df)} selected</div>",
+        unsafe_allow_html=True,
     )
 
+    act1, act2, act3, _ = st.columns([1.5, 1.5, 1.5, 4])
+
+    # Save drafts
+    if act1.button("💾 Save Drafts", key="ps_save_drafts", use_container_width=True,
+                    disabled=(n_sel == 0)):
+        saved = 0
+        for _, row in selected_df.iterrows():
+            try:
+                _save_record(sb, row, payroll_month, _S_DRAFT)
+                saved += 1
+            except Exception as e:
+                st.error(f"Error saving {row['Operator']}: {e}")
+        if saved:
+            st.success(f"Saved {saved} draft(s).")
+            st.session_state.pop(cache_key, None)
+            st.rerun()
+
+    # Submit for approval
+    if act2.button("▶ Submit for Approval", key="ps_submit", type="primary",
+                    use_container_width=True, disabled=(n_sel == 0)):
+        submitted = 0
+        for _, row in selected_df.iterrows():
+            try:
+                _save_record(sb, row, payroll_month, _S_SUBMITTED, {
+                    "submitted_by": _user_name(),
+                    "submitted_at": datetime.now().isoformat(),
+                    "sendback_reason": None,
+                })
+                submitted += 1
+            except Exception as e:
+                st.error(f"Error submitting {row['Operator']}: {e}")
+        if submitted:
+            st.success(f"Submitted {submitted} employee(s) for approval.")
+            st.session_state.pop(cache_key, None)
+            st.rerun()
+
+    # Put on hold
+    if act3.button("⏸ Put on Hold", key="ps_hold", use_container_width=True,
+                    disabled=(n_sel == 0)):
+        st.session_state["ps_hold_confirm"] = True
+        st.session_state["ps_hold_df"] = selected_df
+        st.session_state["ps_hold_month"] = payroll_month
+
+    if st.session_state.get("ps_hold_confirm") and \
+            st.session_state.get("ps_hold_month") == payroll_month:
+        hold_df = st.session_state.get("ps_hold_df", pd.DataFrame())
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='font-size:13px;font-weight:700;color:#991B1B;'>"
+                f"Put {len(hold_df)} employee(s) on hold?</div>",
+                unsafe_allow_html=True,
+            )
+            hold_reason = st.text_input("Hold reason (required)", key="ps_hold_reason")
+            hc1, hc2 = st.columns([1, 1])
+            if hc1.button("Confirm Hold", type="primary", key="ps_hold_ok"):
+                if not hold_reason.strip():
+                    st.error("Please enter a hold reason.")
+                else:
+                    held = 0
+                    for _, row in hold_df.iterrows():
+                        try:
+                            _save_record(sb, row, payroll_month, _S_ONHOLD, {
+                                "hold_reason": hold_reason.strip(),
+                            })
+                            held += 1
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                    if held:
+                        st.success(f"{held} employee(s) put on hold.")
+                        for k in ["ps_hold_confirm", "ps_hold_df", "ps_hold_month", "ps_hold_reason"]:
+                            st.session_state.pop(k, None)
+                        st.session_state.pop(cache_key, None)
+                        st.rerun()
+            if hc2.button("Cancel", key="ps_hold_cancel"):
+                for k in ["ps_hold_confirm", "ps_hold_df", "ps_hold_month"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+    # ── Export ─────────────────────────────────────────────────────────────────
+    exp1, exp2, _ = st.columns([1.5, 1.5, 5])
     try:
-        import io
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            bank_df.to_excel(w, index=False, sheet_name="Bank Transfer")
-        st.download_button(
-            "Export Bank Transfer List",
-            data=buf.getvalue(),
-            file_name=f"bank_transfer_{sel}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="bank_export_xlsx",
-        )
+            calc_df[[c for c in display_cols if c != "Select"]].to_excel(
+                w, index=False, sheet_name="Payroll")
+        exp1.download_button("Export Excel", data=buf.getvalue(),
+                              file_name=f"payroll_{payroll_month}.xlsx",
+                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              key="ps_exp_xlsx", use_container_width=True)
     except Exception:
         pass
+    try:
+        exp2.download_button("Export CSV",
+                              data=calc_df[[c for c in display_cols if c != "Select"]].to_csv(index=False).encode(),
+                              file_name=f"payroll_{payroll_month}.csv",
+                              mime="text/csv", key="ps_exp_csv", use_container_width=True)
+    except Exception:
+        pass
+
+
+# ── Tab 2: Approval Queue ─────────────────────────────────────────────────────
+
+def _tab_approval_queue(sb: SupabaseClient, operators: list) -> None:
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+
+    if not auth.is_admin():
+        st.info("Only Admin can approve payroll submissions.", icon="🔒")
+        return
+
+    year, month, month_days, payroll_month, _, _, load_btn = _period_selector("psaq")
+
+    if load_btn:
+        st.session_state.pop(f"psaq_recs_{payroll_month}", None)
+
+    cache_key = f"psaq_recs_{payroll_month}"
+    if cache_key not in st.session_state:
+        recs = sb.list_payroll_records(payroll_month=payroll_month, status=_S_SUBMITTED)
+        st.session_state[cache_key] = recs
+
+    recs = st.session_state.get(cache_key, [])
+
+    if not recs:
+        st.info(f"No submissions pending approval for {_month_label(month)} {year}.")
+        return
+
+    op_by_id = {o["id"]: o for o in operators}
+
+    st.markdown(
+        f"<div style='font-size:13px;color:#64748B;margin-bottom:14px;'>"
+        f"<strong style='color:#1E293B;'>{len(recs)}</strong> submission(s) awaiting approval</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Build display df
+    rows = []
+    for r in recs:
+        op = op_by_id.get(r["employee_id"], {})
+        rows.append({
+            "Select":           False,
+            "Emp Code":         op.get("emp_code", ""),
+            "Operator":         op.get("operator_name", r["employee_id"]),
+            "Earned Basic":     float(r.get("earned_basic") or 0),
+            "OT Amt":           float(r.get("ot_amount") or 0),
+            "Total Amt":        float(r.get("total_amount") or 0),
+            "Advance Deduction":float(r.get("advance_recovery") or 0),
+            "PF Amt":           float(r.get("pf_amount") or 0),
+            "Deduction Total":  float(r.get("deduction_total") or 0),
+            "Net Payable":      float(r.get("net_payable") or 0),
+            "Submitted By":     r.get("submitted_by", ""),
+            "Remarks":          r.get("remarks", ""),
+            "_id":              r["id"],
+        })
+    disp_df = pd.DataFrame(rows)
+
+    col_cfg = {
+        "Select":            st.column_config.CheckboxColumn("Select",    width="small", default=False),
+        "Emp Code":          st.column_config.TextColumn("Emp Code",      width="small"),
+        "Operator":          st.column_config.TextColumn("Operator",      width="medium"),
+        "Earned Basic":      st.column_config.NumberColumn("Earned",      format="₹%,.0f", width="small"),
+        "OT Amt":            st.column_config.NumberColumn("OT Amt",      format="₹%,.0f", width="small"),
+        "Total Amt":         st.column_config.NumberColumn("Total",       format="₹%,.0f", width="small"),
+        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct",  format="₹%,.0f", width="small"),
+        "PF Amt":            st.column_config.NumberColumn("PF Amt",      format="₹%,.0f", width="small"),
+        "Deduction Total":   st.column_config.NumberColumn("Ded Total",   format="₹%,.0f", width="small"),
+        "Net Payable":       st.column_config.NumberColumn("Net Payable", format="₹%,.0f", width="small"),
+        "Submitted By":      st.column_config.TextColumn("Submitted By",  width="small"),
+        "Remarks":           st.column_config.TextColumn("Remarks",       width="medium"),
+    }
+    ro_cols = [c for c in disp_df.columns if c not in ("Select",)]
+
+    edited = st.data_editor(
+        disp_df.drop(columns=["_id"]),
+        key=f"aq_editor_{payroll_month}",
+        use_container_width=True,
+        hide_index=True,
+        column_config=col_cfg,
+        disabled=[c for c in ro_cols if c != "Select"],
+        num_rows="fixed",
+    )
+
+    # Totals
+    net_total = disp_df["Net Payable"].sum()
+    earn_tot  = disp_df["Earned Basic"].sum()
+    ded_tot   = disp_df["Deduction Total"].sum()
+    st.markdown(
+        f"<div class='ps-total-bar'>"
+        f"Totals — <strong>Earned:</strong> ₹{earn_tot:,.0f} &nbsp;·&nbsp; "
+        f"<strong>Deductions:</strong> ₹{ded_tot:,.0f} &nbsp;·&nbsp; "
+        f"<strong>Net Payable:</strong> ₹{net_total:,.0f}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    sel_mask  = edited["Select"] == True  # noqa: E712
+    sel_ids   = list(disp_df.loc[sel_mask.values, "_id"])
+    sel_recs  = [r for r in recs if r["id"] in sel_ids]
+    n_sel = len(sel_recs)
+
+    st.markdown(
+        f"<div style='font-size:12px;color:#64748B;margin:8px 0 4px;'>"
+        f"<strong style='color:#1E293B;'>{n_sel}</strong> / {len(recs)} selected</div>",
+        unsafe_allow_html=True,
+    )
+
+    ac1, ac2, _ = st.columns([1.5, 2, 5])
+
+    if ac1.button("✅ Approve Selected", type="primary", key="aq_approve",
+                   use_container_width=True, disabled=(n_sel == 0)):
+        for r in sel_recs:
+            sb.update_payroll_record(r["id"], {
+                "status":      _S_APPROVED,
+                "approved_by": _user_name(),
+                "approved_at": datetime.now().isoformat(),
+                "updated_at":  datetime.now().isoformat(),
+            })
+        st.success(f"Approved {n_sel} payroll record(s).")
+        st.session_state.pop(cache_key, None)
+        st.rerun()
+
+    if ac2.button("↩ Send Back Selected", key="aq_sendback",
+                   use_container_width=True, disabled=(n_sel == 0)):
+        st.session_state["aq_sendback_confirm"] = True
+        st.session_state["aq_sendback_ids"] = sel_ids
+
+    if st.session_state.get("aq_sendback_confirm"):
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='font-size:13px;font-weight:700;color:#D97706;'>"
+                f"Send back {len(st.session_state.get('aq_sendback_ids', []))} record(s)?</div>",
+                unsafe_allow_html=True,
+            )
+            sb_reason = st.text_input("Reason for sending back (required)", key="aq_sb_reason")
+            sc1, sc2 = st.columns([1, 1])
+            if sc1.button("Confirm Send Back", type="primary", key="aq_sb_ok"):
+                if not sb_reason.strip():
+                    st.error("Reason is required.")
+                else:
+                    ids_to_sendback = st.session_state.get("aq_sendback_ids", [])
+                    for rid in ids_to_sendback:
+                        sb.update_payroll_record(rid, {
+                            "status":          _S_DRAFT,
+                            "sendback_reason": sb_reason.strip(),
+                            "updated_at":      datetime.now().isoformat(),
+                        })
+                    st.success(f"Sent back {len(ids_to_sendback)} record(s) for revision.")
+                    for k in ["aq_sendback_confirm", "aq_sendback_ids", "aq_sb_reason"]:
+                        st.session_state.pop(k, None)
+                    st.session_state.pop(cache_key, None)
+                    st.rerun()
+            if sc2.button("Cancel", key="aq_sb_cancel"):
+                for k in ["aq_sendback_confirm", "aq_sendback_ids"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+
+# ── Tab 3: Pending / Held Salary ──────────────────────────────────────────────
+
+def _tab_pending_held(sb: SupabaseClient, operators: list) -> None:
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+
+    year, month, _, payroll_month, _, _, load_btn = _period_selector("psph")
+
+    if load_btn:
+        st.session_state.pop(f"psph_recs_{payroll_month}", None)
+
+    cache_key = f"psph_recs_{payroll_month}"
+    if cache_key not in st.session_state:
+        all_recs = sb.list_payroll_records(payroll_month=payroll_month)
+        hold_cancelled = [r for r in all_recs if r["status"] in (_S_ONHOLD, _S_CANCELLED)]
+        st.session_state[cache_key] = hold_cancelled
+
+    recs = st.session_state.get(cache_key, [])
+    op_by_id = {o["id"]: o for o in operators}
+
+    if not recs:
+        st.info(f"No on-hold or cancelled records for {_month_label(month)} {year}.")
+        return
+
+    held      = [r for r in recs if r["status"] == _S_ONHOLD]
+    cancelled = [r for r in recs if r["status"] == _S_CANCELLED]
+
+    def _make_table(rec_list: list, section: str) -> None:
+        rows = []
+        for r in rec_list:
+            op  = op_by_id.get(r["employee_id"], {})
+            rows.append({
+                "Select":       False,
+                "Emp Code":     op.get("emp_code", ""),
+                "Operator":     op.get("operator_name", r["employee_id"]),
+                "Net Payable":  float(r.get("net_payable") or 0),
+                "Reason":       r.get("hold_reason") or r.get("cancel_reason") or "—",
+                "Updated":      str(r.get("updated_at") or "")[:10],
+                "_id":          r["id"],
+            })
+        df = pd.DataFrame(rows)
+        edited = st.data_editor(
+            df.drop(columns=["_id"]),
+            key=f"ph_tbl_{section}_{payroll_month}",
+            use_container_width=True, hide_index=True, num_rows="fixed",
+            column_config={
+                "Select":      st.column_config.CheckboxColumn("Select",   width="small", default=False),
+                "Emp Code":    st.column_config.TextColumn("Emp Code",     width="small"),
+                "Operator":    st.column_config.TextColumn("Operator",     width="medium"),
+                "Net Payable": st.column_config.NumberColumn("Net Payable",format="₹%,.0f"),
+                "Reason":      st.column_config.TextColumn("Reason",       width="large"),
+                "Updated":     st.column_config.TextColumn("Updated",      width="small"),
+            },
+            disabled=["Emp Code", "Operator", "Net Payable", "Reason", "Updated"],
+        )
+        sel_mask = edited["Select"] == True  # noqa: E712
+        sel_ids  = list(df.loc[sel_mask.values, "_id"])
+        n_sel    = len(sel_ids)
+
+        if n_sel > 0 and section == "held":
+            ra1, ra2, _ = st.columns([1.5, 1.5, 5])
+            if ra1.button(f"↩ Release {n_sel} to Calculator", key=f"ph_rel_{section}",
+                           type="primary", use_container_width=True):
+                for rid in sel_ids:
+                    sb.update_payroll_record(rid, {
+                        "status":      _S_DRAFT,
+                        "hold_reason": None,
+                        "updated_at":  datetime.now().isoformat(),
+                    })
+                st.success(f"Released {n_sel} employee(s) back to Payroll Calculator.")
+                st.session_state.pop(cache_key, None)
+                # Also clear the calculator cache so it reloads
+                st.session_state.pop(f"ps_data_{payroll_month}", None)
+                st.rerun()
+
+            if ra2.button(f"✕ Cancel Salary for {n_sel}", key=f"ph_cancel_{section}",
+                           use_container_width=True):
+                st.session_state[f"ph_cancel_confirm_{section}"] = True
+                st.session_state[f"ph_cancel_ids_{section}"] = sel_ids
+
+            if st.session_state.get(f"ph_cancel_confirm_{section}"):
+                with st.container(border=True):
+                    can_reason = st.text_input("Cancellation reason (required)",
+                                               key=f"ph_can_reason_{section}")
+                    cc1, cc2 = st.columns([1, 1])
+                    if cc1.button("Confirm Cancel", type="primary", key=f"ph_can_ok_{section}"):
+                        if not can_reason.strip():
+                            st.error("Reason is required.")
+                        else:
+                            ids_to_cancel = st.session_state.get(f"ph_cancel_ids_{section}", [])
+                            for rid in ids_to_cancel:
+                                sb.update_payroll_record(rid, {
+                                    "status":        _S_CANCELLED,
+                                    "cancel_reason": can_reason.strip(),
+                                    "hold_reason":   None,
+                                    "updated_at":    datetime.now().isoformat(),
+                                })
+                            st.success(f"Cancelled {len(ids_to_cancel)} salary record(s) for {_month_label(month)} {year}.")
+                            for k in [f"ph_cancel_confirm_{section}", f"ph_cancel_ids_{section}"]:
+                                st.session_state.pop(k, None)
+                            st.session_state.pop(cache_key, None)
+                            st.rerun()
+                    if cc2.button("Back", key=f"ph_can_bk_{section}"):
+                        st.session_state.pop(f"ph_cancel_confirm_{section}", None)
+                        st.rerun()
+
+    if held:
+        st.markdown(
+            f"<div class='ps-section-hdr'>On Hold — {len(held)} employee(s)</div>",
+            unsafe_allow_html=True,
+        )
+        _make_table(held, "held")
+
+    if cancelled:
+        st.markdown(
+            f"<div class='ps-section-hdr'>Cancelled — {len(cancelled)} employee(s)</div>",
+            unsafe_allow_html=True,
+        )
+        _make_table(cancelled, "cancelled")
+
+
+# ── Tab 4: Final Payment ──────────────────────────────────────────────────────
+
+def _tab_final_payment(sb: SupabaseClient, operators: list) -> None:
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+
+    year, month, _, payroll_month, _, _, load_btn = _period_selector("psfp")
+
+    if load_btn:
+        st.session_state.pop(f"psfp_recs_{payroll_month}", None)
+
+    cache_key = f"psfp_recs_{payroll_month}"
+    if cache_key not in st.session_state:
+        all_recs = sb.list_payroll_records(payroll_month=payroll_month)
+        fin_recs = [r for r in all_recs if r["status"] in (_S_APPROVED, _S_PAID)]
+        st.session_state[cache_key] = fin_recs
+
+    recs = st.session_state.get(cache_key, [])
+    op_by_id = {o["id"]: o for o in operators}
+
+    approved_recs = [r for r in recs if r["status"] == _S_APPROVED]
+    paid_recs     = [r for r in recs if r["status"] == _S_PAID]
+
+    # ── KPIs ───────────────────────────────────────────────────────────────────
+    total_approved = sum(float(r.get("net_payable") or 0) for r in approved_recs)
+    total_paid     = sum(float(r.get("net_payable") or 0) for r in paid_recs)
+    st.markdown(
+        "<div class='ps-kpi-grid'>"
+        + _kpi("Approved (Pending Payment)", len(approved_recs),       f"₹{total_approved:,.0f} to disburse", "#E87722")
+        + _kpi("Already Paid",               len(paid_recs),           f"₹{total_paid:,.0f} disbursed",       "#10B981")
+        + _kpi("Total",                      len(recs),                f"₹{total_approved+total_paid:,.0f}",  "#2563EB")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Approved section: select + mark as paid ────────────────────────────────
+    if approved_recs:
+        st.markdown(
+            "<div class='ps-section-hdr'>Ready for Payment</div>",
+            unsafe_allow_html=True,
+        )
+
+        rows = []
+        for r in approved_recs:
+            op = op_by_id.get(r["employee_id"], {})
+            rows.append({
+                "Select":           False,
+                "Emp Code":         op.get("emp_code", ""),
+                "Operator":         op.get("operator_name", r["employee_id"]),
+                "Name in Passbook": op.get("name_in_passbook", ""),
+                "Account No.":      op.get("bank_account_number", ""),
+                "IFSC":             op.get("ifsc_code", ""),
+                "Net Payable":      float(r.get("net_payable") or 0),
+                "Approved By":      r.get("approved_by", ""),
+                "Remarks":          r.get("remarks", ""),
+                "_id":              r["id"],
+            })
+        disp_df = pd.DataFrame(rows)
+
+        col_cfg = {
+            "Select":           st.column_config.CheckboxColumn("Select",    width="small", default=False),
+            "Emp Code":         st.column_config.TextColumn("Emp Code",      width="small"),
+            "Operator":         st.column_config.TextColumn("Operator",      width="medium"),
+            "Name in Passbook": st.column_config.TextColumn("Passbook Name", width="medium"),
+            "Account No.":      st.column_config.TextColumn("Account No.",   width="medium"),
+            "IFSC":             st.column_config.TextColumn("IFSC",          width="small"),
+            "Net Payable":      st.column_config.NumberColumn("Net Payable", format="₹%,.0f", width="small"),
+            "Approved By":      st.column_config.TextColumn("Approved By",   width="small"),
+            "Remarks":          st.column_config.TextColumn("Remarks",       width="medium"),
+        }
+
+        edited = st.data_editor(
+            disp_df.drop(columns=["_id"]),
+            key=f"fp_editor_{payroll_month}",
+            use_container_width=True, hide_index=True, num_rows="fixed",
+            column_config=col_cfg,
+            disabled=[c for c in disp_df.columns if c not in ("Select", "_id")],
+        )
+
+        # Export payment list
+        try:
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                disp_df.drop(columns=["Select", "_id"]).to_excel(
+                    w, index=False, sheet_name="Payment List")
+            st.download_button(
+                "Export Payment List",
+                data=buf.getvalue(),
+                file_name=f"payment_list_{payroll_month}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="fp_export",
+            )
+        except Exception:
+            pass
+
+        sel_mask = edited["Select"] == True  # noqa: E712
+        sel_ids  = list(disp_df.loc[sel_mask.values, "_id"])
+        n_sel    = len(sel_ids)
+        sel_total = disp_df.loc[sel_mask.values, "Net Payable"].sum()
+
+        if n_sel > 0:
+            st.markdown(
+                f"<div style='font-size:12px;font-weight:700;color:#0F766E;margin:4px 0 8px;'>"
+                f"{n_sel} selected — Total: ₹{sel_total:,.0f}</div>",
+                unsafe_allow_html=True,
+            )
+            mc1, mc2, mc3 = st.columns([1.2, 2, 3])
+            pay_date = mc1.date_input("Payment Date", value=date.today(), key="fp_pdate")
+            utr_ref  = mc2.text_input("UTR / Reference", key="fp_utr",
+                                       placeholder="Bank UTR or leave blank")
+            if mc3.button(f"Mark {n_sel} as Paid", type="primary", key="fp_mark_paid"):
+                paid_n = 0
+                for rid in sel_ids:
+                    sb.update_payroll_record(rid, {
+                        "status":       _S_PAID,
+                        "paid_by":      _user_name(),
+                        "paid_at":      datetime.now().isoformat(),
+                        "payment_date": str(pay_date),
+                        "utr_reference": utr_ref or None,
+                        "updated_at":   datetime.now().isoformat(),
+                    })
+                    paid_n += 1
+                st.success(f"Marked {paid_n} payment(s) as Paid on {pay_date}.")
+                st.session_state.pop(cache_key, None)
+                st.rerun()
+
+    # ── Paid history ───────────────────────────────────────────────────────────
+    if paid_recs:
+        st.markdown(
+            f"<div class='ps-section-hdr'>Paid — {len(paid_recs)} record(s) &nbsp;"
+            f"<span style='font-weight:400;color:#10B981;'>₹{total_paid:,.0f}</span></div>",
+            unsafe_allow_html=True,
+        )
+        paid_rows = []
+        for r in paid_recs:
+            op = op_by_id.get(r["employee_id"], {})
+            paid_rows.append({
+                "Emp Code":         op.get("emp_code", ""),
+                "Operator":         op.get("operator_name", r["employee_id"]),
+                "Name in Passbook": op.get("name_in_passbook", ""),
+                "Account No.":      op.get("bank_account_number", ""),
+                "IFSC":             op.get("ifsc_code", ""),
+                "Net Payable":      float(r.get("net_payable") or 0),
+                "Payment Date":     r.get("payment_date") or "",
+                "UTR":              r.get("utr_reference") or "—",
+                "Paid By":          r.get("paid_by") or "",
+            })
+        st.dataframe(
+            pd.DataFrame(paid_rows),
+            use_container_width=True, hide_index=True,
+            column_config={"Net Payable": st.column_config.NumberColumn(format="₹%,.0f")},
+        )
+
+    if not recs:
+        st.info(f"No approved or paid records for {_month_label(month)} {year}.")
 
 
 # ── Main render ───────────────────────────────────────────────────────────────
@@ -637,7 +1127,7 @@ def render() -> None:
         "<div style='font-size:10px;font-weight:700;letter-spacing:.13em;"
         "text-transform:uppercase;color:#6B7280;margin-bottom:4px;'>// Payroll</div>"
         "<div style='font-size:26px;font-weight:900;color:#111827;"
-        "letter-spacing:-.5px;margin-bottom:20px;'>Payment Summary</div>",
+        "letter-spacing:-.5px;margin-bottom:16px;'>Payment Summary</div>",
         unsafe_allow_html=True,
     )
 
@@ -653,8 +1143,17 @@ def render() -> None:
     except Exception:
         operators = []
 
-    tab1, tab2 = st.tabs(["Payroll Calculator", "Bank Transfer List"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🧮  Payroll Calculator",
+        "✅  Approval Queue",
+        "⏸  Pending / Held",
+        "💳  Final Payment",
+    ])
     with tab1:
         _tab_calculator(sb, operators)
     with tab2:
-        _tab_bank_list()
+        _tab_approval_queue(sb, operators)
+    with tab3:
+        _tab_pending_held(sb, operators)
+    with tab4:
+        _tab_final_payment(sb, operators)

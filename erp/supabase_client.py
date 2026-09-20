@@ -1690,3 +1690,37 @@ class SupabaseClient:
 
     def delete_payroll_customer_payment(self, rec_id: str) -> None:
         self.admin_client.table("payroll_customer_payments").delete().eq("id", rec_id).execute()
+
+    # ── Payroll Records (workflow) ──────────────────────────────────────────────
+
+    def list_payroll_records(
+        self,
+        payroll_month: str | None = None,
+        status: str | None = None,
+        employee_id: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        q = self.admin_client.table("payroll_records").select("*")
+        if payroll_month:
+            q = q.eq("payroll_month", payroll_month)
+        if status:
+            q = q.eq("status", status)
+        if employee_id:
+            q = q.eq("employee_id", employee_id)
+        return q.order("employee_id").execute().data or []
+
+    def upsert_payroll_record(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        result = (
+            self.admin_client.table("payroll_records")
+            .upsert(payload, on_conflict="employee_id,payroll_month")
+            .execute()
+        )
+        return (result.data or [{}])[0]
+
+    def update_payroll_record(self, rec_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        result = (
+            self.admin_client.table("payroll_records")
+            .update(payload)
+            .eq("id", rec_id)
+            .execute()
+        )
+        return (result.data or [{}])[0]
