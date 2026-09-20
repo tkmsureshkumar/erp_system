@@ -114,6 +114,18 @@ def _site_rule_dialog(sb: SupabaseClient, sites: list, prefill: dict, user_name:
         if not site_name or not rate:
             st.error("Site and Rate are required.")
             return
+        # Enforce one active rule per site (skip check when editing the same rule)
+        if not is_edit:
+            existing_for_site = [
+                r for r in sb.list_conveyance_site_rules()
+                if r.get("site_id") == site_opts[site_name] and r.get("is_active", True)
+            ]
+            if existing_for_site:
+                st.error(
+                    f"An active conveyance rule already exists for **{site_name}**. "
+                    "Please deactivate the existing rule before adding a new one."
+                )
+                return
         payload: dict = {
             "site_id":       site_opts[site_name],
             "rate":          float(rate),

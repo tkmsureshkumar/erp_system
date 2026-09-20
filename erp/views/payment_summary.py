@@ -445,13 +445,14 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
 
     st.markdown(
         "<div class='ps-info-note'>"
-        "🔄 <strong>Auto-calculated (read-only):</strong> "
-        "Earned Basic = Days Worked ÷ Month Days × Fixed Salary &nbsp;·&nbsp; "
+        "🔄 <strong>Auto-calculated:</strong> "
+        "Earned Basic = Days Worked ÷ Month Days × Fixed Sal &nbsp;·&nbsp; "
         "Total = Earned + OT &nbsp;·&nbsp; "
         "Deductions = Sal by Cust + Advance + PF &nbsp;·&nbsp; "
         "Net = Total − Deductions<br>"
         "✏️ <strong>Editable:</strong> Working Days · OT Hours · Fixed Salary · Month Days · "
-        "OT Amt · Sal Paid Other · Advance Deduction · PF Amt · Additions · Remarks"
+        "OT Amt · Sal Paid Other · PF Amt · Additions · Remarks &nbsp;·&nbsp; "
+        "🔒 <strong>Advance Deduction</strong> is read-only — set in Advance Recovery tab"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -462,7 +463,8 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
     # Every OTHER column (all numeric) is editable.
     always_readonly = {
         "Emp Code", "Operator", "Name in Passbook", "IFSC", "Account No.",
-        "No. of Days Worked", "Earned Basic", "Total Amt", "Deduction Total", "Net Payable",
+        "No. of Days Worked", "Earned Basic", "Advance Deduction",
+        "Total Amt", "Deduction Total", "Net Payable",
     }
     display_cols  = [c for c in df.columns if c != "_emp_id"]
     readonly_cols = [c for c in display_cols if c in always_readonly]

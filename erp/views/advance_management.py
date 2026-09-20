@@ -255,7 +255,6 @@ def _build_print_html(items: list, op_by_id: dict) -> str:
 # ── Tab 1: Opening Balance ─────────────────────────────────────────────────────
 
 def _tab_opening_balance() -> None:
-    st.markdown("#### Opening Balance")
     sb = SupabaseClient()
     operators  = sb.list_operators()
     op_by_id   = {o["id"]: o for o in operators}
@@ -279,38 +278,84 @@ def _tab_opening_balance() -> None:
                 "As on Date":  r.get("as_on_date", ""),
                 "Remarks":     r.get("remarks", ""),
                 "Entered By":  r.get("entered_by", ""),
-                "Entry Date":  r.get("entry_date", ""),
             })
-        st.dataframe(
-            pd.DataFrame(rows),
-            use_container_width=True, hide_index=True,
-            column_config={"Balance (₹)": st.column_config.NumberColumn(format="₹%,.0f")},
+        total = sum(r["Balance (₹)"] for r in rows)
+
+        # Header
+        st.markdown(
+            f"<div style='display:flex;justify-content:space-between;align-items:center;"
+            f"margin-bottom:10px;'>"
+            f"<span style='font-size:13px;font-weight:700;color:#1E293B;'>"
+            f"{len(rows)} Opening Balance Entr{'y' if len(rows)==1 else 'ies'}</span>"
+            f"<span style='font-size:13px;font-weight:800;color:#10B981;'>"
+            f"Total: ₹{total:,.0f}</span></div>",
+            unsafe_allow_html=True,
+        )
+
+        # Table with bold employee names
+        hs = ("padding:8px 12px;background:#F8FAFC;font-size:10px;font-weight:700;"
+              "letter-spacing:.1em;text-transform:uppercase;color:#64748B;"
+              "border-bottom:2px solid #E2EBF0;")
+        cs = "padding:9px 12px;font-size:13px;border-bottom:1px solid #F1F5F9;"
+        cols = ["Employee", "Emp Code", "Balance (₹)", "As on Date", "Remarks", "Entered By"]
+        head = "".join(f"<th style='{hs}'>{c}</th>" for c in cols)
+        body = ""
+        for r in rows:
+            body += (
+                f"<tr>"
+                f"<td style='{cs}font-weight:700;color:#1E293B;'>{r['Employee']}</td>"
+                f"<td style='{cs}color:#64748B;'>{r['Emp Code']}</td>"
+                f"<td style='{cs}font-variant-numeric:tabular-nums;font-weight:600;color:#0F766E;'>"
+                f"₹{r['Balance (₹)']:,.0f}</td>"
+                f"<td style='{cs}color:#64748B;'>{r['As on Date']}</td>"
+                f"<td style='{cs}color:#64748B;'>{r['Remarks'] or '—'}</td>"
+                f"<td style='{cs}color:#64748B;'>{r['Entered By'] or '—'}</td>"
+                f"</tr>"
+            )
+        total_row = (
+            f"<tr style='background:#F0FDF4;font-weight:800;'>"
+            f"<td style='{cs}color:#166534;' colspan='2'>Total</td>"
+            f"<td style='{cs}color:#166534;font-size:14px;'>₹{total:,.0f}</td>"
+            f"<td colspan='3' style='{cs}'></td></tr>"
+        )
+        st.markdown(
+            f"<div style='overflow-x:auto;border:1px solid #E2EBF0;border-radius:10px;'>"
+            f"<table style='width:100%;border-collapse:collapse;'>"
+            f"<thead><tr>{head}</tr></thead>"
+            f"<tbody>{body}{total_row}</tbody>"
+            f"</table></div>",
+            unsafe_allow_html=True,
         )
     else:
         st.info("No opening balance entries yet.")
 
-    st.markdown("---")
-    st.markdown("**Add Opening Balance Entry**")
-    with st.form("adv_ob_form", clear_on_submit=True):
-        c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
-        emp_label = c1.selectbox("Employee *", list(op_options.keys()))
-        balance   = c2.number_input("Balance (₹) *", min_value=0.0, step=100.0)
-        as_on     = c3.date_input("As on Date *", value=date.today())
-        remarks   = c4.text_input("Remarks")
-        if st.form_submit_button("Save Opening Balance", type="primary"):
-            if not emp_label:
-                st.error("Please select an employee.")
-            else:
-                sb.insert_advance_opening_balance({
-                    "employee_id": op_options[emp_label],
-                    "balance":     balance,
-                    "as_on_date":  str(as_on),
-                    "remarks":     remarks,
-                    "entered_by":  _user_name(),
-                    "entry_date":  str(date.today()),
-                })
-                st.success("Opening balance saved.")
-                st.rerun()
+    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown(
+            "<span style='font-size:11px;font-weight:700;letter-spacing:.1em;"
+            "text-transform:uppercase;color:#E87722;'>Add Opening Balance Entry</span>",
+            unsafe_allow_html=True,
+        )
+        with st.form("adv_ob_form", clear_on_submit=True):
+            c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
+            emp_label = c1.selectbox("Employee *", list(op_options.keys()))
+            balance   = c2.number_input("Balance (₹) *", min_value=0.0, step=100.0)
+            as_on     = c3.date_input("As on Date *", value=date.today())
+            remarks   = c4.text_input("Remarks")
+            if st.form_submit_button("Save Opening Balance", type="primary"):
+                if not emp_label:
+                    st.error("Please select an employee.")
+                else:
+                    sb.insert_advance_opening_balance({
+                        "employee_id": op_options[emp_label],
+                        "balance":     balance,
+                        "as_on_date":  str(as_on),
+                        "remarks":     remarks,
+                        "entered_by":  _user_name(),
+                        "entry_date":  str(date.today()),
+                    })
+                    st.success("Opening balance saved.")
+                    st.rerun()
 
 
 # ── Tab 2: New Advance ─────────────────────────────────────────────────────────
@@ -453,7 +498,6 @@ def _tab_pending_approval() -> None:
         st.info("Only Admin can approve or reject advance requests.", icon="🔒")
         return
 
-    st.markdown("#### Pending Approval")
     sb = SupabaseClient()
     operators = sb.list_operators()
     op_by_id  = {o["id"]: o for o in operators}
@@ -498,7 +542,16 @@ def _tab_pending_approval() -> None:
         st.info("No requests match the selected filters.")
         return
 
-    st.markdown(f"**{len(filtered)} request(s) pending**")
+    st.markdown(
+        f"<div style='font-size:13px;color:#64748B;margin-bottom:16px;'>"
+        f"<strong style='color:#1E293B;'>{len(filtered)}</strong> request(s) awaiting approval</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Pre-fetch bulk data to avoid N+1 queries
+    all_opens  = sb.list_advance_opening_balances()
+    all_pays   = sb.list_advance_payments()
+    all_recvs  = sb.list_advance_recoveries()
 
     for r in filtered:
         emp_id   = r.get("employee_id", "")
@@ -508,78 +561,135 @@ def _tab_pending_approval() -> None:
         batch    = batches.get(r.get("batch_id", ""), {})
         req_amt  = float(r.get("requested_amount") or 0)
 
-        _emp_pays = sb.list_advance_payments(employee_id=emp_id)
-        _emp_open = sb.list_advance_opening_balances(employee_id=emp_id)
-        _emp_recv = sb.list_advance_recoveries(employee_id=emp_id)
-        bal = _compute_balance_from(_emp_open, _emp_pays, _emp_recv, today)
-
-        title = (
-            f"{emp_name}  ({emp_code})  |  "
-            f"₹{req_amt:,.0f}  |  "
-            f"{r.get('advance_date', '')}  |  "
-            f"Mode: {r.get('payment_mode') or '—'}"
+        bal = _compute_balance_from(
+            [x for x in all_opens if x.get("employee_id") == emp_id],
+            [x for x in all_pays  if x.get("employee_id") == emp_id],
+            [x for x in all_recvs if x.get("employee_id") == emp_id],
+            today,
         )
-        with st.expander(title):
-            ic = st.columns(4)
-            ic[0].metric("Existing Balance",  f"₹{bal['balance']:,.0f}")
-            ic[1].metric("Requested Amount",  f"₹{req_amt:,.0f}")
-            ic[2].metric("Submitted By",      batch.get("submitted_by", ""))
-            ic[3].metric("Reason",            r.get("reason", "") or "—")
 
-            approved_amt = st.number_input(
-                "Approved Amount (₹)",
-                min_value=0.0,
-                value=req_amt,
-                step=100.0,
-                key=f"adv_ap_amt_{r['id']}",
-            )
-            remarks = st.text_input(
-                "Remarks / Reason for change",
-                key=f"adv_ap_rmk_{r['id']}",
-                help="Mandatory when rejecting or when approved amount differs from requested.",
-            )
+        parts    = emp_name.strip().split()
+        initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper()
 
-            bc = st.columns([1, 1, 4])
-            if bc[0].button("✅ Approve", key=f"adv_ok_{r['id']}", type="primary"):
-                if approved_amt != req_amt and not remarks:
-                    st.error("Reason is mandatory when changing the approved amount.")
-                else:
-                    sb.update_advance_request(r["id"], {
-                        "status":               "Approved",
-                        "approved_amount":      approved_amt,
-                        "approval_remarks":     remarks,
-                        "amount_change_reason": remarks if approved_amt != req_amt else None,
-                        "approved_by":          _user_name(),
-                        "approved_at":          datetime.now().isoformat(),
-                    })
-                    sb.insert_advance_payment({
-                        "advance_request_id": r["id"],
-                        "employee_id":        emp_id,
-                        "amount":             approved_amt,
-                        "payment_status":     "Pending",
-                    })
-                    st.success(f"Approved ₹{approved_amt:,.0f} for {emp_name}.")
-                    st.rerun()
+        reason_html = (
+            f"<div style='margin-top:8px;font-size:12px;color:#64748B;'>"
+            f"📝 <em>{r.get('reason', '')}</em></div>"
+            if r.get("reason") else ""
+        )
 
-            if bc[1].button("❌ Reject", key=f"adv_no_{r['id']}"):
-                if not remarks:
-                    st.error("Reason is mandatory when rejecting.")
-                else:
-                    sb.update_advance_request(r["id"], {
-                        "status":           "Rejected",
-                        "approved_amount":  0,
-                        "approval_remarks": remarks,
-                        "approved_by":      _user_name(),
-                        "approved_at":      datetime.now().isoformat(),
-                    })
-                    st.success(f"Rejected advance request for {emp_name}.")
-                    st.rerun()
+        st.markdown(
+            f"""
+            <div style='border:1px solid #E2EBF0;border-radius:14px;padding:18px 20px 14px;
+                        margin-bottom:4px;background:#FFFFFF;box-shadow:0 1px 4px rgba(0,0,0,.06);'>
+              <div style='display:flex;align-items:flex-start;gap:14px;'>
+                <div style='width:44px;height:44px;border-radius:50%;background:#E0F2FE;
+                            display:flex;align-items:center;justify-content:center;
+                            font-size:16px;font-weight:800;color:#0284C7;flex-shrink:0;'>
+                  {initials}
+                </div>
+                <div style='flex:1;'>
+                  <div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>
+                    <span style='font-size:15px;font-weight:800;color:#1E293B;'>{emp_name}</span>
+                    <span style='font-size:11px;color:#64748B;background:#F1F5F9;
+                                 padding:2px 8px;border-radius:20px;'>{emp_code}</span>
+                    <span style='font-size:11px;font-weight:700;color:#D97706;background:#FEF3C7;
+                                 padding:2px 8px;border-radius:20px;'>⏳ Awaiting Approval</span>
+                  </div>
+                  <div style='display:flex;gap:28px;margin-top:10px;flex-wrap:wrap;'>
+                    <div>
+                      <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                  letter-spacing:.08em;'>Requested Amount</div>
+                      <div style='font-size:22px;font-weight:800;color:#1E293B;'>
+                        ₹{req_amt:,.0f}</div>
+                    </div>
+                    <div>
+                      <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                  letter-spacing:.08em;'>Existing Balance</div>
+                      <div style='font-size:18px;font-weight:700;
+                                  color:{"#DC2626" if bal["balance"]>0 else "#64748B"};'>
+                        ₹{bal['balance']:,.0f}</div>
+                    </div>
+                    <div>
+                      <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                  letter-spacing:.08em;'>Payment Mode</div>
+                      <div style='font-size:14px;font-weight:600;color:#475569;'>
+                        {r.get('payment_mode') or '—'}</div>
+                    </div>
+                    <div>
+                      <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                  letter-spacing:.08em;'>Advance Date</div>
+                      <div style='font-size:14px;font-weight:600;color:#475569;'>
+                        {r.get('advance_date', '')}</div>
+                    </div>
+                    <div>
+                      <div style='font-size:10px;color:#94A3B8;text-transform:uppercase;
+                                  letter-spacing:.08em;'>Submitted By</div>
+                      <div style='font-size:14px;font-weight:600;color:#475569;'>
+                        {batch.get('submitted_by', '—')}</div>
+                    </div>
+                  </div>
+                  {reason_html}
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        ci1, ci2, ci3 = st.columns([1.2, 2, 4])
+        approved_amt = ci1.number_input(
+            "Approved Amount (₹)",
+            min_value=0.0, value=req_amt, step=100.0,
+            key=f"adv_ap_amt_{r['id']}",
+        )
+        remarks = ci2.text_input(
+            "Comment / Reason for change",
+            key=f"adv_ap_rmk_{r['id']}",
+            help="Mandatory when rejecting or changing the approved amount.",
+        )
+
+        bc1, bc2, _ = st.columns([1, 1, 6])
+        if bc1.button("✅ Approve", key=f"adv_ok_{r['id']}", type="primary"):
+            if approved_amt != req_amt and not remarks:
+                st.error("Reason is mandatory when changing the approved amount.")
+            else:
+                sb.update_advance_request(r["id"], {
+                    "status":               "Approved",
+                    "approved_amount":      approved_amt,
+                    "approval_remarks":     remarks,
+                    "amount_change_reason": remarks if approved_amt != req_amt else None,
+                    "approved_by":          _user_name(),
+                    "approved_at":          datetime.now().isoformat(),
+                })
+                sb.insert_advance_payment({
+                    "advance_request_id": r["id"],
+                    "employee_id":        emp_id,
+                    "amount":             approved_amt,
+                    "payment_status":     "Pending",
+                })
+                st.success(f"Approved ₹{approved_amt:,.0f} for {emp_name}.")
+                st.rerun()
+
+        if bc2.button("❌ Reject", key=f"adv_no_{r['id']}"):
+            if not remarks:
+                st.error("Reason is mandatory when rejecting.")
+            else:
+                sb.update_advance_request(r["id"], {
+                    "status":           "Rejected",
+                    "approved_amount":  0,
+                    "approval_remarks": remarks,
+                    "approved_by":      _user_name(),
+                    "approved_at":      datetime.now().isoformat(),
+                })
+                st.success(f"Rejected advance request for {emp_name}.")
+                st.rerun()
+
+        st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
 
 
 # ── Tab 4: Pending Payment ─────────────────────────────────────────────────────
 
 def _tab_pending_payment() -> None:
-    st.markdown("#### Pending Payment")
     sb        = SupabaseClient()
     operators = sb.list_operators()
     op_by_id  = {o["id"]: o for o in operators}
@@ -592,11 +702,29 @@ def _tab_pending_payment() -> None:
     all_reqs_list = sb.list_advance_requests()
     all_requests  = {r["id"]: r for r in all_reqs_list}
 
-    # ── Filters ────────────────────────────────────────────────────────────────
-    fc = st.columns([2, 2, 2])
-    label_options = ["All"] + [lbl for lbl in op_labels.values() if lbl]
-    emp_filter    = fc[0].selectbox("Employee", label_options, key="adv_ph_emp")
+    today = date.today()
 
+    # ── Filter bar ─────────────────────────────────────────────────────────────
+    fc = st.columns([2, 1.5, 1.5, 1.5])
+    label_options = ["All"] + sorted(lbl for lbl in op_labels.values() if lbl)
+    emp_filter  = fc[0].selectbox("Employee", label_options, key="adv_ph_emp")
+    mode_filter = fc[1].selectbox("Payment Mode", ["All"] + _PAYMENT_MODES, key="adv_ph_mode")
+    period      = fc[2].selectbox("Date Range",
+                                   ["All Time", "Last 7 Days", "This Month", "Custom"],
+                                   key="adv_ph_period")
+    if period == "Last 7 Days":
+        date_from, date_to = today - timedelta(days=6), today
+    elif period == "This Month":
+        date_from, date_to = today.replace(day=1), today
+    elif period == "Custom":
+        dc = fc[3].date_input("Range", value=(today - timedelta(days=30), today),
+                               key="adv_ph_range")
+        date_from = dc[0] if isinstance(dc, tuple) else dc
+        date_to   = dc[1] if isinstance(dc, tuple) and len(dc) > 1 else today
+    else:
+        date_from = date_to = None
+
+    # ── Enrich and filter ──────────────────────────────────────────────────────
     enriched = []
     for p in all_payments:
         emp_id   = p.get("employee_id", "")
@@ -604,16 +732,28 @@ def _tab_pending_payment() -> None:
         emp_name = op.get("operator_name", emp_id)
         emp_code = op.get("emp_code", "")
         emp_lbl  = op_labels.get(emp_id, "")
+        req      = all_requests.get(p.get("advance_request_id", ""), {})
+        mode     = req.get("payment_mode") or "—"
+        appr_date = str(req.get("approved_at") or "")[:10]
+        pay_date  = p.get("payment_date") or ""
+
         if emp_filter != "All" and emp_lbl != emp_filter:
             continue
-        req = all_requests.get(p.get("advance_request_id", ""), {})
+        if mode_filter != "All" and mode != mode_filter:
+            continue
+        ref_d = appr_date or pay_date
+        if date_from and ref_d and ref_d < str(date_from):
+            continue
+        if date_to and ref_d and ref_d > str(date_to):
+            continue
+
         enriched.append({
             "Employee":        f"{emp_name} ({emp_code})",
             "Advance Date":    req.get("advance_date", ""),
             "Amount (₹)":      float(p.get("amount") or 0),
-            "Payment Mode":    req.get("payment_mode") or "—",
-            "Approval Date":   str(req.get("approved_at") or "")[:10],
-            "Payment Date":    p.get("payment_date") or "",
+            "Payment Mode":    mode,
+            "Approval Date":   appr_date,
+            "Payment Date":    pay_date,
             "Status":          p.get("payment_status") or "Pending",
             "UTR / Reference": p.get("utr_reference") or "",
             "_id":             p["id"],
@@ -624,54 +764,74 @@ def _tab_pending_payment() -> None:
     paid_list    = [r for r in enriched if r["Status"] == "Paid"]
 
     # ── Pending section ────────────────────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:700;color:#1E293B;margin:12px 0 8px;'>"
+        f"Awaiting Disbursement "
+        f"<span style='font-weight:400;color:#64748B;'>({len(pending_list)} payment(s))</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
     if not pending_list:
         st.info("No pending payments.")
     else:
-        st.markdown(f"**{len(pending_list)} payment(s) awaiting disbursement**")
+        total_pending = sum(r["Amount (₹)"] for r in pending_list)
+        act1, act2, _ = st.columns([1.5, 1.5, 5])
 
-        # Print / download voucher
-        print_col, _ = st.columns([2, 6])
         html_voucher = _build_print_html(pending_list, op_by_id)
-        print_col.download_button(
-            label="🖨 Download Payment Voucher",
+        act1.download_button(
+            label="Download Voucher",
             data=html_voucher.encode("utf-8"),
             file_name=f"advance_voucher_{date.today()}.html",
             mime="text/html",
-            help="Open the downloaded file in a browser and use Ctrl+P to print.",
+            help="Open in a browser and use Ctrl+P to print.",
         )
 
         if auth.is_admin():
-            st.markdown("**Select entries to mark as paid:**")
-            # Select All convenience
-            all_key  = "adv_sel_all"
-            select_all = st.checkbox("Select All", key=all_key)
+            # Build data_editor table with Select column
+            _SEL_KEY = "adv_pending_sel"
+            df_pending = pd.DataFrame([{
+                "Select":         st.session_state.get(f"psel_{p['_id']}", False),
+                "Employee":       p["Employee"],
+                "Advance Date":   p["Advance Date"],
+                "Amount (₹)":     p["Amount (₹)"],
+                "Payment Mode":   p["Payment Mode"],
+                "Approval Date":  p["Approval Date"],
+                "_id":            p["_id"],
+            } for p in pending_list])
 
-            for p in pending_list:
-                cb_key   = f"pay_sel_{p['_id']}"
-                default  = select_all or st.session_state.get(cb_key, False)
-                st.checkbox(
-                    f"{p['Employee']}  |  ₹{p['Amount (₹)']:,.0f}  |  "
-                    f"Approved: {p['Approval Date']}  |  Mode: {p['Payment Mode']}",
-                    key=cb_key,
-                    value=default,
-                )
+            edited = st.data_editor(
+                df_pending.drop(columns=["_id"]),
+                use_container_width=True,
+                hide_index=True,
+                num_rows="fixed",
+                column_config={
+                    "Select":      st.column_config.CheckboxColumn("Select", default=False),
+                    "Amount (₹)":  st.column_config.NumberColumn(format="₹%,.0f"),
+                },
+                disabled=["Employee", "Advance Date", "Amount (₹)", "Payment Mode",
+                          "Approval Date"],
+                key=_SEL_KEY,
+            )
 
-            selected = [p for p in pending_list
-                        if st.session_state.get(f"pay_sel_{p['_id']}", False)]
+            selected_rows = edited[edited["Select"] == True] if "Select" in edited.columns else pd.DataFrame()  # noqa: E712
+            sel_ids = list(df_pending.loc[selected_rows.index, "_id"]) if not selected_rows.empty else []
+            selected = [p for p in pending_list if p["_id"] in sel_ids]
 
             if selected:
+                sel_total = sum(r["Amount (₹)"] for r in selected)
                 st.markdown(
-                    f"**{len(selected)} selected — Total: "
-                    f"₹{sum(r['Amount (₹)'] for r in selected):,.0f}**"
+                    f"<div style='font-size:12px;font-weight:700;color:#0F766E;"
+                    f"margin:4px 0 8px;'>{len(selected)} selected — Total: ₹{sel_total:,.0f}</div>",
+                    unsafe_allow_html=True,
                 )
-                mc1, mc2 = st.columns([1, 2])
-                bulk_date = mc1.date_input("Payment Date", value=date.today(),
-                                            key="adv_bulk_pdate")
+                mc1, mc2, mc3 = st.columns([1, 2, 3])
+                bulk_date = mc1.date_input("Payment Date", value=date.today(), key="adv_bulk_pdate")
                 bulk_utr  = mc2.text_input("UTR / Reference", key="adv_bulk_utr",
                                             placeholder="Common UTR or leave blank")
-                if st.button(
-                    f"✅ Mark {len(selected)} Payment(s) as Paid", type="primary",
-                    key="adv_bulk_mark_paid"
+                if mc3.button(
+                    f"Mark {len(selected)} Payment(s) as Paid", type="primary",
+                    key="adv_bulk_mark_paid",
                 ):
                     for p in selected:
                         sb.update_advance_payment(p["_id"], {
@@ -681,59 +841,67 @@ def _tab_pending_payment() -> None:
                             "paid_by":        _user_name(),
                             "paid_at":        datetime.now().isoformat(),
                         })
-                    st.success(
-                        f"Marked {len(selected)} payment(s) as Paid on {bulk_date}."
-                    )
-                    # Clear checkboxes
-                    for p in selected:
-                        st.session_state.pop(f"pay_sel_{p['_id']}", None)
-                    st.session_state.pop(all_key, None)
+                    st.success(f"Marked {len(selected)} payment(s) as Paid on {bulk_date}.")
                     st.rerun()
         else:
-            # Non-admin: read-only view
-            df_pending = pd.DataFrame([{
-                "Employee":     p["Employee"],
-                "Advance Date": p["Advance Date"],
-                "Amount (₹)":   p["Amount (₹)"],
-                "Payment Mode": p["Payment Mode"],
-            } for p in pending_list])
             st.dataframe(
-                df_pending, use_container_width=True, hide_index=True,
+                pd.DataFrame([{
+                    "Employee":     p["Employee"],
+                    "Advance Date": p["Advance Date"],
+                    "Amount (₹)":   p["Amount (₹)"],
+                    "Payment Mode": p["Payment Mode"],
+                } for p in pending_list]),
+                use_container_width=True, hide_index=True,
                 column_config={"Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f")},
             )
 
     # ── Paid history section ───────────────────────────────────────────────────
     if paid_list:
-        st.markdown("---")
-        st.markdown("**Paid History**")
+        st.markdown(
+            f"<div style='font-size:13px;font-weight:700;color:#1E293B;margin:20px 0 8px;'>"
+            f"Paid History "
+            f"<span style='font-weight:400;color:#64748B;'>({len(paid_list)} record(s))</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
         if auth.is_admin():
-            st.caption("Select entries below to revert them to Unpaid (Pending) status.")
-            unp_all_key  = "adv_unp_sel_all"
-            unp_select_all = st.checkbox("Select All", key=unp_all_key)
+            st.caption("Select entries to revert them to Pending status.")
+            df_paid = pd.DataFrame([{
+                "Select":        False,
+                "Employee":      p["Employee"],
+                "Amount (₹)":    p["Amount (₹)"],
+                "Payment Mode":  p["Payment Mode"],
+                "Payment Date":  p["Payment Date"],
+                "UTR":           p["UTR / Reference"],
+                "_id":           p["_id"],
+            } for p in paid_list])
 
-            for p in paid_list:
-                cb_key  = f"unp_sel_{p['_id']}"
-                default = unp_select_all or st.session_state.get(cb_key, False)
-                st.checkbox(
-                    f"{p['Employee']}  |  ₹{p['Amount (₹)']:,.0f}  |  "
-                    f"Paid: {p['Payment Date']}  |  UTR: {p['UTR / Reference'] or '—'}",
-                    key=cb_key,
-                    value=default,
-                )
+            edited_paid = st.data_editor(
+                df_paid.drop(columns=["_id"]),
+                use_container_width=True, hide_index=True, num_rows="fixed",
+                column_config={
+                    "Select":     st.column_config.CheckboxColumn("Select", default=False),
+                    "Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f"),
+                },
+                disabled=["Employee", "Amount (₹)", "Payment Mode", "Payment Date", "UTR"],
+                key="adv_paid_sel",
+            )
 
-            unp_selected = [p for p in paid_list
-                            if st.session_state.get(f"unp_sel_{p['_id']}", False)]
+            unp_selected_rows = edited_paid[edited_paid["Select"] == True] if "Select" in edited_paid.columns else pd.DataFrame()  # noqa: E712
+            unp_ids = list(df_paid.loc[unp_selected_rows.index, "_id"]) if not unp_selected_rows.empty else []
+            unp_selected = [p for p in paid_list if p["_id"] in unp_ids]
 
             if unp_selected:
+                unp_total = sum(r["Amount (₹)"] for r in unp_selected)
                 st.markdown(
-                    f"**{len(unp_selected)} selected — Total: "
-                    f"₹{sum(r['Amount (₹)'] for r in unp_selected):,.0f}**"
+                    f"<div style='font-size:12px;font-weight:700;color:#DC2626;margin:4px 0 8px;'>"
+                    f"{len(unp_selected)} selected — Total: ₹{unp_total:,.0f}</div>",
+                    unsafe_allow_html=True,
                 )
                 if st.button(
-                    f"↩ Mark {len(unp_selected)} Payment(s) as Unpaid",
-                    key="adv_bulk_mark_unpaid",
-                    type="secondary",
+                    f"Revert {len(unp_selected)} to Pending",
+                    key="adv_bulk_mark_unpaid", type="secondary",
                 ):
                     for p in unp_selected:
                         sb.update_advance_payment(p["_id"], {
@@ -743,27 +911,25 @@ def _tab_pending_payment() -> None:
                             "paid_by":        None,
                             "paid_at":        None,
                         })
-                    st.success(
-                        f"Reverted {len(unp_selected)} payment(s) back to Pending."
-                    )
-                    for p in unp_selected:
-                        st.session_state.pop(f"unp_sel_{p['_id']}", None)
-                    st.session_state.pop(unp_all_key, None)
+                    st.success(f"Reverted {len(unp_selected)} payment(s) back to Pending.")
                     st.rerun()
-
-        st.markdown("")
-        df = pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")}
-                           for r in paid_list])
-        st.dataframe(
-            df, use_container_width=True, hide_index=True,
-            column_config={"Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f")},
-        )
+        else:
+            df = pd.DataFrame([{
+                "Employee":     p["Employee"],
+                "Amount (₹)":   p["Amount (₹)"],
+                "Payment Mode": p["Payment Mode"],
+                "Payment Date": p["Payment Date"],
+                "UTR":          p["UTR / Reference"],
+            } for p in paid_list])
+            st.dataframe(
+                df, use_container_width=True, hide_index=True,
+                column_config={"Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f")},
+            )
 
 
 # ── Tab 5: Current Advance ─────────────────────────────────────────────────────
 
 def _tab_current_advance() -> None:
-    st.markdown("#### Current Advance Balances")
     sb        = SupabaseClient()
     operators = sb.list_operators()
 
@@ -786,6 +952,7 @@ def _tab_current_advance() -> None:
         recoveries_by_emp[r.get("employee_id", "")].append(r)
 
     rows = []
+    total_balance = 0.0
     for op in operators:
         eid = op["id"]
         bal = _compute_balance_from(
@@ -796,6 +963,7 @@ def _tab_current_advance() -> None:
         )
         if bal["opening"] == 0 and bal["advances_given"] == 0 and bal["recoveries"] == 0:
             continue
+        total_balance += bal["balance"]
         rows.append({
             "Employee":           op.get("operator_name", eid),
             "Emp Code":           op.get("emp_code", ""),
@@ -803,16 +971,18 @@ def _tab_current_advance() -> None:
             "Advances Given (₹)": bal["advances_given"],
             "Recoveries (₹)":     bal["recoveries"],
             "Balance (₹)":        bal["balance"],
-            "_id":                eid,
         })
 
     if not rows:
         st.info("No advance balances found as on selected date.")
         return
 
-    df = pd.DataFrame(rows)
+    m1, m2 = st.columns(2)
+    m1.metric("Employees with Advance", len(rows))
+    m2.metric("Total Outstanding", f"₹{total_balance:,.0f}")
+
     st.dataframe(
-        df.drop(columns=["_id"]),
+        pd.DataFrame(rows),
         use_container_width=True, hide_index=True,
         column_config={
             "Opening (₹)":        st.column_config.NumberColumn(format="₹%,.0f"),
@@ -821,16 +991,7 @@ def _tab_current_advance() -> None:
             "Balance (₹)":        st.column_config.NumberColumn(format="₹%,.0f"),
         },
     )
-
-    emp_options = ["—"] + [r["Employee"] for r in rows]
-    sel = st.selectbox("View Ledger for Employee:", emp_options, key="adv_cur_sel")
-    if sel != "—":
-        emp_id = next(r["_id"] for r in rows if r["Employee"] == sel)
-        st.markdown(f"**Advance Ledger — {sel}**")
-        _render_ledger(sb, emp_id, as_on,
-                       all_openings=all_openings,
-                       all_payments=all_payments,
-                       all_recoveries=all_recoveries)
+    st.caption("To view an employee's full transaction ledger, use the Advance Ledger tab.")
 
 
 # ── Tab 6: Advance Ledger ──────────────────────────────────────────────────────
@@ -855,7 +1016,6 @@ def _tab_advance_ledger() -> None:
 # ── Tab 7: Payment History ─────────────────────────────────────────────────────
 
 def _tab_payment_history() -> None:
-    st.markdown("#### Payment History")
     sb        = SupabaseClient()
     operators = sb.list_operators()
     op_by_id  = {o["id"]: o for o in operators}
@@ -913,14 +1073,11 @@ def _tab_payment_history() -> None:
         pay_date  = p.get("payment_date") or ""
         appr_date = str(req.get("approved_at") or "")[:10]
 
-        # Date range filter applies on payment_date (fall back to approval date for pending)
         ref_date_str = pay_date or appr_date
-        if date_from and ref_date_str:
-            if ref_date_str < str(date_from):
-                continue
-        if date_to and ref_date_str:
-            if ref_date_str > str(date_to):
-                continue
+        if date_from and ref_date_str and ref_date_str < str(date_from):
+            continue
+        if date_to and ref_date_str and ref_date_str > str(date_to):
+            continue
 
         rows.append({
             "Employee":        f"{emp_name} ({emp_code})",
@@ -930,7 +1087,7 @@ def _tab_payment_history() -> None:
             "Payment Date":    pay_date,
             "Payment Status":  status,
             "UTR / Reference": p.get("utr_reference") or "—",
-            "Batch Number":    batch.get("batch_number") or "—",
+            "Batch No.":       batch.get("batch_number") or "—",
         })
 
     if not rows:
@@ -939,18 +1096,45 @@ def _tab_payment_history() -> None:
 
     total_paid    = sum(r["Amount (₹)"] for r in rows if r["Payment Status"] == "Paid")
     total_pending = sum(r["Amount (₹)"] for r in rows if r["Payment Status"] == "Pending")
+    n_paid        = sum(1 for r in rows if r["Payment Status"] == "Paid")
+    n_pending     = sum(1 for r in rows if r["Payment Status"] == "Pending")
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total Records",   len(rows))
-    m2.metric("Total Paid",      f"₹{total_paid:,.0f}")
-    m3.metric("Total Pending",   f"₹{total_pending:,.0f}")
+    # Summary cards
+    st.markdown(
+        f"""
+        <div style='display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap;'>
+          <div style='flex:1;min-width:140px;background:#F0FDF4;border:1px solid #BBF7D0;
+                      border-radius:12px;padding:14px 18px;'>
+            <div style='font-size:10px;font-weight:700;text-transform:uppercase;
+                        letter-spacing:.1em;color:#166534;'>Total Paid</div>
+            <div style='font-size:22px;font-weight:800;color:#15803D;'>₹{total_paid:,.0f}</div>
+            <div style='font-size:11px;color:#166534;'>{n_paid} payment(s)</div>
+          </div>
+          <div style='flex:1;min-width:140px;background:#FFF7ED;border:1px solid #FED7AA;
+                      border-radius:12px;padding:14px 18px;'>
+            <div style='font-size:10px;font-weight:700;text-transform:uppercase;
+                        letter-spacing:.1em;color:#92400E;'>Total Pending</div>
+            <div style='font-size:22px;font-weight:800;color:#D97706;'>₹{total_pending:,.0f}</div>
+            <div style='font-size:11px;color:#92400E;'>{n_pending} payment(s)</div>
+          </div>
+          <div style='flex:1;min-width:140px;background:#F8FAFC;border:1px solid #E2EBF0;
+                      border-radius:12px;padding:14px 18px;'>
+            <div style='font-size:10px;font-weight:700;text-transform:uppercase;
+                        letter-spacing:.1em;color:#64748B;'>Total Records</div>
+            <div style='font-size:22px;font-weight:800;color:#1E293B;'>{len(rows)}</div>
+            <div style='font-size:11px;color:#64748B;'>matching filters</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.dataframe(
         pd.DataFrame(rows),
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Amount (₹)": st.column_config.NumberColumn(format="₹%,.0f"),
+            "Amount (₹)":     st.column_config.NumberColumn(format="₹%,.0f"),
             "Payment Status": st.column_config.TextColumn(),
         },
     )
@@ -965,21 +1149,31 @@ def _tab_advance_recovery() -> None:
         st.info("Only Admin can process advance recovery.", icon="🔒")
         return
 
-    st.markdown("#### Advance Recovery Through Payroll")
     sb = SupabaseClient()
     operators = sb.list_operators()
 
     # ── Month / Year selector ─────────────────────────────────────────────────
     cy, cm, _ = st.columns([1, 1, 4])
-    sel_year  = cy.number_input("Year",  min_value=2020, max_value=2035,
-                                 value=date.today().year, step=1, key="rec_year")
-    sel_month = cm.selectbox("Month", list(range(1, 13)),
-                              index=date.today().month - 1,
-                              format_func=lambda m: date(2000, m, 1).strftime("%B"),
-                              key="rec_month")
+    sel_year  = cy.number_input(
+        "Year", min_value=2020, max_value=2035,
+        value=date.today().year, step=1, key="rec_year",
+    )
+    sel_month = cm.selectbox(
+        "Month", list(range(1, 13)),
+        index=date.today().month - 1,
+        format_func=lambda m: date(2000, m, 1).strftime("%B"),
+        key="rec_month",
+    )
     payroll_month = f"{int(sel_year)}-{int(sel_month):02d}"
     last_day      = calendar.monthrange(int(sel_year), int(sel_month))[1]
     as_on         = date(int(sel_year), int(sel_month), last_day)
+
+    month_label = date(int(sel_year), int(sel_month), 1).strftime("%B %Y")
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:700;color:#1E293B;margin:8px 0 14px;'>"
+        f"Recovery for <span style='color:#E87722;'>{month_label}</span></div>",
+        unsafe_allow_html=True,
+    )
 
     # ── Bulk data load ─────────────────────────────────────────────────────────
     with st.spinner("Loading advance balances…"):
@@ -996,7 +1190,7 @@ def _tab_advance_recovery() -> None:
     for r in all_recoveries: recoveries_by_emp[r.get("employee_id", "")].append(r)
 
     already_processed = {
-        r["employee_id"] for r in all_recoveries
+        r["employee_id"]: r for r in all_recoveries
         if r.get("payroll_month") == payroll_month
     }
 
@@ -1010,155 +1204,178 @@ def _tab_advance_recovery() -> None:
             recoveries_by_emp[eid],
             as_on,
         )
-        if bal["balance"] <= 0:
+        if bal["balance"] <= 0 and eid not in already_processed:
             continue
-        eligible.append({
-            "emp_id":    eid,
-            "emp_name":  op.get("operator_name", eid),
-            "emp_code":  op.get("emp_code", ""),
-            "outstanding": round(bal["balance"], 2),
-            "done":      eid in already_processed,
-        })
+        if eid in already_processed:
+            done_rec = already_processed[eid]
+            eligible.append({
+                "emp_id":      eid,
+                "emp_name":    op.get("operator_name", eid),
+                "emp_code":    op.get("emp_code", ""),
+                "outstanding": round(bal["balance"], 2),
+                "suggested":   round(float(done_rec.get("suggested_recovery") or 0), 2),
+                "final":       round(float(done_rec.get("final_recovery") or 0), 2),
+                "reason":      done_rec.get("change_reason") or "",
+                "done":        True,
+            })
+        else:
+            eligible.append({
+                "emp_id":      eid,
+                "emp_name":    op.get("operator_name", eid),
+                "emp_code":    op.get("emp_code", ""),
+                "outstanding": round(bal["balance"], 2),
+                "suggested":   round(bal["balance"], 2),
+                "final":       round(bal["balance"], 2),
+                "reason":      "",
+                "done":        False,
+            })
 
     if not eligible:
-        st.info(f"No operators with outstanding advance balance as of {as_on.strftime('%B %Y')}.")
+        st.info(f"No operators with outstanding advance balance as of {month_label}.")
         return
 
-    # ── Session state for editable values ─────────────────────────────────────
-    _ROWS_KEY = f"adv_rec_{payroll_month}"
-    if _ROWS_KEY not in st.session_state:
-        st.session_state[_ROWS_KEY] = {}
-    row_state = st.session_state[_ROWS_KEY]
-    for e in eligible:
-        if e["emp_id"] not in row_state:
-            row_state[e["emp_id"]] = {"final": e["outstanding"], "reason": ""}
+    processable = [e for e in eligible if not e["done"]]
+    done_list   = [e for e in eligible if e["done"]]
 
-    # ── Column headers ────────────────────────────────────────────────────────
-    h = st.columns([2.5, 1.3, 1.3, 1.5, 1.5, 2.5])
-    for col, lbl in zip(h, ["Employee", "Outstanding", "Suggested", "Final Recovery",
-                             "Balance After", "Reason (if changed)"]):
-        col.markdown(
-            f"<span style='font-size:10px;font-weight:700;color:#64748B;"
-            f"text-transform:uppercase;'>{lbl}</span>",
+    # ── data_editor for pending operators ─────────────────────────────────────
+    _DE_KEY = f"adv_rec_de_{payroll_month}"
+
+    if processable:
+        st.markdown(
+            f"<div style='font-size:12px;font-weight:700;color:#1E293B;margin-bottom:6px;'>"
+            f"Pending — {len(processable)} operator(s)</div>",
             unsafe_allow_html=True,
         )
-    st.markdown("<hr style='margin:4px 0 8px;border-color:#F1F5F9;'>",
-                unsafe_allow_html=True)
 
-    # ── Per-operator rows ─────────────────────────────────────────────────────
-    validation_errors: list[str] = []
+        init_df = pd.DataFrame([{
+            "Employee":         f"{e['emp_name']} ({e['emp_code']})",
+            "Outstanding (₹)":  e["outstanding"],
+            "Suggested (₹)":    e["suggested"],
+            "Final Recovery (₹)": e["final"],
+            "Reason":           e["reason"],
+            "_id":              e["emp_id"],
+        } for e in processable])
 
-    for e in eligible:
-        eid         = e["emp_id"]
-        outstanding = e["outstanding"]
-        state       = row_state[eid]
+        if _DE_KEY not in st.session_state:
+            st.session_state[_DE_KEY] = init_df.copy()
 
-        c1, c2, c3, c4, c5, c6 = st.columns([2.5, 1.3, 1.3, 1.5, 1.5, 2.5])
-
-        if e["done"]:
-            c1.markdown(f"~~{e['emp_name']} ({e['emp_code']})~~")
-            c2.write(f"₹{outstanding:,.0f}")
-            c3.write(f"₹{outstanding:,.0f}")
-            c4.markdown(
-                "<span style='background:#FEF3C7;color:#92400E;padding:2px 8px;"
-                "border-radius:10px;font-size:11px;'>Already Processed</span>",
-                unsafe_allow_html=True,
-            )
-            c5.write("—")
-            c6.write("—")
-        else:
-            c1.markdown(f"**{e['emp_name']}**  `{e['emp_code']}`")
-            c2.write(f"₹{outstanding:,.0f}")
-            c3.write(f"₹{outstanding:,.0f}")
-
-            final = c4.number_input(
-                "Final", min_value=0.0, max_value=float(outstanding),
-                value=float(min(state["final"], outstanding)),
-                step=100.0, key=f"rec_final_{eid}",
-                label_visibility="collapsed",
-            )
-            state["final"] = final
-            balance_after  = outstanding - final
-
-            if balance_after > 0:
-                c5.markdown(f"**₹{balance_after:,.0f}**")
-            else:
-                c5.markdown(
-                    "<span style='background:#DCFCE7;color:#166534;padding:2px 6px;"
-                    "border-radius:8px;font-size:11px;'>Fully Cleared</span>",
-                    unsafe_allow_html=True,
-                )
-
-            reason_required = (round(final, 2) != round(outstanding, 2))
-            reason = c6.text_input(
-                "Reason *" if reason_required else "Reason",
-                value=state["reason"],
-                key=f"rec_reason_{eid}",
-                placeholder="Mandatory if amount reduced" if reason_required else "",
-                label_visibility="collapsed",
-            )
-            state["reason"] = reason
-
-            if reason_required and not reason.strip():
-                validation_errors.append(
-                    f"{e['emp_name']}: reason is mandatory when final recovery "
-                    f"differs from suggested."
-                )
-
-        st.markdown("<div style='border-bottom:1px solid #F8FAFC;margin:2px 0;'></div>",
-                    unsafe_allow_html=True)
-
-    # ── Summary metrics ───────────────────────────────────────────────────────
-    st.markdown("---")
-    processable    = [e for e in eligible if not e["done"]]
-    total_out      = sum(e["outstanding"] for e in processable)
-    total_recovery = sum(row_state[e["emp_id"]]["final"] for e in processable)
-    total_balance  = total_out - total_recovery
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Operators",         len(processable))
-    m2.metric("Total Outstanding", f"₹{total_out:,.0f}")
-    m3.metric("Total Recovery",    f"₹{total_recovery:,.0f}")
-    m4.metric("Balance Remaining", f"₹{total_balance:,.0f}")
-
-    if validation_errors:
-        for err in validation_errors:
-            st.error(err)
-
-    already_count = sum(1 for e in eligible if e["done"])
-    if already_count:
-        st.caption(
-            f"{already_count} operator(s) already have recovery processed for "
-            f"{date(int(sel_year), int(sel_month), 1).strftime('%B %Y')} — shown as struck-through above."
+        edited = st.data_editor(
+            st.session_state[_DE_KEY].drop(columns=["_id"]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            column_config={
+                "Outstanding (₹)":    st.column_config.NumberColumn(format="₹%,.0f"),
+                "Suggested (₹)":      st.column_config.NumberColumn(format="₹%,.0f"),
+                "Final Recovery (₹)": st.column_config.NumberColumn(
+                    format="₹%,.0f", min_value=0,
+                    help="Edit to set final recovery amount. Add Reason if different from Suggested.",
+                ),
+                "Reason": st.column_config.TextColumn(
+                    help="Required when Final Recovery differs from Suggested",
+                ),
+            },
+            disabled=["Employee", "Outstanding (₹)", "Suggested (₹)"],
+            key=f"adv_rec_editor_{payroll_month}",
         )
 
-    if st.button(
-        f"✅ Submit & Process Payroll Recovery — {date(int(sel_year), int(sel_month), 1).strftime('%B %Y')}",
-        type="primary",
-        disabled=(len(processable) == 0),
-        key="adv_rec_submit",
-    ):
+        # Validation
+        validation_errors: list[str] = []
+        for i, row in edited.iterrows():
+            final_val = float(row["Final Recovery (₹)"] or 0)
+            sugg_val  = float(init_df.at[i, "Suggested (₹)"] or 0)
+            if round(final_val, 2) != round(sugg_val, 2) and not str(row["Reason"]).strip():
+                validation_errors.append(
+                    f"{row['Employee']}: Reason is required when final recovery differs from suggested."
+                )
+
+        # Summary
+        total_out      = sum(e["outstanding"] for e in processable)
+        total_recovery = edited["Final Recovery (₹)"].fillna(0).astype(float).sum()
+        total_balance  = total_out - total_recovery
+
+        st.markdown(
+            f"""
+            <div style='display:flex;gap:12px;margin:10px 0;flex-wrap:wrap;'>
+              <div style='background:#F8FAFC;border:1px solid #E2EBF0;border-radius:10px;
+                          padding:10px 16px;min-width:120px;'>
+                <div style='font-size:9px;font-weight:700;color:#94A3B8;
+                            text-transform:uppercase;letter-spacing:.1em;'>Operators</div>
+                <div style='font-size:18px;font-weight:800;color:#1E293B;'>{len(processable)}</div>
+              </div>
+              <div style='background:#F8FAFC;border:1px solid #E2EBF0;border-radius:10px;
+                          padding:10px 16px;min-width:120px;'>
+                <div style='font-size:9px;font-weight:700;color:#94A3B8;
+                            text-transform:uppercase;letter-spacing:.1em;'>Total Outstanding</div>
+                <div style='font-size:18px;font-weight:800;color:#DC2626;'>₹{total_out:,.0f}</div>
+              </div>
+              <div style='background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;
+                          padding:10px 16px;min-width:120px;'>
+                <div style='font-size:9px;font-weight:700;color:#166534;
+                            text-transform:uppercase;letter-spacing:.1em;'>Total Recovery</div>
+                <div style='font-size:18px;font-weight:800;color:#15803D;'>₹{total_recovery:,.0f}</div>
+              </div>
+              <div style='background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;
+                          padding:10px 16px;min-width:120px;'>
+                <div style='font-size:9px;font-weight:700;color:#92400E;
+                            text-transform:uppercase;letter-spacing:.1em;'>Balance Remaining</div>
+                <div style='font-size:18px;font-weight:800;color:#D97706;'>₹{total_balance:,.0f}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         if validation_errors:
-            st.error("Please fix the errors above before submitting.")
-        else:
-            for e in processable:
-                eid   = e["emp_id"]
-                state = row_state[eid]
+            for err in validation_errors:
+                st.error(err)
+
+        if st.button(
+            f"Submit & Process Recovery — {month_label}",
+            type="primary", key="adv_rec_submit",
+            disabled=bool(validation_errors),
+        ):
+            for i, row in edited.iterrows():
+                eid       = init_df.at[i, "_id"]
+                final_val = float(row["Final Recovery (₹)"] or 0)
+                sugg_val  = float(init_df.at[i, "Suggested (₹)"] or 0)
+                reason    = str(row["Reason"]).strip() if str(row["Reason"]).strip() else None
                 sb.insert_advance_recovery({
                     "employee_id":        eid,
                     "payroll_month":      payroll_month,
-                    "suggested_recovery": e["outstanding"],
-                    "final_recovery":     state["final"],
-                    "change_reason":      state["reason"].strip() if state["reason"].strip() else None,
+                    "suggested_recovery": sugg_val,
+                    "final_recovery":     final_val,
+                    "change_reason":      reason,
                     "processed_by":       _user_name(),
                 })
             st.success(
-                f"Recovery processed for {len(processable)} operator(s) — "
-                f"{date(int(sel_year), int(sel_month), 1).strftime('%B %Y')}. "
-                f"Advance balances updated."
+                f"Recovery processed for {len(processable)} operator(s) — {month_label}."
             )
-            st.session_state.pop(_ROWS_KEY, None)
+            st.session_state.pop(_DE_KEY, None)
             st.rerun()
+
+    # ── Already processed section ──────────────────────────────────────────────
+    if done_list:
+        st.markdown(
+            f"<div style='font-size:12px;font-weight:700;color:#64748B;margin:18px 0 6px;'>"
+            f"Already Processed — {len(done_list)} operator(s)</div>",
+            unsafe_allow_html=True,
+        )
+        df_done = pd.DataFrame([{
+            "Employee":         f"{e['emp_name']} ({e['emp_code']})",
+            "Outstanding (₹)":  e["outstanding"],
+            "Suggested (₹)":    e["suggested"],
+            "Final Recovery (₹)": e["final"],
+            "Reason":           e["reason"] or "—",
+        } for e in done_list])
+        st.dataframe(
+            df_done, use_container_width=True, hide_index=True,
+            column_config={
+                "Outstanding (₹)":    st.column_config.NumberColumn(format="₹%,.0f"),
+                "Suggested (₹)":      st.column_config.NumberColumn(format="₹%,.0f"),
+                "Final Recovery (₹)": st.column_config.NumberColumn(format="₹%,.0f"),
+            },
+        )
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
