@@ -980,18 +980,32 @@ def render() -> None:
 
                 # Status
                 with st.container(border=True):
-                    _section_hdr("sensors", "Condition Status")
-                    sc1, _ = st.columns([1, 1])
+                    _section_hdr("sensors", "Status")
+                    sc1, sc2 = st.columns(2)
                     with sc1:
                         st.selectbox(
                             "Condition Status *",
                             options=condition_status_values,
                             key="m_condition_status",
                         )
-                    st.caption(
-                        "Operational Status (Available / On Rent / In Transit / Reserved) "
-                        "is set automatically by Work Orders and Machine Movements."
-                    )
+                    with sc2:
+                        _op_status_values = [e.value for e in OperationalStatus]
+                        if _user_is_admin:
+                            st.selectbox(
+                                "Operational Status (Admin override)",
+                                options=_op_status_values,
+                                key="m_operational_status",
+                                help="Normally set automatically by Work Orders. Use only to correct a stuck status.",
+                            )
+                        else:
+                            _cur_op = st.session_state.get("m_operational_status", "")
+                            st.markdown(
+                                f"<div style='padding-top:28px;font-size:13px;color:#6B7280;'>"
+                                f"Operational: <strong>{_cur_op or '—'}</strong>"
+                                f"<br><span style='font-size:11px;'>Set automatically by Work Orders</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
 
             # ── Tab 3: Deployments (placeholder) ─────────────────────────────
             with tab_hist:
