@@ -95,6 +95,11 @@ _PAGE_CSS = """
     padding: 14px 18px 10px;
     position: relative;
     overflow: hidden;
+    transition: box-shadow .15s, transform .15s;
+}
+.ps-kpi-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,.08);
+    transform: translateY(-1px);
 }
 .ps-kpi-bar {
     position: absolute; top: 0; left: 0; right: 0;
@@ -110,6 +115,33 @@ _PAGE_CSS = """
     font-variant-numeric: tabular-nums;
 }
 .ps-kpi-sub { font-size: 11px; color: #6B7280; }
+.ps-pipeline {
+    display: flex; align-items: center; gap: 0;
+    background: #F8FAFC; border: 1px solid #E2EBF0;
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+    overflow-x: auto;
+}
+.ps-pipeline-stage {
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 80px; padding: 4px 12px;
+}
+.ps-pipeline-count {
+    font-size: 20px; font-weight: 800; line-height: 1;
+}
+.ps-pipeline-label {
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: #94A3B8; margin-top: 2px; white-space: nowrap;
+}
+.ps-pipeline-arrow {
+    font-size: 18px; color: #CBD5E1; padding: 0 4px; flex-shrink: 0;
+}
+.ps-prog-bar {
+    height: 8px; border-radius: 4px; margin-top: 4px;
+    background: #E2EBF0; overflow: hidden;
+}
+.ps-prog-fill {
+    height: 100%; border-radius: 4px; transition: width .4s;
+}
 .ps-total-bar {
     padding: 10px 16px;
     background: #F0FDF4;
@@ -169,6 +201,113 @@ def _badge(status: str) -> str:
     return (
         f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:700;"
         f"padding:2px 8px;border-radius:20px;'>{lbl}</span>"
+    )
+
+
+def _pipeline_html(counts: dict) -> str:
+    """Render a horizontal pipeline showing employee counts per workflow stage."""
+    stages = [
+        (_S_DRAFT,     "#94A3B8", "Calculator"),
+        (_S_SUBMITTED, "#F59E0B", "Submitted"),
+        (_S_APPROVED,  "#10B981", "Approved"),
+        (_S_PAID,      "#2563EB", "Paid"),
+    ]
+    side_stages = [
+        (_S_ONHOLD,    "#EF4444", "On Hold"),
+        (_S_CANCELLED, "#6B7280", "Cancelled"),
+    ]
+    total = sum(counts.values()) or 1
+
+    parts = []
+    for i, (status, color, label) in enumerate(stages):
+        n = counts.get(status, 0)
+        pct = round(n / total * 100)
+        parts.append(
+            f"<div class='ps-pipeline-stage'>"
+            f"<span class='ps-pipeline-count' style='color:{color};'>{n}</span>"
+            f"<span class='ps-pipeline-label'>{label}</span>"
+            f"<div class='ps-prog-bar' style='width:60px;'>"
+            f"<div class='ps-prog-fill' style='width:{pct}%;background:{color};'></div>"
+            f"</div></div>"
+        )
+        if i < len(stages) - 1:
+            parts.append("<span class='ps-pipeline-arrow'>→</span>")
+
+    side_html = "".join(
+        f"<span style='font-size:11px;font-weight:700;color:{c};margin-left:16px;'>"
+        f"{label}: {counts.get(s, 0)}</span>"
+        for s, c, label in side_stages
+    )
+
+    return (
+        f"<div class='ps-pipeline'>{''.join(parts)}"
+        f"<div style='flex:1;text-align:right;font-size:11px;color:#94A3B8;'>{side_html}</div>"
+        f"</div>"
+    )
+
+
+def _payroll_breakdown_chart(df: pd.DataFrame) -> None:
+    """Render a simple payroll composition breakdown using HTML progress bars."""
+    if df.empty:
+        return
+    earned   = df["Earned Basic"].sum()
+    ot_amt   = df["OT Amt"].sum()
+    sal_oth  = df["Sal Paid Other"].sum()
+    adv_ded  = df["Advance Deduction"].sum()
+    pf_amt   = df["PF Amt"].sum()
+    net_pay  = df["Net Payable"].sum()
+    gross    = earned + ot_amt
+
+    if gross <= 0:
+        return
+
+    bars = [
+        ("Earned Basic",    earned,  "#10B981", gross),
+        ("OT Amount",       ot_amt,  "#3B82F6", gross),
+        ("Sal Paid Other",  sal_oth, "#F59E0B", gross),
+        ("Adv. Deduction",  adv_ded, "#8B5CF6", gross),
+        ("PF Amount",       pf_amt,  "#64748B", gross),
+    ]
+
+    rows_html = ""
+    for label, val, color, base in bars:
+        pct = min(100, round(val / base * 100)) if base > 0 else 0
+        rows_html += (
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:6px;'>"
+            f"<div style='width:110px;font-size:11px;color:#64748B;font-weight:600;"
+            f"text-align:right;flex-shrink:0;'>{label}</div>"
+            f"<div style='flex:1;background:#F1F5F9;border-radius:4px;height:10px;overflow:hidden;'>"
+            f"<div style='width:{pct}%;background:{color};height:100%;border-radius:4px;'></div>"
+            f"</div>"
+            f"<div style='width:80px;font-size:11px;font-weight:700;color:#1E293B;"
+            f"font-variant-numeric:tabular-nums;'>₹{val:,.0f}</div>"
+            f"<div style='width:36px;font-size:10px;color:#94A3B8;'>{pct}%</div>"
+            f"</div>"
+        )
+
+    net_pct = min(100, round(net_pay / gross * 100)) if gross > 0 else 0
+    rows_html += (
+        f"<div style='display:flex;align-items:center;gap:10px;margin-top:8px;"
+        f"padding-top:8px;border-top:1px solid #E2EBF0;'>"
+        f"<div style='width:110px;font-size:11px;font-weight:800;color:#0F766E;"
+        f"text-align:right;flex-shrink:0;'>Net Payable</div>"
+        f"<div style='flex:1;background:#F1F5F9;border-radius:4px;height:12px;overflow:hidden;'>"
+        f"<div style='width:{net_pct}%;background:#0F766E;height:100%;border-radius:4px;'></div>"
+        f"</div>"
+        f"<div style='width:80px;font-size:13px;font-weight:800;color:#0F766E;"
+        f"font-variant-numeric:tabular-nums;'>₹{net_pay:,.0f}</div>"
+        f"<div style='width:36px;font-size:10px;color:#94A3B8;'>{net_pct}%</div>"
+        f"</div>"
+    )
+
+    st.markdown(
+        f"<div style='border:1px solid #E2EBF0;border-radius:10px;padding:14px 18px;"
+        f"background:#fff;margin:8px 0 12px;'>"
+        f"<div style='font-size:10px;font-weight:700;letter-spacing:.12em;"
+        f"text-transform:uppercase;color:#94A3B8;margin-bottom:10px;'>"
+        f"Payroll Composition (Gross: ₹{gross:,.0f})</div>"
+        f"{rows_html}</div>",
+        unsafe_allow_html=True,
     )
 
 
@@ -453,18 +592,34 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
 
     # Show only Draft / SendBack employees in the calculator
     calc_df = df[df["_status"].isin([_S_DRAFT, _S_SENDBACK])].copy()
-    paid_count     = (df["_status"] == _S_PAID).sum()
-    submitted_count = (df["_status"] == _S_SUBMITTED).sum()
-    held_count     = (df["_status"].isin([_S_ONHOLD, _S_CANCELLED])).sum()
+    paid_count      = int((df["_status"] == _S_PAID).sum())
+    submitted_count = int((df["_status"] == _S_SUBMITTED).sum())
+    held_count      = int((df["_status"] == _S_ONHOLD).sum())
+    cancelled_count = int((df["_status"] == _S_CANCELLED).sum())
+    draft_count     = int((df["_status"].isin([_S_DRAFT, _S_SENDBACK])).sum())
+    approved_count  = int((df["_status"] == _S_APPROVED).sum())
+
+    # ── Pipeline visualization ─────────────────────────────────────────────────
+    st.markdown(
+        _pipeline_html({
+            _S_DRAFT:     draft_count,
+            _S_SUBMITTED: submitted_count,
+            _S_APPROVED:  approved_count,
+            _S_PAID:      paid_count,
+            _S_ONHOLD:    held_count,
+            _S_CANCELLED: cancelled_count,
+        }),
+        unsafe_allow_html=True,
+    )
 
     # ── Info banner ────────────────────────────────────────────────────────────
     info_parts = []
     if submitted_count:
         info_parts.append(f"<strong>{submitted_count}</strong> submitted (Approval Queue tab)")
-    if held_count:
-        info_parts.append(f"<strong>{held_count}</strong> on hold/cancelled (Pending tab)")
+    if held_count or cancelled_count:
+        info_parts.append(f"<strong>{held_count + cancelled_count}</strong> on hold/cancelled (Pending tab)")
     if paid_count:
-        info_parts.append(f"<strong>{paid_count}</strong> already paid (hidden)")
+        info_parts.append(f"<strong>{paid_count}</strong> already paid")
     if info_parts:
         st.markdown(
             f"<div class='ps-info-note'>ℹ️ {' · '.join(info_parts)}</div>",
@@ -484,13 +639,15 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
         )
 
     # ── KPIs ───────────────────────────────────────────────────────────────────
+    n_with_work = (calc_df["Working Days"] > 0).sum()
+    avg_net     = calc_df["Net Payable"].mean() if not calc_df.empty else 0
     st.markdown(
         "<div class='ps-kpi-grid'>"
-        + _kpi("Operators",        len(calc_df),                          "in calculator",        "#2563EB")
-        + _kpi("Net Payable",      f"₹{calc_df['Net Payable'].sum():,.0f}", "to be paid out",      "#10B981")
-        + _kpi("Earned Basic",     f"₹{calc_df['Earned Basic'].sum():,.0f}", "gross earned",       "#E87722")
-        + _kpi("Total Deductions", f"₹{calc_df['Deduction Total'].sum():,.0f}", "all deductions",  "#EF4444")
-        + _kpi("Advance Recovery", f"₹{calc_df['Advance Deduction'].sum():,.0f}", "this month",   "#8B5CF6")
+        + _kpi("Operators",        len(calc_df),                               "in calculator",           "#2563EB")
+        + _kpi("Net Payable",      f"₹{calc_df['Net Payable'].sum():,.0f}",    "total to pay out",        "#10B981")
+        + _kpi("Earned Basic",     f"₹{calc_df['Earned Basic'].sum():,.0f}",   "gross earned",            "#E87722")
+        + _kpi("Total Deductions", f"₹{calc_df['Deduction Total'].sum():,.0f}","all deductions",          "#EF4444")
+        + _kpi("Avg Net / Person", f"₹{avg_net:,.0f}",                         f"{n_with_work} with days","#8B5CF6")
         + "</div>",
         unsafe_allow_html=True,
     )
@@ -576,6 +733,9 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
         f"</div>",
         unsafe_allow_html=True,
     )
+
+    # ── Payroll composition breakdown ──────────────────────────────────────────
+    _payroll_breakdown_chart(calc_df)
 
     # ── Action buttons ─────────────────────────────────────────────────────────
     selected_mask = edited["Select"] == True  # noqa: E712
