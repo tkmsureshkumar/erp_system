@@ -1,5 +1,5 @@
 """
-erp/views/payment_summary.py — Payment Summary (4-tab payroll workflow)
+erp/views/payment_summary.py — Payment Summary (single-page payroll workflow)
 
 Supabase table required — run once in SQL editor:
 
@@ -39,9 +39,9 @@ Supabase table required — run once in SQL editor:
     );
 
 Workflow:
-    Draft  →  Submitted  →  Approved  →  Paid
-                  ↓               ↓
-               OnHold         SendBack (→ Draft)
+    Draft  ->  Submitted  ->  Approved  ->  Paid
+                  |               |
+               OnHold         SendBack (-> Draft)
                Cancelled
 """
 from __future__ import annotations
@@ -72,7 +72,7 @@ _STATUS_BADGE = {
     _S_DRAFT:     ("#F1F5F9", "#475569", "Draft"),
     _S_SUBMITTED: ("#FEF3C7", "#D97706", "Submitted"),
     _S_APPROVED:  ("#DCFCE7", "#166534", "Approved"),
-    _S_PAID:      ("#D1FAE5", "#065F46", "✓ Paid"),
+    _S_PAID:      ("#D1FAE5", "#065F46", "Paid"),
     _S_ONHOLD:    ("#FEE2E2", "#991B1B", "On Hold"),
     _S_CANCELLED: ("#F3F4F6", "#6B7280", "Cancelled"),
     _S_SENDBACK:  ("#FEF9C3", "#854D0E", "Sent Back"),
@@ -82,65 +82,202 @@ _STATUS_BADGE = {
 
 _PAGE_CSS = """
 <style>
-.ps-kpi-grid {
+/* ── KPI row ── */
+.ps-kpi-row {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 14px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
     margin: 0 0 20px;
 }
 .ps-kpi-card {
     background: #fff;
     border: 1px solid #E2EBF0;
     border-radius: 12px;
-    padding: 14px 18px 10px;
-    position: relative;
-    overflow: hidden;
+    padding: 16px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
     transition: box-shadow .15s, transform .15s;
 }
 .ps-kpi-card:hover {
     box-shadow: 0 4px 16px rgba(0,0,0,.08);
     transform: translateY(-1px);
 }
-.ps-kpi-bar {
-    position: absolute; top: 0; left: 0; right: 0;
-    height: 3px; border-radius: 12px 12px 0 0;
+.ps-kpi-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
 }
 .ps-kpi-label {
-    font-size: 10px; font-weight: 700; letter-spacing: .13em;
-    text-transform: uppercase; color: #9CA3AF; margin-bottom: 6px;
+    font-size: 11px; font-weight: 600; color: #6B7280;
+    margin-bottom: 2px;
 }
 .ps-kpi-value {
-    font-size: 22px; font-weight: 800; color: #111827;
-    line-height: 1; margin-bottom: 2px;
-    font-variant-numeric: tabular-nums;
+    font-size: 20px; font-weight: 800; color: #111827;
+    line-height: 1; font-variant-numeric: tabular-nums;
 }
-.ps-kpi-sub { font-size: 11px; color: #6B7280; }
-.ps-pipeline {
-    display: flex; align-items: center; gap: 0;
-    background: #F8FAFC; border: 1px solid #E2EBF0;
-    border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+
+/* ── Formula bar ── */
+.ps-formula-bar {
+    display: flex; align-items: stretch;
+    border-radius: 10px; overflow: hidden;
+    border: 1px solid #E2EBF0;
+    margin: 0 0 20px; font-size: 12px;
+}
+.ps-fb-seg { padding: 12px 16px; flex: 1; }
+.ps-fb-seg-title {
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; margin-bottom: 4px;
+}
+.ps-fb-seg-items { font-size: 11px; }
+.ps-fb-arrow {
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 8px; font-size: 20px; color: #9CA3AF;
+    background: #F9FAFB;
+    border-left: 1px solid #E2EBF0;
+    border-right: 1px solid #E2EBF0;
+    flex-shrink: 0;
+}
+.ps-fb-equals {
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 10px; font-size: 18px; font-weight: 700; color: #6B7280;
+    background: #F9FAFB;
+    border-left: 1px solid #E2EBF0;
+    border-right: 1px solid #E2EBF0;
+    flex-shrink: 0;
+}
+
+/* ── Grouped table ── */
+.ps-table-wrap {
     overflow-x: auto;
+    border: 1px solid #E2EBF0;
+    border-radius: 10px;
+    margin: 8px 0;
+    background: #fff;
 }
-.ps-pipeline-stage {
-    display: flex; flex-direction: column; align-items: center;
-    min-width: 80px; padding: 4px 12px;
+.ps-table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
 }
-.ps-pipeline-count {
-    font-size: 20px; font-weight: 800; line-height: 1;
+.ps-table th, .ps-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #F1F5F9;
+    white-space: nowrap;
 }
-.ps-pipeline-label {
-    font-size: 9px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .08em; color: #94A3B8; margin-top: 2px; white-space: nowrap;
+.ps-table tr:hover td { background: #F9FAFB; }
+.ps-table thead tr:last-child th { border-bottom: 2px solid #E2EBF0; }
+
+/* Group header cells */
+.ps-gh-inputs {
+    background: #DBEAFE; color: #1E40AF;
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; text-align: center;
 }
-.ps-pipeline-arrow {
-    font-size: 18px; color: #CBD5E1; padding: 0 4px; flex-shrink: 0;
+.ps-gh-earnings {
+    background: #FED7AA; color: #92400E;
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; text-align: center;
 }
-.ps-prog-bar {
-    height: 8px; border-radius: 4px; margin-top: 4px;
-    background: #E2EBF0; overflow: hidden;
+.ps-gh-deductions {
+    background: #FECACA; color: #991B1B;
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; text-align: center;
 }
-.ps-prog-fill {
-    height: 100%; border-radius: 4px; transition: width .4s;
+.ps-gh-final {
+    background: #BBF7D0; color: #166534;
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; text-align: center;
+}
+
+/* Sub-header cells */
+.ps-sh-op {
+    background: #F8FAFC; color: #374151;
+    font-size: 11px; font-weight: 600; text-align: left;
+    position: sticky; left: 0; z-index: 1;
+}
+.ps-sh-inputs {
+    background: #EFF6FF; color: #1D4ED8;
+    font-size: 11px; font-weight: 600; text-align: right;
+}
+.ps-sh-earnings {
+    background: #FFFBEB; color: #B45309;
+    font-size: 11px; font-weight: 600; text-align: right;
+}
+.ps-sh-deductions {
+    background: #FFF1F2; color: #BE123C;
+    font-size: 11px; font-weight: 600; text-align: right;
+}
+.ps-sh-final {
+    background: #F0FDF4; color: #15803D;
+    font-size: 11px; font-weight: 600; text-align: right;
+}
+
+/* Data cells */
+.ps-td-op {
+    font-weight: 600; color: #1E293B; text-align: left;
+    position: sticky; left: 0; background: #fff; z-index: 1;
+    min-width: 140px;
+}
+.ps-td-inputs  { color: #1E40AF; text-align: right; }
+.ps-td-earnings { color: #92400E; text-align: right; }
+.ps-td-deductions { color: #991B1B; text-align: right; }
+.ps-td-final { color: #166534; font-weight: 700; text-align: right; }
+
+/* ── Right panel cards ── */
+.ps-right-panel-card {
+    background: #fff;
+    border: 1px solid #E2EBF0;
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+}
+.ps-panel-title {
+    font-size: 13px; font-weight: 700; color: #111827;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+}
+.ps-check-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #F9FAFB;
+    font-size: 12px;
+}
+.ps-check-item:last-child { border-bottom: none; }
+.ps-check-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.ps-check-title { font-weight: 600; color: #111827; }
+.ps-check-sub { color: #6B7280; font-size: 11px; margin-top: 1px; }
+.ps-breakdown-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 0; font-size: 13px;
+}
+.ps-breakdown-row:not(:last-of-type) { border-bottom: 1px solid #F9FAFB; }
+.ps-bd-label { color: #374151; }
+.ps-bd-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ps-bd-net-row {
+    background: #F0FDF4; border-radius: 8px; padding: 10px 12px;
+    margin-top: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+}
+
+/* ── Period nav buttons ── */
+.ps-period-btn {
+    background: #F1F5F9; border: 1px solid #E2EBF0;
+    border-radius: 6px; padding: 4px 10px;
+    font-size: 14px; cursor: pointer; color: #374151;
+    line-height: 1.4;
+}
+.ps-period-btn:hover { background: #E2EBF0; }
+
+/* ── Misc ── */
+.ps-info-note {
+    padding: 10px 14px;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #1E40AF;
+    margin-bottom: 12px;
 }
 .ps-total-bar {
     padding: 10px 16px;
@@ -152,20 +289,41 @@ _PAGE_CSS = """
     font-weight: 600;
     margin: 8px 0 6px;
 }
-.ps-info-note {
-    padding: 10px 14px;
-    background: #EFF6FF;
-    border: 1px solid #BFDBFE;
-    border-radius: 8px;
-    font-size: 12px;
-    color: #1E40AF;
-    margin-bottom: 12px;
-}
 .ps-section-hdr {
     font-size: 11px; font-weight: 700; letter-spacing: .12em;
     text-transform: uppercase; color: #64748B; margin: 16px 0 8px;
     padding-bottom: 4px; border-bottom: 2px solid #F1F5F9;
 }
+
+/* ── Legacy grid (used by _kpi helper) ── */
+.ps-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin: 0 0 20px;
+}
+.ps-kpi-bar {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 3px; border-radius: 12px 12px 0 0;
+}
+.ps-pipeline {
+    display: flex; align-items: center; gap: 0;
+    background: #F8FAFC; border: 1px solid #E2EBF0;
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+    overflow-x: auto;
+}
+.ps-pipeline-stage {
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 80px; padding: 4px 12px;
+}
+.ps-pipeline-count { font-size: 20px; font-weight: 800; line-height: 1; }
+.ps-pipeline-label {
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: #94A3B8; margin-top: 2px; white-space: nowrap;
+}
+.ps-pipeline-arrow { font-size: 18px; color: #CBD5E1; padding: 0 4px; flex-shrink: 0; }
+.ps-prog-bar { height: 8px; border-radius: 4px; margin-top: 4px; background: #E2EBF0; overflow: hidden; }
+.ps-prog-fill { height: 100%; border-radius: 4px; transition: width .4s; }
 </style>
 """
 
@@ -231,7 +389,7 @@ def _pipeline_html(counts: dict) -> str:
             f"</div></div>"
         )
         if i < len(stages) - 1:
-            parts.append("<span class='ps-pipeline-arrow'>→</span>")
+            parts.append("<span class='ps-pipeline-arrow'>-></span>")
 
     side_html = "".join(
         f"<span style='font-size:11px;font-weight:700;color:{c};margin-left:16px;'>"
@@ -280,7 +438,7 @@ def _payroll_breakdown_chart(df: pd.DataFrame) -> None:
             f"<div style='width:{pct}%;background:{color};height:100%;border-radius:4px;'></div>"
             f"</div>"
             f"<div style='width:80px;font-size:11px;font-weight:700;color:#1E293B;"
-            f"font-variant-numeric:tabular-nums;'>₹{val:,.0f}</div>"
+            f"font-variant-numeric:tabular-nums;'>&#8377;{val:,.0f}</div>"
             f"<div style='width:36px;font-size:10px;color:#94A3B8;'>{pct}%</div>"
             f"</div>"
         )
@@ -295,17 +453,18 @@ def _payroll_breakdown_chart(df: pd.DataFrame) -> None:
         f"<div style='width:{net_pct}%;background:#0F766E;height:100%;border-radius:4px;'></div>"
         f"</div>"
         f"<div style='width:80px;font-size:13px;font-weight:800;color:#0F766E;"
-        f"font-variant-numeric:tabular-nums;'>₹{net_pay:,.0f}</div>"
+        f"font-variant-numeric:tabular-nums;'>&#8377;{net_pay:,.0f}</div>"
         f"<div style='width:36px;font-size:10px;color:#94A3B8;'>{net_pct}%</div>"
         f"</div>"
     )
 
+    gross_fmt = f"{gross:,.0f}"
     st.markdown(
         f"<div style='border:1px solid #E2EBF0;border-radius:10px;padding:14px 18px;"
         f"background:#fff;margin:8px 0 12px;'>"
         f"<div style='font-size:10px;font-weight:700;letter-spacing:.12em;"
         f"text-transform:uppercase;color:#94A3B8;margin-bottom:10px;'>"
-        f"Payroll Composition (Gross: ₹{gross:,.0f})</div>"
+        f"Payroll Composition (Gross: &#8377;{gross_fmt})</div>"
         f"{rows_html}</div>",
         unsafe_allow_html=True,
     )
@@ -418,7 +577,7 @@ def _initial_fill(df: pd.DataFrame) -> pd.DataFrame:
     return _recompute(df)
 
 
-# ── Period selector widget (shared across tabs) ───────────────────────────────
+# ── Period selector widget (kept for compatibility) ───────────────────────────
 
 def _period_selector(key_prefix: str = "ps") -> tuple[int, int, int, str, date, date, str]:
     today = date.today()
@@ -486,7 +645,6 @@ def _load_payroll_data(
     cust_by_emp    = _sum_field(cust_recs,  "salary_deduct_from_payroll")
     adv_rec_by_emp = _sum_field(adv_recs,   "final_recovery")
 
-    # Existing payroll_records for this month
     existing_recs = {r["employee_id"]: r for r in _safe(sb.list_payroll_records, payroll_month=payroll_month)}
 
     active_ops = [o for o in operators if o.get("status") == "Active" and o.get("id")]
@@ -495,7 +653,6 @@ def _load_payroll_data(
         eid  = op["id"]
         wl   = wl_agg.get(eid, {})
         rec  = existing_recs.get(eid, {})
-        # Use saved record values if available, fall back to worklog/master
         rows.append({
             "_emp_id":           eid,
             "_rec_id":           rec.get("id", ""),
@@ -520,12 +677,10 @@ def _load_payroll_data(
 
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
     if not df.empty:
-        # For rows with no saved record (no OT Amt calculated), run initial fill
         no_rec_mask = df["_rec_id"] == ""
         if no_rec_mask.any():
             df_new = _initial_fill(df[no_rec_mask].copy())
             df.loc[no_rec_mask, df_new.columns] = df_new.values
-        # For rows with saved record, just recompute formulas
         has_rec_mask = ~no_rec_mask
         if has_rec_mask.any():
             df_saved = _recompute(df[has_rec_mask].copy())
@@ -563,74 +718,119 @@ def _save_record(sb: SupabaseClient, row: pd.Series, payroll_month: str,
     sb.upsert_payroll_record(payload)
 
 
-# ── Tab 1: Payroll Calculator ─────────────────────────────────────────────────
+# ── HTML grouped table ────────────────────────────────────────────────────────
 
-def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+def _make_grouped_table_html(df_page: pd.DataFrame) -> str:
+    """Build the full HTML grouped-header payroll table for one page of data."""
+    rows_html = ""
+    for _, row in df_page.iterrows():
+        # Pre-extract all values (avoid complex expressions inside f-strings)
+        op_name = str(row.get("Operator", ""))
 
-    year, month, month_days, payroll_month, period_start, period_end, load_btn = \
-        _period_selector("ps")
+        fixed_sal = float(row.get("Fixed Salary", 0))
+        work_days = int(float(row.get("Working Days", 0)))
+        ot_hours  = float(row.get("OT Hours", 0.0))
 
-    cache_key = f"ps_data_{payroll_month}"
+        earned_basic    = float(row.get("Earned Basic", 0))
+        ot_amt          = float(row.get("OT Amt", 0))
+        sal_paid_other  = float(row.get("Sal Paid Other", 0))
+        ad_hoc          = 0.0
+        gross_pay       = earned_basic + ot_amt + sal_paid_other
 
-    if load_btn or cache_key not in st.session_state:
-        with st.spinner(f"Loading {_month_label(month)} {year} payroll data…"):
-            df = _load_payroll_data(sb, operators, payroll_month, period_start, period_end, month_days)
-        st.session_state[cache_key] = df
+        adv_deduction = float(row.get("Advance Deduction", 0))
+        pf_amt        = float(row.get("PF Amt", 0))
+        other_ded     = 0.0
+        total_ded     = float(row.get("Deduction Total", 0))
 
-    df: pd.DataFrame = st.session_state.get(cache_key, pd.DataFrame())
+        net_payable = float(row.get("Net Payable", 0))
 
-    if df.empty:
-        st.info("No active operators found. Click **Load / Refresh**.")
-        return
+        # Pre-format strings
+        fixed_sal_s      = f"&#8377;{fixed_sal:,.0f}"
+        work_days_s      = str(work_days)
+        ot_hours_s       = f"{ot_hours:.1f}"
+        earned_basic_s   = f"&#8377;{earned_basic:,.0f}"
+        ot_amt_s         = f"&#8377;{ot_amt:,.0f}"
+        sal_paid_other_s = f"&#8377;{sal_paid_other:,.0f}"
+        ad_hoc_s         = f"&#8377;{ad_hoc:,.0f}"
+        gross_pay_s      = f"&#8377;{gross_pay:,.0f}"
+        adv_deduction_s  = f"&#8377;{adv_deduction:,.0f}"
+        pf_amt_s         = f"&#8377;{pf_amt:,.0f}"
+        other_ded_s      = f"&#8377;{other_ded:,.0f}"
+        total_ded_s      = f"&#8377;{total_ded:,.0f}"
+        net_payable_s    = f"&#8377;{net_payable:,.0f}"
 
-    # Sync Month Days if user changes it without reloading
-    if int(month_days) != int(df["Month Days"].iloc[0]):
-        df["Month Days"] = int(month_days)
-        df = _recompute(df)
-        st.session_state[cache_key] = df
-
-    # Show only Draft / SendBack employees in the calculator
-    calc_df = df[df["_status"].isin([_S_DRAFT, _S_SENDBACK])].copy()
-    paid_count      = int((df["_status"] == _S_PAID).sum())
-    submitted_count = int((df["_status"] == _S_SUBMITTED).sum())
-    held_count      = int((df["_status"] == _S_ONHOLD).sum())
-    cancelled_count = int((df["_status"] == _S_CANCELLED).sum())
-    draft_count     = int((df["_status"].isin([_S_DRAFT, _S_SENDBACK])).sum())
-    approved_count  = int((df["_status"] == _S_APPROVED).sum())
-
-    # ── Pipeline visualization ─────────────────────────────────────────────────
-    st.markdown(
-        _pipeline_html({
-            _S_DRAFT:     draft_count,
-            _S_SUBMITTED: submitted_count,
-            _S_APPROVED:  approved_count,
-            _S_PAID:      paid_count,
-            _S_ONHOLD:    held_count,
-            _S_CANCELLED: cancelled_count,
-        }),
-        unsafe_allow_html=True,
-    )
-
-    # ── Info banner ────────────────────────────────────────────────────────────
-    info_parts = []
-    if submitted_count:
-        info_parts.append(f"<strong>{submitted_count}</strong> submitted (Approval Queue tab)")
-    if held_count or cancelled_count:
-        info_parts.append(f"<strong>{held_count + cancelled_count}</strong> on hold/cancelled (Pending tab)")
-    if paid_count:
-        info_parts.append(f"<strong>{paid_count}</strong> already paid")
-    if info_parts:
-        st.markdown(
-            f"<div class='ps-info-note'>ℹ️ {' · '.join(info_parts)}</div>",
-            unsafe_allow_html=True,
+        rows_html += (
+            "<tr>"
+            f"<td class='ps-td-op'>{op_name}</td>"
+            f"<td class='ps-td-inputs'>{fixed_sal_s}</td>"
+            f"<td class='ps-td-inputs'>{work_days_s}</td>"
+            f"<td class='ps-td-inputs'>{ot_hours_s}</td>"
+            f"<td class='ps-td-earnings'>{earned_basic_s}</td>"
+            f"<td class='ps-td-earnings'>{ot_amt_s}</td>"
+            f"<td class='ps-td-earnings'>{sal_paid_other_s}</td>"
+            f"<td class='ps-td-earnings'>{ad_hoc_s}</td>"
+            f"<td class='ps-td-earnings'>{gross_pay_s}</td>"
+            f"<td class='ps-td-deductions'>{adv_deduction_s}</td>"
+            f"<td class='ps-td-deductions'>{pf_amt_s}</td>"
+            f"<td class='ps-td-deductions'>{other_ded_s}</td>"
+            f"<td class='ps-td-deductions'>{total_ded_s}</td>"
+            f"<td class='ps-td-final'>{net_payable_s}</td>"
+            "</tr>"
         )
 
+    table_html = (
+        "<div class='ps-table-wrap'>"
+        "<table class='ps-table'>"
+        "<thead>"
+        "<tr>"
+        "<th class='ps-sh-op' rowspan='2' style='min-width:150px;text-align:left;'>Operator</th>"
+        "<th class='ps-gh-inputs' colspan='3'>Inputs</th>"
+        "<th class='ps-gh-earnings' colspan='5'>Earnings</th>"
+        "<th class='ps-gh-deductions' colspan='4'>Deductions</th>"
+        "<th class='ps-gh-final' colspan='1'>Final Pay</th>"
+        "</tr>"
+        "<tr>"
+        "<th class='ps-sh-inputs'>Fixed Salary</th>"
+        "<th class='ps-sh-inputs'>Working Days</th>"
+        "<th class='ps-sh-inputs'>OT Hours</th>"
+        "<th class='ps-sh-earnings'>Earned Basic</th>"
+        "<th class='ps-sh-earnings'>OT Pay</th>"
+        "<th class='ps-sh-earnings'>Conveyance</th>"
+        "<th class='ps-sh-earnings'>Ad hoc</th>"
+        "<th class='ps-sh-earnings'>Gross Pay</th>"
+        "<th class='ps-sh-deductions'>Sal Advance</th>"
+        "<th class='ps-sh-deductions'>PF</th>"
+        "<th class='ps-sh-deductions'>Other Ded.</th>"
+        "<th class='ps-sh-deductions'>Total Ded.</th>"
+        "<th class='ps-sh-final'>Net Pay</th>"
+        "</tr>"
+        "</thead>"
+        "<tbody>"
+        + rows_html
+        + "</tbody>"
+        "</table>"
+        "</div>"
+    )
+    return table_html
+
+
+# ── Edit payroll data expander (data_editor + action buttons) ─────────────────
+
+def _render_edit_and_actions(
+    sb: SupabaseClient,
+    df: pd.DataFrame,
+    payroll_month: str,
+    cache_key: str,
+    is_admin: bool,
+) -> None:
+    """Editable data table for Draft/SendBack records plus workflow action buttons."""
+    calc_df = df[df["_status"].isin([_S_DRAFT, _S_SENDBACK])].copy()
+
     if calc_df.empty:
-        st.success("All employees for this month are submitted, on hold, or paid.")
+        st.info("All operators for this period are submitted, approved, on hold, or paid.")
         return
 
-    # ── SendBack banner ────────────────────────────────────────────────────────
+    # SendBack notice
     sendback_rows = calc_df[calc_df["_status"] == _S_SENDBACK]
     if not sendback_rows.empty:
         st.warning(
@@ -638,30 +838,6 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
             icon="↩",
         )
 
-    # ── KPIs ───────────────────────────────────────────────────────────────────
-    n_with_work = (calc_df["Working Days"] > 0).sum()
-    avg_net     = calc_df["Net Payable"].mean() if not calc_df.empty else 0
-    st.markdown(
-        "<div class='ps-kpi-grid'>"
-        + _kpi("Operators",        len(calc_df),                               "in calculator",           "#2563EB")
-        + _kpi("Net Payable",      f"₹{calc_df['Net Payable'].sum():,.0f}",    "total to pay out",        "#10B981")
-        + _kpi("Earned Basic",     f"₹{calc_df['Earned Basic'].sum():,.0f}",   "gross earned",            "#E87722")
-        + _kpi("Total Deductions", f"₹{calc_df['Deduction Total'].sum():,.0f}","all deductions",          "#EF4444")
-        + _kpi("Avg Net / Person", f"₹{avg_net:,.0f}",                         f"{n_with_work} with days","#8B5CF6")
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        "<div class='ps-info-note'>"
-        "✏️ <strong>Editable:</strong> Working Days · OT Hours · Fixed Salary · OT Amt · "
-        "Sal Paid Other · PF Amt · Remarks &nbsp;·&nbsp; "
-        "🔒 <strong>Read-only:</strong> Earned Basic · Advance Deduction · Total · Net Payable"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ── data_editor ────────────────────────────────────────────────────────────
     always_readonly = {
         "Emp Code", "Operator",
         "No. of Days Worked", "Earned Basic", "Advance Deduction",
@@ -675,30 +851,28 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
         "Net Payable", "Remarks",
     ]
 
-    # Attach Select column
     calc_display = calc_df.copy()
     calc_display.insert(0, "Select", False)
 
     col_cfg = {
-        "Select":            st.column_config.CheckboxColumn("Select", default=False, width="small"),
-        "Emp Code":          st.column_config.TextColumn("Emp Code",     width="small"),
-        "Operator":          st.column_config.TextColumn("Operator",     width="medium"),
-        "Fixed Salary":      st.column_config.NumberColumn("Fixed Sal",  format="₹%,.0f", width="small", min_value=0),
-        "Month Days":        st.column_config.NumberColumn("Month Days", width="small",   min_value=1, max_value=31),
-        "Working Days":      st.column_config.NumberColumn("Work Days",  width="small",   min_value=0, max_value=366),
-        "OT Hours":          st.column_config.NumberColumn("OT Hrs",     format="%.2f",   width="small", min_value=0.0),
-        "No. of Days Worked":st.column_config.NumberColumn("Days Worked",width="small"),
-        "Earned Basic":      st.column_config.NumberColumn("Earned",     format="₹%,.0f", width="small"),
-        "OT Amt":            st.column_config.NumberColumn("OT Amt",     format="₹%,.0f", width="small", min_value=0),
-        "Total Amt":         st.column_config.NumberColumn("Total",      format="₹%,.0f", width="small"),
-        "Sal Paid Other":    st.column_config.NumberColumn("Sal by Cust",format="₹%,.0f", width="small", min_value=0),
-        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct", format="₹%,.0f", width="small"),
-        "PF Amt":            st.column_config.NumberColumn("PF Amt",     format="₹%,.0f", width="small", min_value=0),
-        "Deduction Total":   st.column_config.NumberColumn("Ded Total",  format="₹%,.0f", width="small"),
-        "Net Payable":       st.column_config.NumberColumn("Net Payable",format="₹%,.0f", width="small"),
-        "Remarks":           st.column_config.TextColumn("Remarks",      width="medium"),
+        "Select":             st.column_config.CheckboxColumn("Select",      default=False, width="small"),
+        "Emp Code":           st.column_config.TextColumn("Emp Code",        width="small"),
+        "Operator":           st.column_config.TextColumn("Operator",        width="medium"),
+        "Fixed Salary":       st.column_config.NumberColumn("Fixed Sal",     format="&#8377;%,.0f", width="small", min_value=0),
+        "Month Days":         st.column_config.NumberColumn("Month Days",    width="small", min_value=1, max_value=31),
+        "Working Days":       st.column_config.NumberColumn("Work Days",     width="small", min_value=0, max_value=366),
+        "OT Hours":           st.column_config.NumberColumn("OT Hrs",        format="%.2f", width="small", min_value=0.0),
+        "No. of Days Worked": st.column_config.NumberColumn("Days Worked",   width="small"),
+        "Earned Basic":       st.column_config.NumberColumn("Earned",        format="&#8377;%,.0f", width="small"),
+        "OT Amt":             st.column_config.NumberColumn("OT Amt",        format="&#8377;%,.0f", width="small", min_value=0),
+        "Total Amt":          st.column_config.NumberColumn("Total",         format="&#8377;%,.0f", width="small"),
+        "Sal Paid Other":     st.column_config.NumberColumn("Sal by Cust",   format="&#8377;%,.0f", width="small", min_value=0),
+        "Advance Deduction":  st.column_config.NumberColumn("Adv Deduct",    format="&#8377;%,.0f", width="small"),
+        "PF Amt":             st.column_config.NumberColumn("PF Amt",        format="&#8377;%,.0f", width="small", min_value=0),
+        "Deduction Total":    st.column_config.NumberColumn("Ded Total",     format="&#8377;%,.0f", width="small"),
+        "Net Payable":        st.column_config.NumberColumn("Net Payable",   format="&#8377;%,.0f", width="small"),
+        "Remarks":            st.column_config.TextColumn("Remarks",         width="medium"),
     }
-    ro_cols = ["Select"] + [c for c in display_cols if c in always_readonly and c != "Select"]
 
     edited = st.data_editor(
         calc_display[display_cols],
@@ -710,49 +884,54 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
         num_rows="fixed",
     )
 
-    # Merge edits back
+    # Merge edits back into calc_df
     editable_cols = [c for c in display_cols if c not in always_readonly and c != "Select"]
     for col in editable_cols:
         if col in edited.columns:
             calc_df[col] = edited[col].values
     calc_df = _recompute(calc_df)
 
-    # Write updated calc rows back into main df
+    # Write updated calc rows back into main df and persist
     df.loc[df["_status"].isin([_S_DRAFT, _S_SENDBACK]), calc_df.columns] = calc_df.values
     st.session_state[cache_key] = df
 
-    # ── Totals bar ─────────────────────────────────────────────────────────────
-    t = calc_df
+    # Totals bar
+    earn_sum  = calc_df["Earned Basic"].sum()
+    ot_sum    = calc_df["OT Amt"].sum()
+    total_sum = calc_df["Total Amt"].sum()
+    ded_sum   = calc_df["Deduction Total"].sum()
+    net_sum   = calc_df["Net Payable"].sum()
     st.markdown(
         f"<div class='ps-total-bar'>"
-        f"Totals — <strong>Earned:</strong> ₹{t['Earned Basic'].sum():,.0f} &nbsp;·&nbsp; "
-        f"<strong>OT:</strong> ₹{t['OT Amt'].sum():,.0f} &nbsp;·&nbsp; "
-        f"<strong>Total:</strong> ₹{t['Total Amt'].sum():,.0f} &nbsp;·&nbsp; "
-        f"<strong>Deductions:</strong> ₹{t['Deduction Total'].sum():,.0f} &nbsp;·&nbsp; "
-        f"<strong>Net Payable:</strong> ₹{t['Net Payable'].sum():,.0f}"
+        f"Totals — <strong>Earned:</strong> &#8377;{earn_sum:,.0f} &nbsp;&middot;&nbsp; "
+        f"<strong>OT:</strong> &#8377;{ot_sum:,.0f} &nbsp;&middot;&nbsp; "
+        f"<strong>Total:</strong> &#8377;{total_sum:,.0f} &nbsp;&middot;&nbsp; "
+        f"<strong>Deductions:</strong> &#8377;{ded_sum:,.0f} &nbsp;&middot;&nbsp; "
+        f"<strong>Net Payable:</strong> &#8377;{net_sum:,.0f}"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Payroll composition breakdown ──────────────────────────────────────────
-    _payroll_breakdown_chart(calc_df)
-
-    # ── Action buttons ─────────────────────────────────────────────────────────
+    # Selection info
     selected_mask = edited["Select"] == True  # noqa: E712
     selected_df   = calc_df[selected_mask.values]
-    n_sel = len(selected_df)
-
+    n_sel         = len(selected_df)
+    n_total_calc  = len(calc_df)
     st.markdown(
         f"<div style='font-size:12px;color:#64748B;margin:8px 0 4px;'>"
-        f"<strong style='color:#1E293B;'>{n_sel}</strong> / {len(calc_df)} selected</div>",
+        f"<strong style='color:#1E293B;'>{n_sel}</strong> / {n_total_calc} selected</div>",
         unsafe_allow_html=True,
     )
 
-    act1, act2, act3, _ = st.columns([1.5, 1.5, 1.5, 4])
+    # Action buttons row
+    if is_admin:
+        act1, act2, act3, act4, _ = st.columns([1.4, 1.6, 1.4, 1.6, 2])
+    else:
+        act1, act2, act3, _ = st.columns([1.4, 1.6, 1.4, 4])
 
-    # Save drafts
-    if act1.button("💾 Save Drafts", key="ps_save_drafts", use_container_width=True,
-                    disabled=(n_sel == 0)):
+    # Save Drafts
+    if act1.button("Save Drafts", key="ps_save_drafts", use_container_width=True,
+                   disabled=(n_sel == 0)):
         saved = 0
         for _, row in selected_df.iterrows():
             try:
@@ -765,9 +944,9 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
             st.session_state.pop(cache_key, None)
             st.rerun()
 
-    # Submit for approval
-    if act2.button("▶ Submit for Approval", key="ps_submit", type="primary",
-                    use_container_width=True, disabled=(n_sel == 0)):
+    # Submit for Approval
+    if act2.button("Submit for Approval", key="ps_submit", type="primary",
+                   use_container_width=True, disabled=(n_sel == 0)):
         submitted = 0
         for _, row in selected_df.iterrows():
             try:
@@ -784,20 +963,21 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
             st.session_state.pop(cache_key, None)
             st.rerun()
 
-    # Put on hold
-    if act3.button("⏸ Put on Hold", key="ps_hold", use_container_width=True,
-                    disabled=(n_sel == 0)):
+    # Put on Hold
+    if act3.button("Put on Hold", key="ps_hold", use_container_width=True,
+                   disabled=(n_sel == 0)):
         st.session_state["ps_hold_confirm"] = True
-        st.session_state["ps_hold_df"] = selected_df
-        st.session_state["ps_hold_month"] = payroll_month
+        st.session_state["ps_hold_df"]      = selected_df
+        st.session_state["ps_hold_month"]   = payroll_month
 
     if st.session_state.get("ps_hold_confirm") and \
             st.session_state.get("ps_hold_month") == payroll_month:
         hold_df = st.session_state.get("ps_hold_df", pd.DataFrame())
         with st.container(border=True):
+            hold_count_s = str(len(hold_df))
             st.markdown(
                 f"<div style='font-size:13px;font-weight:700;color:#991B1B;'>"
-                f"Put {len(hold_df)} employee(s) on hold?</div>",
+                f"Put {hold_count_s} employee(s) on hold?</div>",
                 unsafe_allow_html=True,
             )
             hold_reason = st.text_input("Hold reason (required)", key="ps_hold_reason")
@@ -826,79 +1006,114 @@ def _tab_calculator(sb: SupabaseClient, operators: list) -> None:
                     st.session_state.pop(k, None)
                 st.rerun()
 
-    # ── Export ─────────────────────────────────────────────────────────────────
+    # Admin: Approve All Submitted
+    if is_admin:
+        submitted_df = df[df["_status"] == _S_SUBMITTED]
+        n_submitted  = len(submitted_df)
+        lbl_approve  = f"Approve All ({n_submitted})"
+        if act4.button(lbl_approve, key="ps_approve_all", use_container_width=True,
+                       disabled=(n_submitted == 0)):
+            try:
+                all_recs = sb.list_payroll_records(payroll_month=payroll_month, status=_S_SUBMITTED)
+                for r in all_recs:
+                    sb.update_payroll_record(r["id"], {
+                        "status":      _S_APPROVED,
+                        "approved_by": _user_name(),
+                        "approved_at": datetime.now().isoformat(),
+                        "updated_at":  datetime.now().isoformat(),
+                    })
+                st.success(f"Approved {len(all_recs)} payroll record(s).")
+                st.session_state.pop(cache_key, None)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Approval error: {e}")
+
+    # Export buttons
     exp1, exp2, _ = st.columns([1.5, 1.5, 5])
     try:
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
             calc_df[[c for c in display_cols if c != "Select"]].to_excel(
                 w, index=False, sheet_name="Payroll")
-        exp1.download_button("Export Excel", data=buf.getvalue(),
-                              file_name=f"payroll_{payroll_month}.xlsx",
-                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                              key="ps_exp_xlsx", use_container_width=True)
+        exp1.download_button(
+            "Export Excel",
+            data=buf.getvalue(),
+            file_name=f"payroll_{payroll_month}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="ps_exp_xlsx",
+            use_container_width=True,
+        )
     except Exception:
         pass
     try:
-        exp2.download_button("Export CSV",
-                              data=calc_df[[c for c in display_cols if c != "Select"]].to_csv(index=False).encode(),
-                              file_name=f"payroll_{payroll_month}.csv",
-                              mime="text/csv", key="ps_exp_csv", use_container_width=True)
+        exp2.download_button(
+            "Export CSV",
+            data=calc_df[[c for c in display_cols if c != "Select"]].to_csv(index=False).encode(),
+            file_name=f"payroll_{payroll_month}.csv",
+            mime="text/csv",
+            key="ps_exp_csv",
+            use_container_width=True,
+        )
     except Exception:
         pass
 
 
-# ── Tab 2: Approval Queue ─────────────────────────────────────────────────────
+# ── Approval queue expander ───────────────────────────────────────────────────
 
-def _tab_approval_queue(sb: SupabaseClient, operators: list) -> None:
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
-
+def _render_approval_expander(
+    sb: SupabaseClient,
+    operators: list,
+    payroll_month: str,
+    month: int,
+    year: int,
+) -> None:
+    """Content for the Approval Queue expander (admin only)."""
     if not auth.is_admin():
         st.info("Only Admin can approve payroll submissions.", icon="🔒")
         return
 
-    year, month, month_days, payroll_month, _, _, load_btn = _period_selector("psaq")
+    aq_cache = f"psaq_recs_{payroll_month}"
+    rc1, rc2 = st.columns([1, 4])
+    if rc1.button("Refresh", key="aq_refresh"):
+        st.session_state.pop(aq_cache, None)
 
-    if load_btn:
-        st.session_state.pop(f"psaq_recs_{payroll_month}", None)
-
-    cache_key = f"psaq_recs_{payroll_month}"
-    if cache_key not in st.session_state:
+    if aq_cache not in st.session_state:
         recs = sb.list_payroll_records(payroll_month=payroll_month, status=_S_SUBMITTED)
-        st.session_state[cache_key] = recs
+        st.session_state[aq_cache] = recs
 
-    recs = st.session_state.get(cache_key, [])
+    recs = st.session_state.get(aq_cache, [])
+    month_lbl = _month_label(month)
 
     if not recs:
-        st.info(f"No submissions pending approval for {_month_label(month)} {year}.")
+        st.info(f"No submissions pending approval for {month_lbl} {year}.")
         return
 
     op_by_id = {o["id"]: o for o in operators}
 
+    n_recs = len(recs)
     st.markdown(
         f"<div style='font-size:13px;color:#64748B;margin-bottom:14px;'>"
-        f"<strong style='color:#1E293B;'>{len(recs)}</strong> submission(s) awaiting approval</div>",
+        f"<strong style='color:#1E293B;'>{n_recs}</strong> submission(s) awaiting approval</div>",
         unsafe_allow_html=True,
     )
 
-    # Build display df
     rows = []
     for r in recs:
         op = op_by_id.get(r["employee_id"], {})
         rows.append({
-            "Select":           False,
-            "Emp Code":         op.get("emp_code", ""),
-            "Operator":         op.get("operator_name", r["employee_id"]),
-            "Earned Basic":     float(r.get("earned_basic") or 0),
-            "OT Amt":           float(r.get("ot_amount") or 0),
-            "Total Amt":        float(r.get("total_amount") or 0),
-            "Advance Deduction":float(r.get("advance_recovery") or 0),
-            "PF Amt":           float(r.get("pf_amount") or 0),
-            "Deduction Total":  float(r.get("deduction_total") or 0),
-            "Net Payable":      float(r.get("net_payable") or 0),
-            "Submitted By":     r.get("submitted_by", ""),
-            "Remarks":          r.get("remarks", ""),
-            "_id":              r["id"],
+            "Select":            False,
+            "Emp Code":          op.get("emp_code", ""),
+            "Operator":          op.get("operator_name", r["employee_id"]),
+            "Earned Basic":      float(r.get("earned_basic") or 0),
+            "OT Amt":            float(r.get("ot_amount") or 0),
+            "Total Amt":         float(r.get("total_amount") or 0),
+            "Advance Deduction": float(r.get("advance_recovery") or 0),
+            "PF Amt":            float(r.get("pf_amount") or 0),
+            "Deduction Total":   float(r.get("deduction_total") or 0),
+            "Net Payable":       float(r.get("net_payable") or 0),
+            "Submitted By":      r.get("submitted_by", ""),
+            "Remarks":           r.get("remarks", ""),
+            "_id":               r["id"],
         })
     disp_df = pd.DataFrame(rows)
 
@@ -906,17 +1121,17 @@ def _tab_approval_queue(sb: SupabaseClient, operators: list) -> None:
         "Select":            st.column_config.CheckboxColumn("Select",    width="small", default=False),
         "Emp Code":          st.column_config.TextColumn("Emp Code",      width="small"),
         "Operator":          st.column_config.TextColumn("Operator",      width="medium"),
-        "Earned Basic":      st.column_config.NumberColumn("Earned",      format="₹%,.0f", width="small"),
-        "OT Amt":            st.column_config.NumberColumn("OT Amt",      format="₹%,.0f", width="small"),
-        "Total Amt":         st.column_config.NumberColumn("Total",       format="₹%,.0f", width="small"),
-        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct",  format="₹%,.0f", width="small"),
-        "PF Amt":            st.column_config.NumberColumn("PF Amt",      format="₹%,.0f", width="small"),
-        "Deduction Total":   st.column_config.NumberColumn("Ded Total",   format="₹%,.0f", width="small"),
-        "Net Payable":       st.column_config.NumberColumn("Net Payable", format="₹%,.0f", width="small"),
+        "Earned Basic":      st.column_config.NumberColumn("Earned",      format="&#8377;%,.0f", width="small"),
+        "OT Amt":            st.column_config.NumberColumn("OT Amt",      format="&#8377;%,.0f", width="small"),
+        "Total Amt":         st.column_config.NumberColumn("Total",       format="&#8377;%,.0f", width="small"),
+        "Advance Deduction": st.column_config.NumberColumn("Adv Deduct",  format="&#8377;%,.0f", width="small"),
+        "PF Amt":            st.column_config.NumberColumn("PF Amt",      format="&#8377;%,.0f", width="small"),
+        "Deduction Total":   st.column_config.NumberColumn("Ded Total",   format="&#8377;%,.0f", width="small"),
+        "Net Payable":       st.column_config.NumberColumn("Net Payable", format="&#8377;%,.0f", width="small"),
         "Submitted By":      st.column_config.TextColumn("Submitted By",  width="small"),
         "Remarks":           st.column_config.TextColumn("Remarks",       width="medium"),
     }
-    ro_cols = [c for c in disp_df.columns if c not in ("Select",)]
+    ro_cols = [c for c in disp_df.columns if c not in ("Select", "_id")]
 
     edited = st.data_editor(
         disp_df.drop(columns=["_id"]),
@@ -924,38 +1139,37 @@ def _tab_approval_queue(sb: SupabaseClient, operators: list) -> None:
         use_container_width=True,
         hide_index=True,
         column_config=col_cfg,
-        disabled=[c for c in ro_cols if c != "Select"],
+        disabled=ro_cols,
         num_rows="fixed",
     )
 
-    # Totals
-    net_total = disp_df["Net Payable"].sum()
-    earn_tot  = disp_df["Earned Basic"].sum()
-    ded_tot   = disp_df["Deduction Total"].sum()
+    net_total  = disp_df["Net Payable"].sum()
+    earn_total = disp_df["Earned Basic"].sum()
+    ded_total  = disp_df["Deduction Total"].sum()
     st.markdown(
         f"<div class='ps-total-bar'>"
-        f"Totals — <strong>Earned:</strong> ₹{earn_tot:,.0f} &nbsp;·&nbsp; "
-        f"<strong>Deductions:</strong> ₹{ded_tot:,.0f} &nbsp;·&nbsp; "
-        f"<strong>Net Payable:</strong> ₹{net_total:,.0f}"
+        f"Totals — <strong>Earned:</strong> &#8377;{earn_total:,.0f} &nbsp;&middot;&nbsp; "
+        f"<strong>Deductions:</strong> &#8377;{ded_total:,.0f} &nbsp;&middot;&nbsp; "
+        f"<strong>Net Payable:</strong> &#8377;{net_total:,.0f}"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-    sel_mask  = edited["Select"] == True  # noqa: E712
-    sel_ids   = list(disp_df.loc[sel_mask.values, "_id"])
-    sel_recs  = [r for r in recs if r["id"] in sel_ids]
-    n_sel = len(sel_recs)
+    sel_mask = edited["Select"] == True  # noqa: E712
+    sel_ids  = list(disp_df.loc[sel_mask.values, "_id"])
+    sel_recs = [r for r in recs if r["id"] in sel_ids]
+    n_sel    = len(sel_recs)
 
     st.markdown(
         f"<div style='font-size:12px;color:#64748B;margin:8px 0 4px;'>"
-        f"<strong style='color:#1E293B;'>{n_sel}</strong> / {len(recs)} selected</div>",
+        f"<strong style='color:#1E293B;'>{n_sel}</strong> / {n_recs} selected</div>",
         unsafe_allow_html=True,
     )
 
     ac1, ac2, _ = st.columns([1.5, 2, 5])
 
-    if ac1.button("✅ Approve Selected", type="primary", key="aq_approve",
-                   use_container_width=True, disabled=(n_sel == 0)):
+    if ac1.button("Approve Selected", type="primary", key="aq_approve",
+                  use_container_width=True, disabled=(n_sel == 0)):
         for r in sel_recs:
             sb.update_payroll_record(r["id"], {
                 "status":      _S_APPROVED,
@@ -964,19 +1178,20 @@ def _tab_approval_queue(sb: SupabaseClient, operators: list) -> None:
                 "updated_at":  datetime.now().isoformat(),
             })
         st.success(f"Approved {n_sel} payroll record(s).")
-        st.session_state.pop(cache_key, None)
+        st.session_state.pop(aq_cache, None)
         st.rerun()
 
-    if ac2.button("↩ Send Back Selected", key="aq_sendback",
-                   use_container_width=True, disabled=(n_sel == 0)):
+    if ac2.button("Send Back Selected", key="aq_sendback",
+                  use_container_width=True, disabled=(n_sel == 0)):
         st.session_state["aq_sendback_confirm"] = True
-        st.session_state["aq_sendback_ids"] = sel_ids
+        st.session_state["aq_sendback_ids"]     = sel_ids
 
     if st.session_state.get("aq_sendback_confirm"):
         with st.container(border=True):
+            n_sb = len(st.session_state.get("aq_sendback_ids", []))
             st.markdown(
                 f"<div style='font-size:13px;font-weight:700;color:#D97706;'>"
-                f"Send back {len(st.session_state.get('aq_sendback_ids', []))} record(s)?</div>",
+                f"Send back {n_sb} record(s)?</div>",
                 unsafe_allow_html=True,
             )
             sb_reason = st.text_input("Reason for sending back (required)", key="aq_sb_reason")
@@ -992,10 +1207,11 @@ def _tab_approval_queue(sb: SupabaseClient, operators: list) -> None:
                             "sendback_reason": sb_reason.strip(),
                             "updated_at":      datetime.now().isoformat(),
                         })
-                    st.success(f"Sent back {len(ids_to_sendback)} record(s) for revision.")
+                    n_sent = len(ids_to_sendback)
+                    st.success(f"Sent back {n_sent} record(s) for revision.")
                     for k in ["aq_sendback_confirm", "aq_sendback_ids", "aq_sb_reason"]:
                         st.session_state.pop(k, None)
-                    st.session_state.pop(cache_key, None)
+                    st.session_state.pop(aq_cache, None)
                     st.rerun()
             if sc2.button("Cancel", key="aq_sb_cancel"):
                 for k in ["aq_sendback_confirm", "aq_sendback_ids"]:
@@ -1003,68 +1219,74 @@ def _tab_approval_queue(sb: SupabaseClient, operators: list) -> None:
                 st.rerun()
 
 
-# ── Tab 3: Pending / Held Salary ──────────────────────────────────────────────
+# ── Pending / Held expander ───────────────────────────────────────────────────
 
-def _tab_pending_held(sb: SupabaseClient, operators: list) -> None:
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+def _render_pending_held_expander(
+    sb: SupabaseClient,
+    operators: list,
+    payroll_month: str,
+    month: int,
+    year: int,
+    main_cache_key: str,
+) -> None:
+    """Content for the Pending / On Hold expander."""
+    ph_cache = f"psph_recs_{payroll_month}"
+    rc1, _ = st.columns([1, 4])
+    if rc1.button("Refresh", key="ph_refresh"):
+        st.session_state.pop(ph_cache, None)
 
-    year, month, _, payroll_month, _, _, load_btn = _period_selector("psph")
-
-    if load_btn:
-        st.session_state.pop(f"psph_recs_{payroll_month}", None)
-
-    cache_key = f"psph_recs_{payroll_month}"
-    if cache_key not in st.session_state:
+    if ph_cache not in st.session_state:
         all_recs = sb.list_payroll_records(payroll_month=payroll_month)
         hold_cancelled = [r for r in all_recs if r["status"] in (_S_ONHOLD, _S_CANCELLED)]
-        st.session_state[cache_key] = hold_cancelled
+        st.session_state[ph_cache] = hold_cancelled
 
-    recs = st.session_state.get(cache_key, [])
+    recs     = st.session_state.get(ph_cache, [])
+    month_lbl = _month_label(month)
     op_by_id = {o["id"]: o for o in operators}
 
     if not recs:
-        st.info(f"No on-hold or cancelled records for {_month_label(month)} {year}.")
+        st.info(f"No on-hold or cancelled records for {month_lbl} {year}.")
         return
 
     held      = [r for r in recs if r["status"] == _S_ONHOLD]
     cancelled = [r for r in recs if r["status"] == _S_CANCELLED]
 
-    def _make_table(rec_list: list, section: str) -> None:
+    def _make_section(rec_list: list, section: str) -> None:
         rows = []
         for r in rec_list:
-            op  = op_by_id.get(r["employee_id"], {})
+            op = op_by_id.get(r["employee_id"], {})
             rows.append({
-                "Select":       False,
-                "Emp Code":     op.get("emp_code", ""),
-                "Operator":     op.get("operator_name", r["employee_id"]),
-                "Net Payable":  float(r.get("net_payable") or 0),
-                "Reason":       r.get("hold_reason") or r.get("cancel_reason") or "—",
-                "Updated":      str(r.get("updated_at") or "")[:10],
-                "_id":          r["id"],
+                "Select":      False,
+                "Emp Code":    op.get("emp_code", ""),
+                "Operator":    op.get("operator_name", r["employee_id"]),
+                "Net Payable": float(r.get("net_payable") or 0),
+                "Reason":      r.get("hold_reason") or r.get("cancel_reason") or "—",
+                "Updated":     str(r.get("updated_at") or "")[:10],
+                "_id":         r["id"],
             })
-        df = pd.DataFrame(rows)
-        edited = st.data_editor(
-            df.drop(columns=["_id"]),
+        sec_df = pd.DataFrame(rows)
+        sec_edited = st.data_editor(
+            sec_df.drop(columns=["_id"]),
             key=f"ph_tbl_{section}_{payroll_month}",
             use_container_width=True, hide_index=True, num_rows="fixed",
             column_config={
-                "Select":      st.column_config.CheckboxColumn("Select",   width="small", default=False),
-                "Emp Code":    st.column_config.TextColumn("Emp Code",     width="small"),
-                "Operator":    st.column_config.TextColumn("Operator",     width="medium"),
-                "Net Payable": st.column_config.NumberColumn("Net Payable",format="₹%,.0f"),
-                "Reason":      st.column_config.TextColumn("Reason",       width="large"),
-                "Updated":     st.column_config.TextColumn("Updated",      width="small"),
+                "Select":      st.column_config.CheckboxColumn("Select",    width="small", default=False),
+                "Emp Code":    st.column_config.TextColumn("Emp Code",      width="small"),
+                "Operator":    st.column_config.TextColumn("Operator",      width="medium"),
+                "Net Payable": st.column_config.NumberColumn("Net Payable", format="&#8377;%,.0f"),
+                "Reason":      st.column_config.TextColumn("Reason",        width="large"),
+                "Updated":     st.column_config.TextColumn("Updated",       width="small"),
             },
             disabled=["Emp Code", "Operator", "Net Payable", "Reason", "Updated"],
         )
-        sel_mask = edited["Select"] == True  # noqa: E712
-        sel_ids  = list(df.loc[sel_mask.values, "_id"])
+        sel_mask = sec_edited["Select"] == True  # noqa: E712
+        sel_ids  = list(sec_df.loc[sel_mask.values, "_id"])
         n_sel    = len(sel_ids)
 
         if n_sel > 0 and section == "held":
-            ra1, ra2, _ = st.columns([1.5, 1.5, 5])
-            if ra1.button(f"↩ Release {n_sel} to Calculator", key=f"ph_rel_{section}",
-                           type="primary", use_container_width=True):
+            ra1, ra2, _ = st.columns([1.8, 1.8, 4])
+            if ra1.button(f"Release {n_sel} to Calculator", key=f"ph_rel_{section}",
+                          type="primary", use_container_width=True):
                 for rid in sel_ids:
                     sb.update_payroll_record(rid, {
                         "status":      _S_DRAFT,
@@ -1072,15 +1294,14 @@ def _tab_pending_held(sb: SupabaseClient, operators: list) -> None:
                         "updated_at":  datetime.now().isoformat(),
                     })
                 st.success(f"Released {n_sel} employee(s) back to Payroll Calculator.")
-                st.session_state.pop(cache_key, None)
-                # Also clear the calculator cache so it reloads
-                st.session_state.pop(f"ps_data_{payroll_month}", None)
+                st.session_state.pop(ph_cache, None)
+                st.session_state.pop(main_cache_key, None)
                 st.rerun()
 
-            if ra2.button(f"✕ Cancel Salary for {n_sel}", key=f"ph_cancel_{section}",
-                           use_container_width=True):
+            if ra2.button(f"Cancel Salary ({n_sel})", key=f"ph_cancel_{section}",
+                          use_container_width=True):
                 st.session_state[f"ph_cancel_confirm_{section}"] = True
-                st.session_state[f"ph_cancel_ids_{section}"] = sel_ids
+                st.session_state[f"ph_cancel_ids_{section}"]     = sel_ids
 
             if st.session_state.get(f"ph_cancel_confirm_{section}"):
                 with st.container(border=True):
@@ -1099,71 +1320,82 @@ def _tab_pending_held(sb: SupabaseClient, operators: list) -> None:
                                     "hold_reason":   None,
                                     "updated_at":    datetime.now().isoformat(),
                                 })
-                            st.success(f"Cancelled {len(ids_to_cancel)} salary record(s) for {_month_label(month)} {year}.")
+                            n_can = len(ids_to_cancel)
+                            st.success(f"Cancelled {n_can} salary record(s) for {month_lbl} {year}.")
                             for k in [f"ph_cancel_confirm_{section}", f"ph_cancel_ids_{section}"]:
                                 st.session_state.pop(k, None)
-                            st.session_state.pop(cache_key, None)
+                            st.session_state.pop(ph_cache, None)
                             st.rerun()
                     if cc2.button("Back", key=f"ph_can_bk_{section}"):
                         st.session_state.pop(f"ph_cancel_confirm_{section}", None)
                         st.rerun()
 
     if held:
+        n_held = len(held)
         st.markdown(
-            f"<div class='ps-section-hdr'>On Hold — {len(held)} employee(s)</div>",
+            f"<div class='ps-section-hdr'>On Hold — {n_held} employee(s)</div>",
             unsafe_allow_html=True,
         )
-        _make_table(held, "held")
+        _make_section(held, "held")
 
     if cancelled:
+        n_cancelled = len(cancelled)
         st.markdown(
-            f"<div class='ps-section-hdr'>Cancelled — {len(cancelled)} employee(s)</div>",
+            f"<div class='ps-section-hdr'>Cancelled — {n_cancelled} employee(s)</div>",
             unsafe_allow_html=True,
         )
-        _make_table(cancelled, "cancelled")
+        _make_section(cancelled, "cancelled")
 
 
-# ── Tab 4: Final Payment ──────────────────────────────────────────────────────
+# ── Final payment expander ────────────────────────────────────────────────────
 
-def _tab_final_payment(sb: SupabaseClient, operators: list) -> None:
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+def _render_final_payment_expander(
+    sb: SupabaseClient,
+    operators: list,
+    payroll_month: str,
+    month: int,
+    year: int,
+    is_admin: bool,
+) -> None:
+    """Content for the Final Payment expander."""
+    fp_cache = f"psfp_recs_{payroll_month}"
+    rc1, _ = st.columns([1, 4])
+    if rc1.button("Refresh", key="fp_refresh"):
+        st.session_state.pop(fp_cache, None)
 
-    year, month, _, payroll_month, _, _, load_btn = _period_selector("psfp")
-
-    if load_btn:
-        st.session_state.pop(f"psfp_recs_{payroll_month}", None)
-
-    cache_key = f"psfp_recs_{payroll_month}"
-    if cache_key not in st.session_state:
+    if fp_cache not in st.session_state:
         all_recs = sb.list_payroll_records(payroll_month=payroll_month)
         fin_recs = [r for r in all_recs if r["status"] in (_S_APPROVED, _S_PAID)]
-        st.session_state[cache_key] = fin_recs
+        st.session_state[fp_cache] = fin_recs
 
-    recs = st.session_state.get(cache_key, [])
-    op_by_id = {o["id"]: o for o in operators}
+    recs       = st.session_state.get(fp_cache, [])
+    month_lbl  = _month_label(month)
+    op_by_id   = {o["id"]: o for o in operators}
 
     approved_recs = [r for r in recs if r["status"] == _S_APPROVED]
     paid_recs     = [r for r in recs if r["status"] == _S_PAID]
 
-    # ── KPIs ───────────────────────────────────────────────────────────────────
     total_approved = sum(float(r.get("net_payable") or 0) for r in approved_recs)
     total_paid     = sum(float(r.get("net_payable") or 0) for r in paid_recs)
+
+    n_approved = len(approved_recs)
+    n_paid     = len(paid_recs)
+    n_total    = len(recs)
+
     st.markdown(
         "<div class='ps-kpi-grid'>"
-        + _kpi("Approved (Pending Payment)", len(approved_recs),       f"₹{total_approved:,.0f} to disburse", "#E87722")
-        + _kpi("Already Paid",               len(paid_recs),           f"₹{total_paid:,.0f} disbursed",       "#10B981")
-        + _kpi("Total",                      len(recs),                f"₹{total_approved+total_paid:,.0f}",  "#2563EB")
+        + _kpi("Approved (Pending Payment)", n_approved, f"&#8377;{total_approved:,.0f} to disburse", "#E87722")
+        + _kpi("Already Paid",               n_paid,     f"&#8377;{total_paid:,.0f} disbursed",       "#10B981")
+        + _kpi("Total",                      n_total,    f"&#8377;{total_approved + total_paid:,.0f}", "#2563EB")
         + "</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Approved section: select + mark as paid ────────────────────────────────
     if approved_recs:
         st.markdown(
             "<div class='ps-section-hdr'>Ready for Payment</div>",
             unsafe_allow_html=True,
         )
-
         rows = []
         for r in approved_recs:
             op = op_by_id.get(r["employee_id"], {})
@@ -1188,12 +1420,12 @@ def _tab_final_payment(sb: SupabaseClient, operators: list) -> None:
             "Name in Passbook": st.column_config.TextColumn("Passbook Name", width="medium"),
             "Account No.":      st.column_config.TextColumn("Account No.",   width="medium"),
             "IFSC":             st.column_config.TextColumn("IFSC",          width="small"),
-            "Net Payable":      st.column_config.NumberColumn("Net Payable", format="₹%,.0f", width="small"),
+            "Net Payable":      st.column_config.NumberColumn("Net Payable", format="&#8377;%,.0f", width="small"),
             "Approved By":      st.column_config.TextColumn("Approved By",   width="small"),
             "Remarks":          st.column_config.TextColumn("Remarks",       width="medium"),
         }
 
-        edited = st.data_editor(
+        fp_edited = st.data_editor(
             disp_df.drop(columns=["_id"]),
             key=f"fp_editor_{payroll_month}",
             use_container_width=True, hide_index=True, num_rows="fixed",
@@ -1201,7 +1433,6 @@ def _tab_final_payment(sb: SupabaseClient, operators: list) -> None:
             disabled=[c for c in disp_df.columns if c not in ("Select", "_id")],
         )
 
-        # Export payment list
         try:
             buf = io.BytesIO()
             with pd.ExcelWriter(buf, engine="openpyxl") as w:
@@ -1217,42 +1448,44 @@ def _tab_final_payment(sb: SupabaseClient, operators: list) -> None:
         except Exception:
             pass
 
-        sel_mask = edited["Select"] == True  # noqa: E712
-        sel_ids  = list(disp_df.loc[sel_mask.values, "_id"])
-        n_sel    = len(sel_ids)
-        sel_total = disp_df.loc[sel_mask.values, "Net Payable"].sum()
+        sel_mask   = fp_edited["Select"] == True  # noqa: E712
+        sel_ids    = list(disp_df.loc[sel_mask.values, "_id"])
+        n_sel      = len(sel_ids)
+        sel_total  = disp_df.loc[sel_mask.values, "Net Payable"].sum()
 
         if n_sel > 0:
+            sel_total_s = f"{sel_total:,.0f}"
             st.markdown(
                 f"<div style='font-size:12px;font-weight:700;color:#0F766E;margin:4px 0 8px;'>"
-                f"{n_sel} selected — Total: ₹{sel_total:,.0f}</div>",
+                f"{n_sel} selected — Total: &#8377;{sel_total_s}</div>",
                 unsafe_allow_html=True,
             )
             mc1, mc2, mc3 = st.columns([1.2, 2, 3])
             pay_date = mc1.date_input("Payment Date", value=date.today(), key="fp_pdate")
             utr_ref  = mc2.text_input("UTR / Reference", key="fp_utr",
-                                       placeholder="Bank UTR or leave blank")
-            if mc3.button(f"Mark {n_sel} as Paid", type="primary", key="fp_mark_paid"):
+                                      placeholder="Bank UTR or leave blank")
+            lbl_paid = f"Mark {n_sel} as Paid"
+            if mc3.button(lbl_paid, type="primary", key="fp_mark_paid"):
                 paid_n = 0
                 for rid in sel_ids:
                     sb.update_payroll_record(rid, {
-                        "status":       _S_PAID,
-                        "paid_by":      _user_name(),
-                        "paid_at":      datetime.now().isoformat(),
-                        "payment_date": str(pay_date),
+                        "status":        _S_PAID,
+                        "paid_by":       _user_name(),
+                        "paid_at":       datetime.now().isoformat(),
+                        "payment_date":  str(pay_date),
                         "utr_reference": utr_ref or None,
-                        "updated_at":   datetime.now().isoformat(),
+                        "updated_at":    datetime.now().isoformat(),
                     })
                     paid_n += 1
                 st.success(f"Marked {paid_n} payment(s) as Paid on {pay_date}.")
-                st.session_state.pop(cache_key, None)
+                st.session_state.pop(fp_cache, None)
                 st.rerun()
 
-    # ── Paid history ───────────────────────────────────────────────────────────
     if paid_recs:
+        total_paid_s = f"{total_paid:,.0f}"
         st.markdown(
             f"<div class='ps-section-hdr'>Paid — {len(paid_recs)} record(s) &nbsp;"
-            f"<span style='font-weight:400;color:#10B981;'>₹{total_paid:,.0f}</span></div>",
+            f"<span style='font-weight:400;color:#10B981;'>&#8377;{total_paid_s}</span></div>",
             unsafe_allow_html=True,
         )
         paid_rows = []
@@ -1272,25 +1505,19 @@ def _tab_final_payment(sb: SupabaseClient, operators: list) -> None:
         st.dataframe(
             pd.DataFrame(paid_rows),
             use_container_width=True, hide_index=True,
-            column_config={"Net Payable": st.column_config.NumberColumn(format="₹%,.0f")},
+            column_config={"Net Payable": st.column_config.NumberColumn(format="&#8377;%,.0f")},
         )
 
     if not recs:
-        st.info(f"No approved or paid records for {_month_label(month)} {year}.")
+        st.info(f"No approved or paid records for {month_lbl} {year}.")
 
 
 # ── Main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
     st.markdown(_PAGE_CSS, unsafe_allow_html=True)
-    st.markdown(
-        "<div style='font-size:10px;font-weight:700;letter-spacing:.13em;"
-        "text-transform:uppercase;color:#6B7280;margin-bottom:4px;'>// Payroll</div>"
-        "<div style='font-size:26px;font-weight:900;color:#111827;"
-        "letter-spacing:-.5px;margin-bottom:16px;'>Payment Summary</div>",
-        unsafe_allow_html=True,
-    )
 
+    # ── Supabase + operators ───────────────────────────────────────────────────
     try:
         sb = SupabaseClient()
     except Exception as exc:
@@ -1303,17 +1530,369 @@ def render() -> None:
     except Exception:
         operators = []
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🧮  Payroll Calculator",
-        "✅  Approval Queue",
-        "⏸  Pending / Held",
-        "💳  Final Payment",
-    ])
-    with tab1:
-        _tab_calculator(sb, operators)
-    with tab2:
-        _tab_approval_queue(sb, operators)
-    with tab3:
-        _tab_pending_held(sb, operators)
-    with tab4:
-        _tab_final_payment(sb, operators)
+    # ── Period state ───────────────────────────────────────────────────────────
+    today = date.today()
+    if "ps_month_sel" not in st.session_state:
+        st.session_state["ps_month_sel"] = today.month
+    if "ps_year_input" not in st.session_state:
+        st.session_state["ps_year_input"] = today.year
+
+    ps_month = int(st.session_state["ps_month_sel"])
+    ps_year  = int(st.session_state["ps_year_input"])
+
+    # Reset mdays when period changes
+    period_tag = f"{ps_year}-{ps_month:02d}"
+    if st.session_state.get("_ps_period_tag") != period_tag:
+        st.session_state["ps_mdays"]       = _calc_month_days(ps_year, ps_month)
+        st.session_state["_ps_period_tag"] = period_tag
+
+    ps_mdays = int(st.session_state.get("ps_mdays", _calc_month_days(ps_year, ps_month)))
+
+    payroll_month = f"{ps_year}-{ps_month:02d}"
+    _, last_day   = calendar.monthrange(ps_year, ps_month)
+    period_start  = date(ps_year, ps_month, 1)
+    period_end    = date(ps_year, ps_month, last_day)
+    month_lbl     = _month_label(ps_month)
+
+    # ── Header row ─────────────────────────────────────────────────────────────
+    h_left, h_right = st.columns([2, 2])
+
+    with h_left:
+        st.markdown(
+            f"<div style='font-size:26px;font-weight:900;color:#111827;"
+            f"letter-spacing:-.5px;margin-bottom:2px;'>Payment summary</div>"
+            f"<div style='font-size:14px;color:#6B7280;'>{month_lbl} {ps_year}</div>",
+            unsafe_allow_html=True,
+        )
+
+    with h_right:
+        # Compact period selector: ← | Month dropdown | Year input | → | Review button
+        rc1, rc2, rc3, rc4, rc5 = st.columns([0.5, 1.8, 1.1, 0.5, 1.8])
+
+        # Prev month button
+        if rc1.button("←", key="ps_prev_month", help="Previous month"):
+            new_m = ps_month - 1
+            new_y = ps_year
+            if new_m < 1:
+                new_m = 12
+                new_y -= 1
+            st.session_state["ps_month_sel"]  = new_m
+            st.session_state["ps_year_input"] = new_y
+            # Clear data cache for all periods
+            for k in [k for k in st.session_state if k.startswith("ps_data_")]:
+                del st.session_state[k]
+            st.rerun()
+
+        rc2.selectbox(
+            "Month",
+            list(range(1, 13)),
+            format_func=_month_label,
+            key="ps_month_sel",
+            label_visibility="collapsed",
+        )
+
+        rc3.number_input(
+            "Year",
+            min_value=2020,
+            max_value=2035,
+            step=1,
+            key="ps_year_input",
+            label_visibility="collapsed",
+        )
+
+        # Next month button
+        if rc4.button("→", key="ps_next_month", help="Next month"):
+            new_m = ps_month + 1
+            new_y = ps_year
+            if new_m > 12:
+                new_m = 1
+                new_y += 1
+            st.session_state["ps_month_sel"]  = new_m
+            st.session_state["ps_year_input"] = new_y
+            for k in [k for k in st.session_state if k.startswith("ps_data_")]:
+                del st.session_state[k]
+            st.rerun()
+
+        if rc5.button("Review & approve", key="ps_review_approve",
+                      type="primary", use_container_width=True):
+            st.session_state["ps_show_review"] = not st.session_state.get("ps_show_review", False)
+
+    st.markdown("<div style='margin:12px 0'></div>", unsafe_allow_html=True)
+
+    # ── Load payroll data ──────────────────────────────────────────────────────
+    cache_key = f"ps_data_{payroll_month}"
+    if cache_key not in st.session_state:
+        with st.spinner(f"Loading {month_lbl} {ps_year} payroll data…"):
+            df = _load_payroll_data(
+                sb, operators, payroll_month, period_start, period_end, ps_mdays
+            )
+        st.session_state[cache_key] = df
+
+    df: pd.DataFrame = st.session_state.get(cache_key, pd.DataFrame())
+
+    if df.empty:
+        st.info("No active operators found. Try a different period.")
+        return
+
+    # Sync Month Days if the user adjusts it without a full reload
+    if ps_mdays != int(df["Month Days"].iloc[0]):
+        df["Month Days"] = ps_mdays
+        df = _recompute(df)
+        st.session_state[cache_key] = df
+
+    # ── 4 KPI cards ───────────────────────────────────────────────────────────
+    n_ops       = len(df)
+    net_kpi     = df["Net Payable"].sum()
+    gross_kpi   = df["Earned Basic"].sum() + df["OT Amt"].sum() + df["Sal Paid Other"].sum()
+    ded_kpi     = df["Deduction Total"].sum()
+
+    net_kpi_s   = f"&#8377;{net_kpi:,.0f}"
+    gross_kpi_s = f"&#8377;{gross_kpi:,.0f}"
+    ded_kpi_s   = f"&#8377;{ded_kpi:,.0f}"
+
+    kpi_html = (
+        "<div class='ps-kpi-row'>"
+
+        "<div class='ps-kpi-card'>"
+        "<div class='ps-kpi-icon' style='background:#EFF6FF;font-size:20px;'>&#128101;</div>"
+        "<div>"
+        "<div class='ps-kpi-label'>Operators</div>"
+        f"<div class='ps-kpi-value'>{n_ops}</div>"
+        "</div></div>"
+
+        "<div class='ps-kpi-card'>"
+        "<div class='ps-kpi-icon' style='background:#F0FDF4;font-size:16px;font-weight:800;"
+        "color:#166534;'>&#8377;</div>"
+        "<div>"
+        "<div class='ps-kpi-label'>Net payable</div>"
+        f"<div class='ps-kpi-value'>{net_kpi_s}</div>"
+        "</div></div>"
+
+        "<div class='ps-kpi-card'>"
+        "<div class='ps-kpi-icon' style='background:#FFFBEB;font-size:18px;'>&#128200;</div>"
+        "<div>"
+        "<div class='ps-kpi-label'>Gross earnings</div>"
+        f"<div class='ps-kpi-value'>{gross_kpi_s}</div>"
+        "</div></div>"
+
+        "<div class='ps-kpi-card'>"
+        "<div class='ps-kpi-icon' style='background:#FFF1F2;font-size:18px;'>&#128202;</div>"
+        "<div>"
+        "<div class='ps-kpi-label'>Deductions</div>"
+        f"<div class='ps-kpi-value'>{ded_kpi_s}</div>"
+        "</div></div>"
+
+        "</div>"
+    )
+    st.markdown(kpi_html, unsafe_allow_html=True)
+
+    # ── Formula bar ────────────────────────────────────────────────────────────
+    st.markdown(
+        "<div class='ps-formula-bar'>"
+        "<div class='ps-fb-seg' style='background:#EFF6FF;'>"
+        "<div class='ps-fb-seg-title' style='color:#1E40AF;'>Inputs</div>"
+        "<div class='ps-fb-seg-items' style='color:#1E40AF;'>"
+        "Fixed salary + Working days + OT hours</div>"
+        "</div>"
+        "<div class='ps-fb-arrow'>&#8594;</div>"
+        "<div class='ps-fb-seg' style='background:#FFFBEB;'>"
+        "<div class='ps-fb-seg-title' style='color:#92400E;'>Gross Pay</div>"
+        "<div class='ps-fb-seg-items' style='color:#92400E;'>"
+        "Earned Basic + OT Pay + Conveyance + Ad hoc</div>"
+        "</div>"
+        "<div class='ps-fb-arrow'>&#8594;</div>"
+        "<div class='ps-fb-seg' style='background:#FFF1F2;'>"
+        "<div class='ps-fb-seg-title' style='color:#991B1B;'>Total Deductions</div>"
+        "<div class='ps-fb-seg-items' style='color:#991B1B;'>"
+        "Sal advance + PF + Other deductions</div>"
+        "</div>"
+        "<div class='ps-fb-equals'>=</div>"
+        "<div class='ps-fb-seg' style='background:#F0FDF4;'>"
+        "<div class='ps-fb-seg-title' style='color:#166534;'>Net Pay</div>"
+        "<div class='ps-fb-seg-items' style='color:#166534;'>"
+        "Gross Pay &#8722; Total Deductions</div>"
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Two-column main area ───────────────────────────────────────────────────
+    col_left, col_right = st.columns([2.2, 1])
+
+    with col_left:
+        # Search bar
+        prev_search = st.session_state.get("ps_search", "")
+        search_term = st.text_input(
+            "Search operators",
+            value=prev_search,
+            placeholder="Search by name or emp code...",
+            label_visibility="collapsed",
+            key="ps_search_input",
+        )
+        if search_term != prev_search:
+            st.session_state["ps_search"] = search_term
+            st.session_state["ps_page"]   = 1
+
+        st.session_state["ps_search"] = search_term
+
+        # Filter by search
+        filtered_df = df.copy()
+        if search_term.strip():
+            op_mask   = filtered_df["Operator"].str.contains(search_term, case=False, na=False)
+            code_mask = filtered_df["Emp Code"].str.contains(search_term, case=False, na=False)
+            filtered_df = filtered_df[op_mask | code_mask]
+
+        n_filtered = len(filtered_df)
+
+        # Table heading
+        st.markdown(
+            f"<div style='font-size:14px;font-weight:700;color:#111827;margin:8px 0 4px;'>"
+            f"Operator payroll ({n_filtered})</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Pagination
+        rows_per_page = 10
+        if "ps_page" not in st.session_state:
+            st.session_state["ps_page"] = 1
+        total_pages   = max(1, (n_filtered + rows_per_page - 1) // rows_per_page)
+        current_page  = max(1, min(int(st.session_state.get("ps_page", 1)), total_pages))
+        st.session_state["ps_page"] = current_page
+
+        start_idx = (current_page - 1) * rows_per_page
+        end_idx   = min(start_idx + rows_per_page, n_filtered)
+        df_page   = filtered_df.iloc[start_idx:end_idx]
+
+        # HTML grouped table
+        st.markdown(_make_grouped_table_html(df_page), unsafe_allow_html=True)
+
+        # Pagination controls
+        start_d = (start_idx + 1) if n_filtered > 0 else 0
+        end_d   = end_idx
+        st.markdown(
+            f"<div style='font-size:11px;color:#6B7280;margin:6px 0 4px;'>"
+            f"Showing {start_d}&#8211;{end_d} of {n_filtered} operators</div>",
+            unsafe_allow_html=True,
+        )
+
+        pg1, pg2, pg3, pg4 = st.columns([0.8, 0.6, 0.6, 3])
+        if pg1.button("Prev", key="ps_prev_page", disabled=(current_page <= 1)):
+            st.session_state["ps_page"] = current_page - 1
+            st.rerun()
+        pg2.markdown(
+            f"<div style='text-align:center;font-size:12px;padding:6px 0;font-weight:600;'>"
+            f"{current_page} / {total_pages}</div>",
+            unsafe_allow_html=True,
+        )
+        if pg3.button("Next", key="ps_next_page", disabled=(current_page >= total_pages)):
+            st.session_state["ps_page"] = current_page + 1
+            st.rerun()
+
+        # Info note
+        st.markdown(
+            "<div class='ps-info-note' style='margin-top:8px;'>"
+            "&#8505;&#65039; Net pay is calculated from inputs and earnings minus deductions. "
+            "Use the <strong>Edit Payroll Data</strong> expander below to modify values.</div>",
+            unsafe_allow_html=True,
+        )
+
+    with col_right:
+        # ── Payroll checks card ────────────────────────────────────────────────
+        n_total_chk   = len(df)
+        n_with_salary = int((df["Fixed Salary"] > 0).sum())
+        has_all_inputs = n_with_salary == n_total_chk
+        no_errors      = bool(
+            ((df["Working Days"] <= df["Month Days"]) & (df["Net Payable"] >= 0)).all()
+        )
+        deductions_ok    = True
+        ready_for_review = has_all_inputs and no_errors
+
+        def _ci(ok: bool) -> str:
+            return "&#9989;" if ok else "&#128992;"
+
+        ready_icon   = _ci(ready_for_review)
+        ready_title  = "Ready for review" if ready_for_review else "Not ready for review"
+        ready_sub    = ("All required payroll inputs are complete."
+                        if ready_for_review else "Some inputs are missing or invalid.")
+        inputs_icon  = _ci(has_all_inputs)
+        inputs_sub   = f"{n_with_salary} / {n_total_chk}"
+        errors_icon  = _ci(no_errors)
+        ded_icon     = _ci(deductions_ok)
+
+        st.markdown(
+            "<div class='ps-right-panel-card'>"
+            "<div class='ps-panel-title'>Payroll checks</div>"
+            f"<div class='ps-check-item'>"
+            f"<div class='ps-check-icon'>{ready_icon}</div>"
+            f"<div><div class='ps-check-title'>{ready_title}</div>"
+            f"<div class='ps-check-sub'>{ready_sub}</div></div></div>"
+            f"<div class='ps-check-item'>"
+            f"<div class='ps-check-icon'>{inputs_icon}</div>"
+            f"<div><div class='ps-check-title'>All operators have pay inputs</div>"
+            f"<div class='ps-check-sub'>{inputs_sub}</div></div></div>"
+            f"<div class='ps-check-item'>"
+            f"<div class='ps-check-icon'>{errors_icon}</div>"
+            f"<div><div class='ps-check-title'>No validation errors</div>"
+            f"<div class='ps-check-sub'>Timestamps, days and OT verified</div></div></div>"
+            f"<div class='ps-check-item'>"
+            f"<div class='ps-check-icon'>{ded_icon}</div>"
+            f"<div><div class='ps-check-title'>Deductions configured</div>"
+            f"<div class='ps-check-sub'>All deductions (if any) are applied</div></div></div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Payment breakdown card ─────────────────────────────────────────────
+        gross_bd = df["Earned Basic"].sum() + df["OT Amt"].sum() + df["Sal Paid Other"].sum()
+        ded_bd   = df["Deduction Total"].sum()
+        net_bd   = df["Net Payable"].sum()
+
+        gross_bd_s = f"&#8377;{gross_bd:,.0f}"
+        ded_bd_s   = f"&#8377;{ded_bd:,.0f}"
+        net_bd_s   = f"&#8377;{net_bd:,.0f}"
+        now_s      = datetime.now().strftime("%d %b %Y")
+        user_s     = _user_name()
+
+        st.markdown(
+            "<div class='ps-right-panel-card'>"
+            "<div class='ps-panel-title'>Payment breakdown</div>"
+            "<div class='ps-breakdown-row'>"
+            "<span class='ps-bd-label'>Gross earnings</span>"
+            f"<span class='ps-bd-value'>{gross_bd_s}</span></div>"
+            "<div class='ps-breakdown-row'>"
+            "<span class='ps-bd-label'>Total deductions</span>"
+            f"<span class='ps-bd-value' style='color:#991B1B;'>{ded_bd_s}</span></div>"
+            "<div class='ps-bd-net-row'>"
+            "<span style='font-weight:700;color:#166534;font-size:13px;'>Net payable</span>"
+            f"<span style='font-weight:800;font-size:16px;color:#166534;"
+            f"font-variant-numeric:tabular-nums;'>{net_bd_s}</span></div>"
+            f"<div style='font-size:11px;color:#6B7280;margin-top:10px;'>"
+            f"&#128336; Last updated {now_s} by {user_s}</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Edit payroll data + action buttons ─────────────────────────────────────
+    st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
+    is_admin = auth.is_admin()
+
+    with st.expander("Edit Payroll Data", expanded=False):
+        _render_edit_and_actions(sb, df, payroll_month, cache_key, is_admin)
+
+    # ── Approval queue (admin only) ────────────────────────────────────────────
+    if is_admin:
+        show_review = st.session_state.get("ps_show_review", False)
+        with st.expander("Approval Queue", expanded=show_review):
+            _render_approval_expander(sb, operators, payroll_month, ps_month, ps_year)
+
+    # ── Pending / Held ─────────────────────────────────────────────────────────
+    with st.expander("Pending & On Hold"):
+        _render_pending_held_expander(
+            sb, operators, payroll_month, ps_month, ps_year, cache_key
+        )
+
+    # ── Final payment ──────────────────────────────────────────────────────────
+    with st.expander("Final Payment"):
+        _render_final_payment_expander(
+            sb, operators, payroll_month, ps_month, ps_year, is_admin
+        )
