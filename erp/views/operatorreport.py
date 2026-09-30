@@ -160,18 +160,23 @@ def _resolve_operator(stored: str, op_by_code: dict, op_by_name: dict) -> dict:
     return op_by_name.get(stored.lower(), {})
 
 
-def _available_days(joining_date_str, period_start: date, period_end: date) -> int:
-    """Days in [period_start, period_end] on or after joining_date."""
-    if not joining_date_str:
-        return (period_end - period_start).days + 1
-    try:
-        jd = date.fromisoformat(str(joining_date_str)[:10])
-    except Exception:
-        return (period_end - period_start).days + 1
-    effective_start = max(period_start, jd)
-    if effective_start > period_end:
+def _available_days(joining_date_str, period_start: date, period_end: date, inactive_from_str=None) -> int:
+    """Days in [period_start, period_end] between joining_date and inactive_from."""
+    effective_start = period_start
+    effective_end   = period_end
+    if joining_date_str:
+        try:
+            effective_start = max(period_start, date.fromisoformat(str(joining_date_str)[:10]))
+        except Exception:
+            pass
+    if inactive_from_str:
+        try:
+            effective_end = min(period_end, date.fromisoformat(str(inactive_from_str)[:10]))
+        except Exception:
+            pass
+    if effective_start > effective_end:
         return 0
-    return (period_end - effective_start).days + 1
+    return (effective_end - effective_start).days + 1
 
 
 def _flatten_for_salary(
@@ -220,6 +225,7 @@ def _flatten_for_salary(
                 "Op Status":         op_rec.get("status", ""),
                 "Fixed Salary":      float(op_rec.get("fixed_salary") or 0),
                 "Joining Date":      op_rec.get("joining_date"),
+                "Inactive From":     op_rec.get("inactive_from"),
                 "Name in Passbook":  op_rec.get("name_in_passbook", ""),
                 "Account No.":       op_rec.get("bank_account_number", ""),
                 "IFSC":              op_rec.get("ifsc_code", ""),
@@ -323,7 +329,7 @@ def _render_operator_master(operators: list[dict]) -> None:
           "border-bottom:2px solid #E2EBF0;white-space:nowrap;")
 
     headers = [
-        "Emp Code", "Status", "Joining Date", "Name", "Fixed Salary",
+        "Emp Code", "Status", "Joining Date", "Inactive From", "Name", "Fixed Salary",
         "Mobile", "Father Name", "Aadhar", "Licence No.",
         "Heavy Licence Start", "Light Licence Start",
         "Name in Passbook", "Account Number", "IFSC Code",
@@ -364,6 +370,8 @@ def _render_operator_master(operators: list[dict]) -> None:
             f"border-radius:12px;font-size:11px;font-weight:700;'>{st_v}</span></td>"
             f"<td style='padding:8px 12px;font-size:12px;color:#374151;'>"
             f"{_fmt_date(op.get('joining_date'))}</td>"
+            f"<td style='padding:8px 12px;font-size:12px;color:#374151;'>"
+            f"{_fmt_date(op.get('inactive_from'))}</td>"
             f"<td style='padding:8px 12px;font-size:12px;font-weight:600;color:#111827;'>"
             f"{op.get('operator_name') or '—'}</td>"
             f"<td style='padding:8px 12px;font-size:12px;color:#374151;'>{sal_disp}</td>"
@@ -410,6 +418,7 @@ def _render_operator_master(operators: list[dict]) -> None:
         "Emp Code":           _s(op, "emp_code"),
         "Status":             _s(op, "status"),
         "Joining Date":       _s(op, "joining_date"),
+        "Inactive From":      _s(op, "inactive_from"),
         "Name":               _s(op, "operator_name"),
         "Fixed Salary":       op.get("fixed_salary") or "",
         "Mobile":             _s(op, "mobile_number"),
@@ -544,7 +553,7 @@ def _render_salary_report(
 
     op_grp = (
         working_df
-        .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date",
+        .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date", "Inactive From",
                   "Name in Passbook", "IFSC", "Account No."], dropna=False)
         .agg(Working_Days=("Emp Code", "count"))  # each row = 1 working day (Net Time>0 or BD>0)
         .reset_index()
@@ -556,8 +565,8 @@ def _render_salary_report(
     )
     op_grp = op_grp.merge(_ot_emp, on="Emp Code", how="left")
     op_grp["OT_Hrs"] = op_grp["OT_Hrs"].fillna(0)
-    op_grp["Available Days"] = op_grp["Joining Date"].apply(
-        lambda jd: _available_days(jd, period_start, period_end)
+    op_grp["Available Days"] = op_grp.apply(
+        lambda r: _available_days(r["Joining Date"], period_start, period_end, r.get("Inactive From")), axis=1
     )
 
     summary_cols = [
@@ -636,7 +645,7 @@ def _render_salary_report(
 
     client_grp = (
         working_df
-        .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date",
+        .groupby(["Emp Code", "Operator", "Fixed Salary", "Joining Date", "Inactive From",
                   "Name in Passbook", "IFSC", "Account No.",
                   "Customer", "Site", "Machine"], dropna=False)
         .agg(Working_Days=("Emp Code", "count"))  # each row = 1 working day (Net Time>0 or BD>0)
@@ -651,8 +660,8 @@ def _render_salary_report(
         _ot_client, on=["Emp Code", "Customer", "Site", "Machine"], how="left"
     )
     client_grp["OT_Hrs"] = client_grp["OT_Hrs"].fillna(0)
-    client_grp["Available Days"] = client_grp["Joining Date"].apply(
-        lambda jd: _available_days(jd, period_start, period_end)
+    client_grp["Available Days"] = client_grp.apply(
+        lambda r: _available_days(r["Joining Date"], period_start, period_end, r.get("Inactive From")), axis=1
     )
 
     by_client_cols = [

@@ -168,6 +168,7 @@ class Operator(BaseModel):
     operator_name: str
     mobile_number: Optional[str] = None
     joining_date: Optional[date] = None
+    inactive_from: Optional[date] = None
     license_number: Optional[str] = None
     license_type: Optional[str] = None
     license_expiry: Optional[date] = None

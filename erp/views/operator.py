@@ -528,6 +528,7 @@ def render() -> None:
         st.session_state["op_mobile"]        = op.get("mobile_number") or ""
         st.session_state["op_aadhar"]        = op.get("aadhar_number") or ""
         st.session_state["op_joining_date"]  = _parse_date(op.get("joining_date"))
+        st.session_state["op_inactive_from"] = _parse_date(op.get("inactive_from"))
         st.session_state["op_status"]        = op.get("status") or OperatorStatus.ACTIVE.value
         st.session_state["op_license_number"]      = op.get("license_number") or ""
         st.session_state["op_license_type"]        = op.get("license_type") or ""
@@ -774,6 +775,12 @@ def render() -> None:
                     status = st.selectbox(
                         "Status", options=operator_status_values, key="op_status",
                     )
+                    inactive_from = st.date_input(
+                        "Inactive From",
+                        key="op_inactive_from",
+                        disabled=(status != "Inactive"),
+                        help="Date the operator became inactive. Only applies when status is 'Inactive'.",
+                    )
 
                 # Section 2 — Licence Details
                 with st.container(border=True):
@@ -868,6 +875,7 @@ def render() -> None:
                         mobile_number=mobile_number.strip() or None,
                         aadhar_number=aadhar_number.strip() or None,
                         joining_date=joining_date.isoformat() if joining_date else None,
+                        inactive_from=inactive_from.isoformat() if (inactive_from and status == "Inactive") else None,
                         status=status,
                         license_number=license_number.strip() or None,
                         license_type=license_type.strip() or None,

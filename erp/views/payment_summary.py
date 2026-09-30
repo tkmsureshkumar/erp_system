@@ -647,9 +647,25 @@ def _load_payroll_data(
 
     existing_recs = {r["employee_id"]: r for r in _safe(sb.list_payroll_records, payroll_month=payroll_month)}
 
-    active_ops = [o for o in operators if o.get("status") == "Active" and o.get("id")]
+    def _active_in_period(op: dict) -> bool:
+        """True if the operator was active at any point during [period_start, period_end]."""
+        try:
+            if op.get("joining_date"):
+                if date.fromisoformat(str(op["joining_date"])[:10]) > period_end:
+                    return False
+        except Exception:
+            pass
+        try:
+            if op.get("inactive_from"):
+                if date.fromisoformat(str(op["inactive_from"])[:10]) < period_start:
+                    return False
+        except Exception:
+            pass
+        return True
+
+    period_ops = [o for o in operators if o.get("id") and _active_in_period(o)]
     rows = []
-    for op in sorted(active_ops, key=lambda o: o.get("emp_code") or ""):
+    for op in sorted(period_ops, key=lambda o: o.get("emp_code") or ""):
         eid  = op["id"]
         wl   = wl_agg.get(eid, {})
         rec  = existing_recs.get(eid, {})

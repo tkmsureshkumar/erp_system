@@ -1159,10 +1159,12 @@ def render() -> None:
         name = op.get("operator_name") or ""
         return f"{code} — {name}" if code else name
 
-    operator_names = [""] + sorted(
-        _op_label(op) for op in operators
-        if op.get("operator_name") and op.get("status") == "Active"
-    )
+    # All operators appear in options so existing schedule rows referencing now-Inactive
+    # operators remain valid (SelectboxColumn requires stored values to be in the list).
+    # Active operators are listed first for easier selection when entering new data.
+    _active_op_labels   = sorted(_op_label(op) for op in operators if op.get("operator_name") and op.get("status") == "Active")
+    _inactive_op_labels = sorted(_op_label(op) for op in operators if op.get("operator_name") and op.get("status") != "Active")
+    operator_names = [""] + _active_op_labels + _inactive_op_labels
 
     # ── Customer selector ──────────────────────────────────────────────────────
     # Only list customers that have at least one work order (keeps it short).
