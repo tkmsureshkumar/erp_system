@@ -1724,3 +1724,58 @@ class SupabaseClient:
             .execute()
         )
         return (result.data or [{}])[0]
+
+    # ── Rental Units ──────────────────────────────────────────────────────────
+
+    def list_rental_units(self) -> List[Dict[str, Any]]:
+        resp = self.client.table("rental_units").select("*").execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data if isinstance(data, list) else []
+
+    def insert_rental_unit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.admin_client.table("rental_units").insert(payload).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else {})
+
+    def update_rental_unit(self, unit_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.admin_client.table("rental_units").update(payload).eq("id", unit_id).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data[0] if isinstance(data, list) and data else {}
+
+    # ── Rent Transactions ─────────────────────────────────────────────────────
+
+    def list_rent_transactions(self, status: str | None = None) -> List[Dict[str, Any]]:
+        query = self.client.table("rent_transactions").select("*")
+        if status:
+            query = query.eq("status", status)
+        resp  = query.execute()
+        data  = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data if isinstance(data, list) else []
+
+    def insert_rent_transaction(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.admin_client.table("rent_transactions").insert(payload).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else {})
+
+    def update_rent_transaction(self, tx_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self.admin_client.table("rent_transactions").update(payload).eq("id", tx_id).execute()
+        data = resp.data if hasattr(resp, "data") else (resp.get("data") if isinstance(resp, dict) else None)
+        error = resp.error if hasattr(resp, "error") else (resp.get("error") if isinstance(resp, dict) else None)
+        if error:
+            raise RuntimeError(str(error))
+        return data[0] if isinstance(data, list) and data else {}

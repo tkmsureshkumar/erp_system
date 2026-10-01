@@ -22,6 +22,7 @@ from erp.views import (
     advance_management,
     payment_summary,
     payroll_inputs,
+    rental,
     pf_payments,
     asset,
     closeworkorder,
@@ -764,6 +765,8 @@ _SIDEBAR_ITEMS = [
     # ── Operations ────────────────────────────────────────────────────────────
     ("machinemovement",   "move_up",                 "Machine Move",      "OPERATIONS",   None),
     ("worklog",           "edit_note",               "Work Log",          "OPERATIONS",   None),
+    # ── Accommodation ─────────────────────────────────────────────────────────
+    ("rental",            "home_work",               "Rental",            "ACCOMMODATION", None),
     # ── Billing ───────────────────────────────────────────────────────────────
     ("invoice",           "receipt_long",            "Invoice",           "BILLING",      None),
     # ── Reports ───────────────────────────────────────────────────────────────
@@ -1015,6 +1018,12 @@ elif page == "invoice":
 elif page == "worklog":
     if auth.has_page_access("worklog"):
         worklog.render()
+    else:
+        _access_denied()
+
+elif page == "rental":
+    if auth.has_page_access("rental"):
+        rental.render()
     else:
         _access_denied()
 
